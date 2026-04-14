@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 const endpoints = [
   ["GET", "/api/health", "Basic service health and GitHub configuration state."],
   ["GET", "/api/memory/file?path=.hippocamp/shared/context.md", "Read a Markdown memory file from GitHub."],
@@ -13,13 +15,30 @@ export default function HomePage() {
   return (
     <main>
       <section className="hero">
-        <p className="eyebrow">shared-memory v1</p>
-        <h1>Git-backed memory for agents.</h1>
-        <p className="lede">
-          This service stores shared agent memory as plain Markdown in a GitHub repository.
-          It keeps the model intentionally small: append-only daily events, isolated
-          per-agent working files, and one curated shared context file.
-        </p>
+        <div className="hero-top">
+          <div className="hero-copy">
+            <p className="eyebrow">hippocamp v1</p>
+            <h1>Git-backed memory for agents.</h1>
+            <p className="lede">
+              This service stores shared agent memory as plain Markdown in a GitHub repository.
+              It keeps the model intentionally small: append-only daily events, isolated
+              per-agent working files, and one curated shared context file.
+            </p>
+          </div>
+
+          <figure className="mascot-card">
+            <div className="mascot-glow" />
+            <Image
+              src="/brand/hippocamp-mascot.png"
+              alt="Hippocamp mascot"
+              width={320}
+              height={320}
+              priority
+              className="mascot-image"
+            />
+            <figcaption>Hippocamp, the repo mascot.</figcaption>
+          </figure>
+        </div>
 
         <div className="grid">
           <article className="card">

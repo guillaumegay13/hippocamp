@@ -1,6 +1,8 @@
-# shared-memory
+# Hippocamp
 
-`shared-memory` is a minimal shared memory layer for AI agents. It stores memory as plain Markdown files inside a GitHub repository and exposes a small Next.js API that reads and writes those files directly through the GitHub REST API.
+![Hippocamp mascot](./public/brand/hippocamp-mascot.png)
+
+Hippocamp is a minimal shared memory layer for AI agents. It stores memory as plain Markdown files inside a GitHub repository and exposes a small Next.js API that reads and writes those files directly through the GitHub REST API.
 
 The product is intentionally narrow:
 
