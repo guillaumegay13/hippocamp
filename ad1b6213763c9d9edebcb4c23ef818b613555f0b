@@ -1,0 +1,89 @@
+app/globals.css
+  03b2d1a0b4c3ca26 1-155
+scripts/hippocamp-mcp.cjs
+  03b2d1a0b4c3ca26 1-193
+app/api/memory/list/route.ts
+  03b2d1a0b4c3ca26 1-21
+app/api/memory/file/route.ts
+  03b2d1a0b4c3ca26 1-44
+tsconfig.json
+  03b2d1a0b4c3ca26 1-41
+next.config.ts
+  03b2d1a0b4c3ca26 1-9
+package.json
+  03b2d1a0b4c3ca26 1-29
+.hippocamp/project.md
+  03b2d1a0b4c3ca26 1-4
+lib/github.ts
+  03b2d1a0b4c3ca26 1-253
+app/api/memory/append-event/route.ts
+  03b2d1a0b4c3ca26 1-33
+app/page.tsx
+  03b2d1a0b4c3ca26 1-68
+AGENTS.md
+  03b2d1a0b4c3ca26 1-81
+app/api/health/route.ts
+  03b2d1a0b4c3ca26 1-18
+app/api/memory/update-agent/route.ts
+  03b2d1a0b4c3ca26 1-28
+scripts/install-claude.cjs
+  03b2d1a0b4c3ca26 1-221
+lib/dream.ts
+  03b2d1a0b4c3ca26 1-142
+lib/http.ts
+  03b2d1a0b4c3ca26 1-29
+scripts/hippocamp-memory.cjs
+  03b2d1a0b4c3ca26 1-584
+README.md
+  03b2d1a0b4c3ca26 1-287
+app/layout.tsx
+  03b2d1a0b4c3ca26 1-17
+lib/memory.ts
+  03b2d1a0b4c3ca26 1-276
+.gitignore
+  03b2d1a0b4c3ca26 1-13
+lib/errors.ts
+  03b2d1a0b4c3ca26 1-31
+next-env.d.ts
+  03b2d1a0b4c3ca26 1-6
+app/api/memory/dream/route.ts
+  03b2d1a0b4c3ca26 1-29
+app/api/memory/search/route.ts
+  03b2d1a0b4c3ca26 1-35
+.hippocamp/current_state.md
+  03b2d1a0b4c3ca26 1-5
+lib/types.ts
+  03b2d1a0b4c3ca26 1-69
+.env.example
+  03b2d1a0b4c3ca26 1-4
+ARCHITECTURE.md
+  03b2d1a0b4c3ca26 1-152
+.hippocamp/open_threads.md
+  03b2d1a0b4c3ca26 1-4
+lib/config.ts
+  03b2d1a0b4c3ca26 1-29
+scripts/install-codex.cjs
+  03b2d1a0b4c3ca26 1-177
+skills/hippocamp-memory/SKILL.md
+  03b2d1a0b4c3ca26 1-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "ad1b6213763c9d9edebcb4c23ef818b613555f0b",
+  "prompts": {
+    "03b2d1a0b4c3ca26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8b7e-bdc4-7ca0-9066-6ac01319b4c3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 3157,
+      "total_deletions": 0,
+      "accepted_lines": 3157,
+      "overriden_lines": 0
+    }
+  }
+}
