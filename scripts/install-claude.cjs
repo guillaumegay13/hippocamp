@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 const CLAUDE_MANAGED_START = "<!-- hippocamp:managed:start -->";
 const CLAUDE_MANAGED_END = "<!-- hippocamp:managed:end -->";
+const HIPPOCAMP_SKILL_NAME = "hippocamp-memory";
 
 function expandHomePath(value) {
   if (!value) {
@@ -104,6 +105,9 @@ function buildClaudeManagedBlock() {
     "- At the start of every top-level task, call the `wake_up` MCP tool.",
     "- Only call `search_memory` if the wake-up files are insufficient.",
     "- Use project memory for project-specific state and global memory for durable personal context.",
+    "- After meaningful code or content changes, checkpoint project memory before the final response.",
+    "- When project state changes, use `append_event` for milestones and update curated files such as `current_state.md` and `open_threads.md` before finishing the task.",
+    "- If a project-memory write does not sync automatically, call `sync_memory` before finishing the task.",
     "- Before writing, reviewing, or refactoring code, read and follow `/Users/guillaumegay/.agents/skills/karpathy-guidelines/SKILL.md` unless the user explicitly asks to skip it.",
     CLAUDE_MANAGED_END,
     "",
@@ -142,6 +146,44 @@ async function ensureClaudeInstructionsInstalled({ claudeHome }) {
   await fs.writeFile(claudeMdPath, nextContent, "utf8");
 
   return claudeMdPath;
+}
+
+async function copyDirectory(sourceDir, targetDir) {
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+
+  await fs.mkdir(targetDir, { recursive: true });
+
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirectory(sourcePath, targetPath);
+      continue;
+    }
+
+    if (entry.isFile()) {
+      await fs.copyFile(sourcePath, targetPath);
+    }
+  }
+}
+
+async function ensureClaudeSkillInstalled({ claudeHome, repoRoot }) {
+  const sourceDir = path.join(repoRoot, "skills", HIPPOCAMP_SKILL_NAME);
+  const skillsDir = path.join(claudeHome, "skills");
+  const targetDir = path.join(skillsDir, HIPPOCAMP_SKILL_NAME);
+  const legacyAgentPath = path.join(claudeHome, "agents", `${HIPPOCAMP_SKILL_NAME}.md`);
+
+  await copyDirectory(sourceDir, targetDir);
+  await fs.rm(legacyAgentPath, { force: true }).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  });
+
+  return targetDir;
 }
 
 async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
@@ -193,6 +235,10 @@ async function main() {
   const claudeMdPath = await ensureClaudeInstructionsInstalled({
     claudeHome: options.claudeHome,
   });
+  const claudeSkillPath = await ensureClaudeSkillInstalled({
+    claudeHome: options.claudeHome,
+    repoRoot,
+  });
 
   const server = await ensureServerInstalled({
     repoRoot,
@@ -206,8 +252,9 @@ async function main() {
         ok: true,
         claudeHome: options.claudeHome,
         claudeMdPath,
+        claudeSkillPath,
         server,
-        note: "Restart Claude Code to load the installed MCP server and refreshed CLAUDE.md instructions.",
+        note: "Restart Claude Code to load the installed MCP server, Hippocamp skill, and refreshed CLAUDE.md instructions.",
       },
       null,
       2,

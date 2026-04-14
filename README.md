@@ -1,6 +1,8 @@
 # Hippocamp
 
-![Hippocamp mascot](./public/brand/hippocamp-mascot.png)
+<p align="center">
+  <img src="./public/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
+</p>
 
 Hippocamp is a minimal shared memory layer for AI agents. It stores memory as plain Markdown files inside a GitHub repository and exposes a small Next.js API that reads and writes those files directly through the GitHub REST API.
 
@@ -243,9 +245,11 @@ That command:
 
 - registers the local stdio MCP server with `claude mcp add --scope user`
 - points global memory at the Lagoon clone in `~/.lagoon` by default
+- installs the `hippocamp-memory` skill into `~/.claude/skills/hippocamp-memory/`
 - creates or updates `~/.claude/CLAUDE.md` with a small Hippocamp block that tells Claude to:
   - call `wake_up` at the start of top-level tasks
   - search memory only on demand
+  - checkpoint project memory before the final response after meaningful changes
   - read the Karpathy guidelines file before coding unless explicitly told to skip it
 
 You can override the global memory root:
@@ -256,8 +260,8 @@ node scripts/install-claude.cjs --global-root /absolute/path/to/your/global/memo
 
 Environment:
 
-- `HIPPOCAMP_GLOBAL_ROOT` points to the local clone of your Lagoon repo. Global memory lives under its `.hippocamp/` folder. Default: `~/.lagoon`
-- `HIPPOCAMP_PROJECT_ROOT` optionally overrides the project root. Default: current working directory
+- `HIPPOCAMP_GLOBAL_ROOT` points to the local clone of your Lagoon repo. Global memory lives under its `.hippocamp/` folder, and per-project personal memory lives under `.hippocamp/projects/<slug>/`. Default: `~/.lagoon`
+- `HIPPOCAMP_PROJECT_ROOT` optionally overrides the project root used to infer the current project slug. Default: current working directory
 
 If you use `lagoon` as the global memory repo, clone it to `~/.lagoon` or point `HIPPOCAMP_GLOBAL_ROOT` at another local clone path.
 
@@ -274,11 +278,12 @@ The local MCP server exposes these tools:
 Default sync behavior:
 
 - Global memory writes commit and push automatically when `~/.lagoon` is a git clone of your global memory repo.
-- Project memory writes attempt to commit and push automatically only when the project is a git repo and there are no unrelated changes outside `.hippocamp/`.
+- Project memory writes also sync through that same Lagoon clone, under `.hippocamp/projects/<slug>/`.
+- All Hippocamp reads, writes, and syncs stay inside the selected `.hippocamp/` root. `sync_memory` cannot stage arbitrary files elsewhere in the repo.
 - When default sync is skipped or fails, call `sync_memory`.
 
 The installable skill for agents lives under `skills/hippocamp-memory/`.
-For Claude Code, the equivalent behavior is installed into `~/.claude/CLAUDE.md` by `npm run install:claude`.
+For Claude Code, `npm run install:claude` installs that same skill into `~/.claude/skills/hippocamp-memory/`, adds the Hippocamp MCP server, and refreshes `~/.claude/CLAUDE.md`.
 
 ## V1 limitations
 

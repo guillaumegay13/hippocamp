@@ -7,13 +7,14 @@ description: Use Hippocamp memory to load global identity and workflow context f
 
 Use this skill when the user wants persistent memory across agent sessions.
 
-This skill is for Codex-style environments that support installable skills.
-For Claude Code, use `npm run install:claude`; that installer writes the equivalent user instructions into `~/.claude/CLAUDE.md` and registers the Hippocamp MCP server there.
+This same skill can be installed into Codex or Claude Code.
+For Claude Code, use `npm run install:claude`; that installer copies this skill into `~/.claude/skills/hippocamp-memory/`, registers the Hippocamp MCP server, and refreshes `~/.claude/CLAUDE.md`.
 
 ## Scope
 
 - Global memory lives in the `.hippocamp/` folder inside the local Lagoon clone pointed to by `HIPPOCAMP_GLOBAL_ROOT`.
-- Project memory lives in `<project>/.hippocamp/`.
+- Project memory lives under `.hippocamp/projects/<slug>/` inside that same Lagoon clone.
+- The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory.
 - The Hippocamp MCP server exposes the tools that read and write those locations.
 
 ## Default Workflow

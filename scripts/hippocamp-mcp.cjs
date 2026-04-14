@@ -24,7 +24,7 @@ Runs a local stdio MCP server for Hippocamp memory.
 
 Environment:
   HIPPOCAMP_GLOBAL_ROOT   Local path to the Lagoon clone. Default: ~/.lagoon
-  HIPPOCAMP_PROJECT_ROOT  Default project root. Default: current working directory
+  HIPPOCAMP_PROJECT_ROOT  Project root used to infer the current project slug. Default: current working directory
 
 Tools:
   wake_up

@@ -47,6 +47,7 @@ Configuration is loaded in `lib/config.ts`.
 ## Project Invariants
 
 - Memory paths must stay under `.hippocamp/`.
+- Sync paths must stay under the selected `.hippocamp/` root.
 - Agent names may only contain letters, numbers, dots, underscores, and hyphens.
 - Event logs are append-only daily Markdown files under `.hippocamp/events/YYYY-MM-DD.md`.
 - Agent state lives in isolated files under `.hippocamp/agents/{agent}.md`.
@@ -54,8 +55,9 @@ Configuration is loaded in `lib/config.ts`.
 - Shared context should only be written through dream mode.
 - Route handlers should stay thin; shared behavior belongs in `lib/*`.
 - Reuse `lib/github.ts` for GitHub access instead of adding ad hoc `fetch` calls in routes.
-- The local MCP server uses `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/` for global memory and `<project>/.hippocamp/` for project memory.
-- Default sync is automatic for global memory and opportunistic for project memory; project sync should not override unrelated repo work.
+- The local MCP server uses `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/` for global memory and `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/projects/<slug>/` for per-project personal memory.
+- The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory.
+- Default sync is automatic through the Lagoon repo for both global memory and per-project personal memory.
 
 ## Change Rules
 

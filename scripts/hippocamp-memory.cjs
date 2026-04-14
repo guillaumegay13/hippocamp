@@ -1,3 +1,4 @@
+const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const { execFile } = require("node:child_process");
 const path = require("node:path");
@@ -48,13 +49,46 @@ function getProjectRoot(projectRoot) {
   return path.resolve(expandHomePath(projectRoot || process.env.HIPPOCAMP_PROJECT_ROOT || process.cwd()));
 }
 
+function findGitRootSync(startPath) {
+  let current = path.resolve(startPath);
+
+  while (true) {
+    if (fsSync.existsSync(path.join(current, ".git"))) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+
+    if (parent === current) {
+      return null;
+    }
+
+    current = parent;
+  }
+}
+
+function slugifyProjectName(value) {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug || "project";
+}
+
+function getProjectSlug(projectRoot) {
+  const resolvedProjectRoot = getProjectRoot(projectRoot);
+  const gitRoot = findGitRootSync(resolvedProjectRoot);
+  return slugifyProjectName(path.basename(gitRoot || resolvedProjectRoot));
+}
+
 function getScopeRoot(scope, projectRoot) {
   if (scope === "global") {
     return getGlobalRoot();
   }
 
   if (scope === "project") {
-    return path.join(getProjectRoot(projectRoot), ".hippocamp");
+    return path.join(getGlobalRoot(), "projects", getProjectSlug(projectRoot));
   }
 
   throw new Error(`Unsupported scope: ${scope}`);
@@ -94,6 +128,17 @@ function resolveScopedPath(scope, relativePath, projectRoot) {
     path: normalizedPath,
     absolutePath,
   };
+}
+
+function assertPathInScope(scopeRoot, targetPath) {
+  const absolutePath = path.resolve(targetPath);
+  const allowedPrefix = `${scopeRoot}${path.sep}`;
+
+  if (absolutePath !== scopeRoot && !absolutePath.startsWith(allowedPrefix)) {
+    throw new Error("path escapes the memory root.");
+  }
+
+  return absolutePath;
 }
 
 async function readFileIfExists(filePath) {
@@ -156,21 +201,10 @@ async function getGitRepoRoot(startPath) {
   return result.stdout;
 }
 
-function parseGitStatus(stdout) {
-  return stdout
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter(Boolean)
-    .map((line) => line.slice(3).split(" -> ").pop());
-}
-
-function hasOnlyProjectMemoryChanges(paths) {
-  return paths.every((item) => item === ".hippocamp" || item.startsWith(".hippocamp/"));
-}
-
 async function syncMemory({ scope, projectRoot, paths, message }) {
-  const repoCandidate = scope === "global" ? getGlobalRepoRoot() : getProjectRoot(projectRoot);
+  const repoCandidate = getGlobalRepoRoot();
   const repoRoot = await getGitRepoRoot(repoCandidate);
+  const scopeRoot = getScopeRoot(scope, projectRoot);
 
   if (!repoRoot) {
     return {
@@ -181,22 +215,8 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
     };
   }
 
-  if (scope === "project") {
-    const status = await runGit(["status", "--porcelain"], repoRoot);
-    const changedPaths = parseGitStatus(status.stdout);
-
-    if (!hasOnlyProjectMemoryChanges(changedPaths)) {
-      return {
-        attempted: false,
-        skipped: true,
-        reason: "unrelated_changes_present",
-        repoRoot,
-      };
-    }
-  }
-
   const repoRelativePaths = paths.map((item) =>
-    (path.relative(repoRoot, item).split(path.sep).join(path.posix.sep) || "."),
+    path.relative(repoRoot, assertPathInScope(scopeRoot, item)).split(path.sep).join(path.posix.sep) || ".",
   );
 
   const addResult = await runGit(["add", "--", ...repoRelativePaths], repoRoot);
@@ -459,8 +479,12 @@ async function searchMemory({ query, scope = "both", projectRoot, maxResults = 1
   for (const itemScope of scopes) {
     const root = getScopeRoot(itemScope, projectRoot);
     const markdownFiles = await walkMarkdownFiles(root);
+    const scopedFiles =
+      itemScope === "global"
+        ? markdownFiles.filter((relativePath) => !relativePath.startsWith("projects/"))
+        : markdownFiles;
 
-    for (const relativePath of markdownFiles) {
+    for (const relativePath of scopedFiles) {
       scannedFiles += 1;
 
       if (results.length >= clampedMaxResults) {
@@ -497,6 +521,7 @@ async function searchMemory({ query, scope = "both", projectRoot, maxResults = 1
 async function wakeUp({ projectRoot } = {}) {
   const globalRoot = getScopeRoot("global", projectRoot);
   const resolvedProjectRoot = getProjectRoot(projectRoot);
+  const projectSlug = getProjectSlug(projectRoot);
   const projectMemoryRoot = getScopeRoot("project", projectRoot);
   const globalFiles = [];
   const projectFiles = [];
@@ -535,6 +560,7 @@ async function wakeUp({ projectRoot } = {}) {
     "",
     `Global root: ${globalRoot}`,
     `Project root: ${resolvedProjectRoot}`,
+    `Project slug: ${projectSlug}`,
     `Project memory root: ${projectMemoryRoot}`,
   ];
 
@@ -561,6 +587,7 @@ async function wakeUp({ projectRoot } = {}) {
   return {
     globalRoot,
     projectRoot: resolvedProjectRoot,
+    projectSlug,
     projectMemoryRoot,
     missing,
     globalFiles: globalFiles.map((file) => file.path),
@@ -573,6 +600,7 @@ module.exports = {
   getGlobalRepoRoot,
   getGlobalRoot,
   getProjectRoot,
+  getProjectSlug,
   getScopeRoot,
   readMemoryFile,
   writeMemoryFile,
