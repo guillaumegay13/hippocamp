@@ -1,0 +1,29 @@
+{
+  "name": "shared-memory",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "install:claude": "node scripts/install-claude.cjs",
+    "install:codex": "node scripts/install-codex.cjs",
+    "mcp": "node scripts/hippocamp-mcp.cjs",
+    "mcp:help": "node scripts/hippocamp-mcp.cjs --help",
+    "mcp:smoke": "node scripts/hippocamp-mcp.cjs --smoke"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "next": "16.2.3",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "24.7.2",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}
