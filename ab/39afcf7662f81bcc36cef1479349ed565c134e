@@ -1,0 +1,36 @@
+CLAUDE.md
+  74a320d3bf6ea2b3 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "ab39afcf7662f81bcc36cef1479349ed565c134e",
+  "prompts": {
+    "74a320d3bf6ea2b3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "473539d9-4a4d-4d34-94be-463fd06aa5f3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 21,
+      "total_deletions": 0,
+      "accepted_lines": 21,
+      "overriden_lines": 0
+    },
+    "87fc4862b6b59449": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8fb0-6335-76c1-a441-ca700eaca3f2",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 84,
+      "total_deletions": 14,
+      "accepted_lines": 83,
+      "overriden_lines": 0
+    }
+  }
+}
