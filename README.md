@@ -1,270 +1,105 @@
 # Hippocamp
 
 <p align="center">
-  <img src="./public/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
+  <img src="./assets/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
 </p>
 
-Hippocamp is a minimal shared memory layer for AI agents. It stores memory as plain Markdown files inside a GitHub repository and exposes a small Next.js API that reads and writes those files directly through the GitHub REST API.
+Hippocamp is local Git-backed memory for AI agents.
 
-The product is intentionally narrow:
+It gives Codex, Claude Code, and other MCP clients a small shared memory surface stored as plain Markdown in a repo you own. There is no database, hosted service, vector store, or token broker in the MVP.
 
-- It is not a notes app.
-- It is not a database.
-- It is not a vector or embeddings system.
-- It is a Git-backed shared memory surface that stays inspectable and hackable.
+## Why
 
-## Stack
+Agents forget useful context between sessions. Hippocamp keeps that context inspectable:
 
-- Next.js App Router with TypeScript
-- Vercel for deployment
-- GitHub as the storage backend
-- Markdown `.md` files as the memory format
+- memory is Markdown
+- storage is a local Git clone
+- sync is normal `git commit` and `git push`
+- agents access it through MCP tools
 
-## Required environment variables
+## Install
 
-Set these in local development and in Vercel:
-
-- `GITHUB_TOKEN`
-- `GITHUB_OWNER`
-- `GITHUB_REPO`
-- `GITHUB_BRANCH`
-
-The token needs permission to read and write contents in the target repository.
-
-An `.env.example` file is included as a starting point.
-
-## Memory model
-
-All memory lives under `.hippocamp/` in the configured GitHub repository:
-
-- `.hippocamp/events/YYYY-MM-DD.md`
-- `.hippocamp/agents/{agentName}.md`
-- `.hippocamp/shared/context.md`
-- additional curated files like `.hippocamp/project.md` or `.hippocamp/current_state.md` can be managed directly through the file API
-
-### Rules
-
-- Events are append-only.
-- Each agent owns its own file under `.hippocamp/agents/`.
-- Shared files are ordinary Markdown files managed through explicit file writes.
-- GitHub-owned facts stay in GitHub. Memory should store references to commits, PRs, issues, or CI runs plus the rationale or context that GitHub does not already capture.
-
-### Default Markdown shapes
-
-Event files are created on first write with a date heading and then append formatted event blocks:
-
-```md
-# Events — 2026-04-08
-
-## 2026-04-08T21:10:00Z — code_change
-Agent: agent-builder
-Project: mytrainer
-References:
-- commit: abc1234
-- pr: #12
-
-What changed:
-Captured the rationale for preserving required scopes during reauthorization.
-
-Why:
-The previous flow did not preserve required scopes for reauthorization.
-
-Impact:
-Clients can now receive structured insufficient-scope responses.
-
-Next:
-Validate behavior with Claude Desktop.
-```
-
-Agent working memory can be initialized with:
-
-```md
-# Agent: agent-builder
-
-## Current Focus
-
-## Recent Activity
-
-## Open Questions
-
-## Next Actions
-```
-
-Shared context follows:
-
-```md
-# Shared Context
-
-## Current State
-
-## Key Facts
-
-## Recent Decisions
-
-## Open Threads
-```
-
-## API endpoints
-
-### `GET /api/health`
-
-Returns a simple status payload and whether GitHub configuration is present.
-
-### `GET /api/memory/file?path=.hippocamp/shared/context.md`
-
-Reads one Markdown file from the GitHub-backed memory tree and returns content plus basic metadata.
-
-### `PUT /api/memory/file`
-
-Creates or overwrites one Markdown file under `.hippocamp/`.
-
-Example payload:
-
-```json
-{
-  "path": ".hippocamp/current_state.md",
-  "content": "# Current State\n\n- Trying the first Git-backed Hippocamp workflow.\n"
-}
-```
-
-### `GET /api/memory/list?path=.hippocamp`
-
-Lists the children of a directory under `.hippocamp/`.
-
-### `GET /api/memory/search?q=builder`
-
-Performs naive case-insensitive substring search across Markdown files under `.hippocamp/`. V1 recursively traverses the tree and returns matching file paths with short snippets.
-
-### `POST /api/memory/append-event`
-
-Appends a formatted event entry to the current UTC daily log in `.hippocamp/events/YYYY-MM-DD.md`.
-
-Example payload:
-
-```json
-{
-  "agent": "agent-builder",
-  "type": "code_change",
-  "project": "mytrainer",
-  "references": ["commit: abc1234", "pr: #12"],
-  "whatChanged": "Captured the rationale for preserving required scopes during reauthorization.",
-  "why": "The previous flow did not preserve required scopes for reauthorization.",
-  "impact": "Clients can now receive structured insufficient-scope responses.",
-  "next": "Validate behavior with Claude Desktop."
-}
-```
-
-Use `references` for GitHub artifacts and keep the event body focused on durable context, decisions, assumptions, or follow-up work. The legacy `commit` field is still accepted and rendered as a reference.
-
-### `POST /api/memory/update-agent`
-
-Creates or overwrites one agent memory file at `.hippocamp/agents/{agent}.md`.
-
-Example payload:
-
-```json
-{
-  "agent": "agent-builder",
-  "content": "# Agent: agent-builder\n\n## Current Focus\nShip the API.\n"
-}
-```
-
-## GitHub write behavior
-
-Writes go through the GitHub contents API and commit directly to the configured branch.
-
-- Event commit messages look like `append event: code_change by agent-builder`
-- Agent updates use `update agent memory: agent-builder`
-
-To reduce coordination complexity in V1:
-
-- event logs are append-only
-- agent files are isolated per agent
-
-If GitHub rejects a write because the file SHA is stale, the server refetches the latest file and retries once.
-
-## Local development
-
-Install dependencies and run the dev server:
+Clone this repo, install dependencies, then install the MCP server for your agent:
 
 ```bash
 npm install
-npm run dev
-```
-
-Then open [http://localhost:3000](http://localhost:3000).
-
-## Local MCP server
-
-For local agent autopilot, run the stdio MCP server instead of deploying the Next.js app:
-
-```bash
-npm run mcp
-```
-
-Helpful commands:
-
-```bash
-npm run install:claude
-npm run install:codex
-npm run mcp:help
-npm run mcp:smoke
-```
-
-One-command installers:
-
-- Codex: `npm run install:codex`
-- Claude Code: `npm run install:claude`
-
-To install Hippocamp into Codex in one step, run:
-
-```bash
 npm run install:codex
 ```
 
-That command:
-
-- installs the `hippocamp-memory` skill into `~/.codex/skills/`
-- registers the local stdio MCP server with `codex mcp add`
-- points global memory at the Lagoon clone in `~/.lagoon` by default
-
-You can override the global memory root:
+For Claude Code:
 
 ```bash
-node scripts/install-codex.cjs --global-root /absolute/path/to/your/global/memory/clone
-```
-
-To install Hippocamp into Claude Code in one step, run:
-
-```bash
+npm install
 npm run install:claude
 ```
 
-That command:
-
-- registers the local stdio MCP server with `claude mcp add --scope user`
-- points global memory at the Lagoon clone in `~/.lagoon` by default
-- installs the `hippocamp-memory` skill into `~/.claude/skills/hippocamp-memory/`
-- creates or updates `~/.claude/CLAUDE.md` with a small Hippocamp block that tells Claude to:
-  - call `wake_up` at the start of top-level tasks
-  - search memory only on demand
-  - checkpoint project memory before the final response after meaningful changes
-  - read the Karpathy guidelines file before coding unless explicitly told to skip it
-
-You can override the global memory root:
+After publishing, the intended one-line install shape is:
 
 ```bash
-node scripts/install-claude.cjs --global-root /absolute/path/to/your/global/memory/clone
+npx hippocamp install-codex
 ```
 
-Environment:
+Both installers default to `~/.lagoon` as the memory repo. You can override it:
 
-- `HIPPOCAMP_GLOBAL_ROOT` points to the local clone of your Lagoon repo. Global memory lives under its `.hippocamp/` folder, and per-project personal memory lives under `.hippocamp/projects/<slug>/`. Default: `~/.lagoon`
-- `HIPPOCAMP_PROJECT_ROOT` optionally overrides the project root used to infer the current project slug. Default: current working directory
+```bash
+npm run install:codex -- --global-root /absolute/path/to/lagoon
+npm run install:claude -- --global-root /absolute/path/to/lagoon
+```
 
-If you use `lagoon` as the global memory repo, clone it to `~/.lagoon` or point `HIPPOCAMP_GLOBAL_ROOT` at another local clone path.
+## Lagoon Repo
 
-The local MCP server exposes these tools:
+Hippocamp expects a local Git repo for memory:
+
+```bash
+git clone git@github.com:YOUR_USER/lagoon.git ~/.lagoon
+```
+
+The repo can be private. Hippocamp does not need a GitHub token for local MCP mode. It uses your normal local Git credentials.
+
+If push auth is not configured yet, use your preferred GitHub setup. With GitHub CLI:
+
+```bash
+gh auth login
+gh auth setup-git
+cd ~/.lagoon
+git push --dry-run
+```
+
+Once `git push --dry-run` works from `~/.lagoon`, Hippocamp can sync memory.
+
+## Memory Layout
+
+Global memory lives in:
+
+```text
+~/.lagoon/.hippocamp/
+```
+
+Project memory lives in:
+
+```text
+~/.lagoon/.hippocamp/projects/<project-slug>/
+```
+
+Suggested files:
+
+```text
+.hippocamp/
+  identity.md
+  how_i_work.md
+  preferences.md
+  open_loops.md
+  events/YYYY-MM-DD.md
+  projects/<project-slug>/
+    project.md
+    current_state.md
+    open_threads.md
+    events/YYYY-MM-DD.md
+```
+
+## MCP Tools
+
+The local MCP server exposes:
 
 - `wake_up`
 - `read_memory_file`
@@ -274,19 +109,62 @@ The local MCP server exposes these tools:
 - `search_memory`
 - `sync_memory`
 
-Default sync behavior:
+Typical agent flow:
 
-- Global memory writes commit and push automatically when `~/.lagoon` is a git clone of your global memory repo.
-- Project memory writes also sync through that same Lagoon clone, under `.hippocamp/projects/<slug>/`.
-- All Hippocamp reads, writes, and syncs stay inside the selected `.hippocamp/` root. `sync_memory` cannot stage arbitrary files elsewhere in the repo.
-- When default sync is skipped or fails, call `sync_memory`.
+1. Call `wake_up` at the start of a top-level task.
+2. Read the returned global and project memory.
+3. Use `search_memory` only when wake-up files are not enough.
+4. Use `append_event` for meaningful milestones.
+5. Update curated files like `current_state.md` and `open_threads.md` before finishing.
 
-The installable skill for agents lives under `skills/hippocamp-memory/`.
-For Claude Code, `npm run install:claude` installs that same skill into `~/.claude/skills/hippocamp-memory/`, adds the Hippocamp MCP server, and refreshes `~/.claude/CLAUDE.md`.
+Writes sync by default. If sync fails or is skipped, call `sync_memory`.
 
-## V1 limitations
+## Memory Rules
 
-- Search is naive and reads Markdown files directly from GitHub.
-- There is no auth layer beyond the server-side GitHub token.
-- There is no database, queue, background worker, compaction system, or semantic retrieval.
-- There is no branch-per-agent or PR-per-write workflow.
+- Keep memory concise.
+- Prefer curated summaries over raw event history.
+- Do not duplicate GitHub-owned facts such as commits, PRs, issues, reviews, or CI results.
+- Store artifact references plus the missing rationale, preference, assumption, or follow-up context.
+- Use project scope for project-specific state.
+- Use global scope only for durable context that should follow you across projects.
+
+Example event content:
+
+```md
+References:
+- commit: abc1234
+- pr: #12
+
+Decision:
+Keep the local MCP path token-free and rely on normal git credentials.
+
+Why:
+This reduces onboarding friction for open-source users and avoids cloud auth concerns in the MVP.
+```
+
+## Commands
+
+```bash
+npm run mcp
+npm run mcp:help
+npm run mcp:smoke
+npm run install:codex
+npm run install:claude
+```
+
+## Configuration
+
+Environment variables are optional for local use:
+
+- `HIPPOCAMP_GLOBAL_ROOT`: local Lagoon clone path. Default: `~/.lagoon`
+- `HIPPOCAMP_PROJECT_ROOT`: project root used to infer the current project slug. Default: current working directory
+
+## What This Is Not
+
+- Not a hosted cloud service
+- Not a database
+- Not a notes app
+- Not a vector store
+- Not a queue
+
+The cloud/API version can be redesigned later. The MVP is intentionally local-first and Git-native.

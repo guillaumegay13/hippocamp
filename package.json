@@ -1,12 +1,31 @@
 {
-  "name": "shared-memory",
+  "name": "hippocamp",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "description": "Local Git-backed memory for AI agents.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/guillaumegay13/hippocamp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/guillaumegay13/hippocamp/issues"
+  },
+  "homepage": "https://github.com/guillaumegay13/hippocamp#readme",
+  "keywords": [
+    "agents",
+    "mcp",
+    "memory",
+    "markdown",
+    "git"
+  ],
+  "bin": {
+    "hippocamp": "scripts/hippocamp.cjs",
+    "hippocamp-mcp": "scripts/hippocamp-mcp.cjs",
+    "hippocamp-install-codex": "scripts/install-codex.cjs",
+    "hippocamp-install-claude": "scripts/install-claude.cjs"
+  },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "typecheck": "tsc --noEmit",
     "install:claude": "node scripts/install-claude.cjs",
     "install:codex": "node scripts/install-codex.cjs",
     "mcp": "node scripts/hippocamp-mcp.cjs",
@@ -15,15 +34,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "next": "16.2.3",
-    "react": "19.2.5",
-    "react-dom": "19.2.5",
     "zod": "^4.3.6"
-  },
-  "devDependencies": {
-    "@types/node": "24.7.2",
-    "@types/react": "19.2.2",
-    "@types/react-dom": "19.2.2",
-    "typescript": "5.9.3"
   }
 }

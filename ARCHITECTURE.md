@@ -1,142 +1,73 @@
 # Architecture
 
-This project is a small Next.js service that treats a GitHub repository as the source of truth for shared agent memory.
+Hippocamp is a local MCP server backed by a Git clone.
 
-## High-Level Diagram
+## Diagram
 
 ```mermaid
 flowchart LR
-  client["Browser / agent client"]
+  agent["Agent / MCP client"]
 
-  subgraph next["Next.js App Router service"]
-    page["/"]
-    health["GET /api/health"]
-    file["GET /api/memory/file"]
-    list["GET /api/memory/list"]
-    search["GET /api/memory/search"]
-    append["POST /api/memory/append-event"]
-    update["POST /api/memory/update-agent"]
+  subgraph mcp["Local Hippocamp MCP server"]
+    tools["wake_up / read / write / append / search / sync"]
+    memory["scripts/hippocamp-memory.cjs"]
   end
 
-  subgraph domain["Application logic"]
-    config["lib/config.ts<br/>load required GitHub env vars"]
-    http["lib/http.ts<br/>shared JSON error responses"]
-    memory["lib/memory.ts<br/>validation, safe paths, file shapes, search"]
-    github["lib/github.ts<br/>GitHub Contents API client + stale-SHA retry"]
+  subgraph lagoon["Local Lagoon Git repo"]
+    global[".hippocamp/*.md"]
+    project[".hippocamp/projects/<slug>/*.md"]
+    events[".hippocamp/**/events/YYYY-MM-DD.md"]
   end
 
-  gh["GitHub REST API<br/>/repos/{owner}/{repo}/contents/*"]
+  remote["Git remote"]
 
-  subgraph repo["Configured GitHub repository"]
-    events[".hippocamp/events/YYYY-MM-DD.md"]
-    agents[".hippocamp/agents/{agent}.md"]
-    shared[".hippocamp/shared/context.md"]
-  end
-
-  client --> page
-  client --> health
-  client --> file
-  client --> list
-  client --> search
-  client --> append
-  client --> update
-
-  health --> config
-
-  file --> memory
-  list --> memory
-  search --> memory
-  append --> memory
-  update --> memory
-
-  file --> github
-  list --> github
-  search --> github
-  append --> github
-  update --> github
-
-  github --> config
-  github --> gh
-  gh --> events
-  gh --> agents
-  gh --> shared
-
-  file -. errors .-> http
-  list -. errors .-> http
-  search -. errors .-> http
-  append -. errors .-> http
-  update -. errors .-> http
-```
-
-## Request Flow: Append Event
-
-```mermaid
-sequenceDiagram
-  participant Client
-  participant Route as POST /api/memory/append-event
-  participant Memory as lib/memory.ts
-  participant GitHub as lib/github.ts
-  participant Repo as GitHub repo
-
-  Client->>Route: JSON body
-  Route->>Memory: validateAppendEventInput()
-  Route->>Memory: formatEventEntry()
-  Route->>GitHub: updateTextFile(path, message, computeContent)
-  GitHub->>Repo: GET existing daily file
-  GitHub->>Repo: PUT updated Markdown
-  Repo-->>GitHub: new SHA
-  GitHub-->>Route: committed / created / sha
-  Route-->>Client: JSON response
+  agent --> tools
+  tools --> memory
+  memory --> global
+  memory --> project
+  memory --> events
+  memory -->|"git commit && git push"| remote
 ```
 
 ## Core Ideas
 
-- The app itself does not store memory locally.
-- All durable state lives in one GitHub repository under `.hippocamp/`.
-- `lib/memory.ts` enforces the memory model:
-  - safe paths under `.hippocamp/`
-  - valid agent names
-  - event formatting
-  - search helpers
-- `lib/github.ts` is the only storage integration layer.
+- Durable memory is plain Markdown.
+- The local Lagoon clone is the source of truth for reads and writes.
+- Sync uses normal Git commands, not GitHub API tokens.
+- Global memory and project memory share the same Lagoon repo.
+- Project memory is namespaced by a slug inferred from the current project root.
 
-## Memory Layout
+## Roots
 
 ```text
-.hippocamp/
-  events/
-    YYYY-MM-DD.md
-  agents/
-    {agent}.md
-  shared/
-    context.md
+HIPPOCAMP_GLOBAL_ROOT          default: ~/.lagoon
+HIPPOCAMP_PROJECT_ROOT         default: current working directory
 ```
 
-## Endpoint Responsibilities
+Global memory:
 
-- `GET /api/health`
-  - returns service status
-  - reports whether required GitHub env vars are present
-- `GET /api/memory/file`
-  - reads one Markdown file from GitHub
-- `PUT /api/memory/file`
-  - creates or overwrites one Markdown file under `.hippocamp/`
-- `GET /api/memory/list`
-  - lists files or folders under a safe `.hippocamp/` path
-- `GET /api/memory/search`
-  - recursively scans Markdown files and returns substring matches
-- `POST /api/memory/append-event`
-  - appends one formatted event block to the current UTC daily log
-- `POST /api/memory/update-agent`
-  - creates or overwrites one agent working-memory file
+```text
+${HIPPOCAMP_GLOBAL_ROOT}/.hippocamp/
+```
 
-## Operational Constraints
+Project memory:
 
-- The service requires:
-  - `GITHUB_TOKEN`
-  - `GITHUB_OWNER`
-  - `GITHUB_REPO`
-  - `GITHUB_BRANCH`
-- Without those env vars, the app can boot and `/api/health` works, but GitHub-backed memory endpoints fail at runtime.
-- Writes go directly to the configured GitHub branch through the contents API.
-- If a write hits a stale SHA, the GitHub layer retries once with the latest file state.
+```text
+${HIPPOCAMP_GLOBAL_ROOT}/.hippocamp/projects/<project-slug>/
+```
+
+## Sync
+
+`write_memory_file` and `append_event` sync by default:
+
+1. Write the target Markdown file under the selected memory root.
+2. Stage only paths inside the selected `.hippocamp/` root.
+3. Commit with a Hippocamp message.
+4. Push the current Lagoon branch.
+5. If push fails, run `git pull --rebase --autostash` and retry once.
+
+If the Lagoon repo has no upstream or git auth is not configured, the write can still happen locally but push will fail or be skipped. Users should fix normal Git auth rather than configure Hippocamp-specific tokens.
+
+## Deferred
+
+Cloud API, GitHub App auth, Dream PRs, branch-per-agent workflows, and automatic compaction are intentionally deferred. They should build on this local baseline instead of complicating the MVP.
