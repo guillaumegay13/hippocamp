@@ -1,0 +1,31 @@
+README.md
+  3ba874a8e6f33cb3 4,7,9,11,13,15-18,20,22,24-26,29,31-33,36,38-39,42,44-46,49,51,53-54,57,59,61-65,68,70,72,74-75,78,80-81,84-97,100,102,104-110,112,114-118,120,122,124-129,131,133-136,138-139,141-142,145,148,155,157,159-160,162,164-168,170
+AGENTS.md
+  3ba874a8e6f33cb3 3,7-10,14,18-21,25,31,35,37-38,40-44,50-52,58-60,65-68
+package.json
+  3ba874a8e6f33cb3 2,4-27
+scripts/hippocamp.cjs
+  3ba874a8e6f33cb3 1-57
+.env.example
+  3ba874a8e6f33cb3 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "3b11258756b9bc50a55e5f0257ea95a24919c756",
+  "prompts": {
+    "3ba874a8e6f33cb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d9005-f05f-7683-b2ee-0d1809f067f3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 718,
+      "total_deletions": 317,
+      "accepted_lines": 229,
+      "overriden_lines": 0
+    }
+  }
+}
