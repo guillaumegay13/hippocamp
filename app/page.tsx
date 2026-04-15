@@ -8,7 +8,6 @@ const endpoints = [
   ["GET", "/api/memory/search?q=builder", "Naive substring search across Markdown memory files."],
   ["POST", "/api/memory/append-event", "Append an event to the current UTC daily log."],
   ["POST", "/api/memory/update-agent", "Create or replace one agent working-memory file."],
-  ["POST", "/api/memory/dream", "Curate shared context from recent events and agent state."],
 ] as const;
 
 export default function HomePage() {
@@ -22,7 +21,7 @@ export default function HomePage() {
             <p className="lede">
               This service stores shared agent memory as plain Markdown in a GitHub repository.
               It keeps the model intentionally small: append-only daily events, isolated
-              per-agent working files, and one curated shared context file.
+              per-agent working files, and shared Markdown files.
             </p>
           </div>
 
@@ -60,7 +59,7 @@ export default function HomePage() {
             <ul>
               <li>Events append only.</li>
               <li>Each agent owns its own file.</li>
-              <li>Shared context updates only through dream mode.</li>
+              <li>Shared files are explicit Markdown writes.</li>
             </ul>
           </article>
         </div>

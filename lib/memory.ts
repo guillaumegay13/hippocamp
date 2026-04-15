@@ -3,7 +3,6 @@ import { ValidationError } from "@/lib/errors";
 import { getFile, listDirectory } from "@/lib/github";
 import type {
   AppendEventInput,
-  ParsedEventEntry,
   SearchResult,
   UpdateAgentInput,
   UpsertMemoryFileInput,
@@ -13,7 +12,6 @@ export const MEMORY_ROOT = ".hippocamp";
 export const EVENTS_ROOT = `${MEMORY_ROOT}/events`;
 export const AGENTS_ROOT = `${MEMORY_ROOT}/agents`;
 export const SHARED_ROOT = `${MEMORY_ROOT}/shared`;
-export const SHARED_CONTEXT_PATH = `${SHARED_ROOT}/context.md`;
 
 const MAX_SEARCH_RESULTS = 20;
 
@@ -120,19 +118,6 @@ export function createDefaultAgentFile(agent: string) {
 `;
 }
 
-export function createDefaultSharedContext() {
-  return `# Shared Context
-
-## Current State
-
-## Key Facts
-
-## Recent Decisions
-
-## Open Threads
-`;
-}
-
 export function formatEventEntry(input: AppendEventInput & { timestamp: string }) {
   const lines = [
     `## ${input.timestamp} — ${input.type}`,
@@ -171,44 +156,6 @@ export function appendEventDocument(currentContent: string | null, date: string,
   }
 
   return `${currentContent.trimEnd()}\n\n${entry.trim()}\n`;
-}
-
-function extractBlock(label: string, body: string) {
-  const safeLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const matches = body.match(
-    new RegExp(`${safeLabel}:\\n([\\s\\S]*?)(?=\\n\\n(?:What changed|Why|Impact|Next):|$)`),
-  );
-
-  return matches?.[1]?.trim() || undefined;
-}
-
-export function parseEventEntries(content: string, sourcePath: string): ParsedEventEntry[] {
-  const entries: ParsedEventEntry[] = [];
-  const pattern = /(?:^|\n)##\s+([0-9TZ:.-]+)\s+—\s+([^\n]+)\n([\s\S]*?)(?=\n##\s+[0-9TZ:.-]+\s+—|$)/g;
-
-  for (const match of content.matchAll(pattern)) {
-    const [, timestamp, type, body] = match;
-    const agent = body.match(/^Agent:\s*(.+)$/m)?.[1]?.trim();
-
-    if (!agent) {
-      continue;
-    }
-
-    entries.push({
-      timestamp,
-      type: type.trim(),
-      agent,
-      project: body.match(/^Project:\s*(.+)$/m)?.[1]?.trim(),
-      commit: body.match(/^Commit:\s*(.+)$/m)?.[1]?.trim(),
-      whatChanged: extractBlock("What changed", body) ?? "-",
-      why: extractBlock("Why", body),
-      impact: extractBlock("Impact", body),
-      next: extractBlock("Next", body),
-      sourcePath,
-    });
-  }
-
-  return entries;
 }
 
 function normalizeSnippetWhitespace(value: string) {

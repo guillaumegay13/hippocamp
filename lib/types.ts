@@ -44,26 +44,7 @@ export interface UpsertMemoryFileInput {
   content: string;
 }
 
-export interface ParsedEventEntry extends AppendEventInput {
-  timestamp: string;
-  sourcePath: string;
-}
-
 export interface SearchResult {
   path: string;
   snippet: string;
-}
-
-export interface DreamSummary {
-  currentState: string[];
-  keyFacts: string[];
-  recentDecisions: string[];
-  openThreads: string[];
-}
-
-export interface DreamResult {
-  content: string;
-  summary: DreamSummary;
-  eventCount: number;
-  sourceFiles: string[];
 }

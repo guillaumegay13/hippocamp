@@ -34,7 +34,6 @@ Configuration is loaded in `lib/config.ts`.
 - `app/api/**/route.ts`: thin route handlers; keep request parsing and response shaping here.
 - `lib/memory.ts`: memory path validation, agent name sanitization, event formatting, default file shapes, and search helpers.
 - `lib/github.ts`: all GitHub reads and writes, including stale-SHA retry behavior.
-- `lib/dream.ts`: deterministic shared-context summarization from recent events and agent files.
 - `lib/http.ts`: shared JSON error responses.
 - `lib/types.ts`: shared domain types.
 - `scripts/hippocamp-memory.cjs`: local filesystem-backed Hippocamp memory helpers for MCP use.
@@ -51,8 +50,7 @@ Configuration is loaded in `lib/config.ts`.
 - Agent names may only contain letters, numbers, dots, underscores, and hyphens.
 - Event logs are append-only daily Markdown files under `.hippocamp/events/YYYY-MM-DD.md`.
 - Agent state lives in isolated files under `.hippocamp/agents/{agent}.md`.
-- Shared context lives at `.hippocamp/shared/context.md`.
-- Shared context should only be written through dream mode.
+- Shared files live under `.hippocamp/shared/` and use explicit file writes.
 - Route handlers should stay thin; shared behavior belongs in `lib/*`.
 - Reuse `lib/github.ts` for GitHub access instead of adding ad hoc `fetch` calls in routes.
 - The local MCP server uses `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/` for global memory and `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/projects/<slug>/` for per-project personal memory.
@@ -77,7 +75,6 @@ When changing code, use the smallest verification that proves the change:
 
 ## Notes For Future Agents
 
-- `lib/dream.ts` is intentionally deterministic. Do not introduce LLM calls unless explicitly requested.
 - `lib/memory.ts` defines the Markdown file formats. Keep those formats stable unless the API contract is intentionally changing.
 - `lib/github.ts` already handles stale SHA retries for writes. Reuse that path before inventing new conflict handling.
 - Keep the product narrow. Simpler is better in this repo.

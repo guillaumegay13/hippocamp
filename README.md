@@ -46,7 +46,7 @@ All memory lives under `.hippocamp/` in the configured GitHub repository:
 
 - Events are append-only.
 - Each agent owns its own file under `.hippocamp/agents/`.
-- Shared context is curated and only updated by the dream endpoint.
+- Shared files are ordinary Markdown files managed through explicit file writes.
 
 ### Default Markdown shapes
 
@@ -164,23 +164,17 @@ Example payload:
 }
 ```
 
-### `POST /api/memory/dream`
-
-Manual summarization mode for V1. It reads recent events and agent files, generates a deterministic shared summary, and writes the result to `.hippocamp/shared/context.md`.
-
 ## GitHub write behavior
 
 Writes go through the GitHub contents API and commit directly to the configured branch.
 
 - Event commit messages look like `append event: code_change by agent-builder`
 - Agent updates use `update agent memory: agent-builder`
-- Dream updates use `dream: refresh shared context`
 
 To reduce coordination complexity in V1:
 
 - event logs are append-only
 - agent files are isolated per agent
-- shared context updates only through dream mode
 
 If GitHub rejects a write because the file SHA is stale, the server refetches the latest file and retries once.
 
@@ -289,6 +283,5 @@ For Claude Code, `npm run install:claude` installs that same skill into `~/.clau
 
 - Search is naive and reads Markdown files directly from GitHub.
 - There is no auth layer beyond the server-side GitHub token.
-- There is no database, queue, background worker, or semantic retrieval.
-- Dream mode uses deterministic summarization rather than an LLM.
+- There is no database, queue, background worker, compaction system, or semantic retrieval.
 - There is no branch-per-agent or PR-per-write workflow.

@@ -16,14 +16,12 @@ flowchart LR
     search["GET /api/memory/search"]
     append["POST /api/memory/append-event"]
     update["POST /api/memory/update-agent"]
-    dreamRoute["POST /api/memory/dream"]
   end
 
   subgraph domain["Application logic"]
     config["lib/config.ts<br/>load required GitHub env vars"]
     http["lib/http.ts<br/>shared JSON error responses"]
     memory["lib/memory.ts<br/>validation, safe paths, file shapes, search"]
-    dream["lib/dream.ts<br/>deterministic shared-context summary"]
     github["lib/github.ts<br/>GitHub Contents API client + stale-SHA retry"]
   end
 
@@ -42,7 +40,6 @@ flowchart LR
   client --> search
   client --> append
   client --> update
-  client --> dreamRoute
 
   health --> config
 
@@ -51,15 +48,12 @@ flowchart LR
   search --> memory
   append --> memory
   update --> memory
-  dreamRoute --> dream
-  dream --> memory
 
   file --> github
   list --> github
   search --> github
   append --> github
   update --> github
-  dream --> github
 
   github --> config
   github --> gh
@@ -72,7 +66,6 @@ flowchart LR
   search -. errors .-> http
   append -. errors .-> http
   update -. errors .-> http
-  dreamRoute -. errors .-> http
 ```
 
 ## Request Flow: Append Event
@@ -106,7 +99,6 @@ sequenceDiagram
   - event formatting
   - search helpers
 - `lib/github.ts` is the only storage integration layer.
-- `lib/dream.ts` builds shared context by reading recent event files and agent files, then writing one curated Markdown summary.
 
 ## Memory Layout
 
@@ -137,8 +129,6 @@ sequenceDiagram
   - appends one formatted event block to the current UTC daily log
 - `POST /api/memory/update-agent`
   - creates or overwrites one agent working-memory file
-- `POST /api/memory/dream`
-  - reads recent memory, creates a deterministic shared summary, writes `.hippocamp/shared/context.md`
 
 ## Operational Constraints
 
