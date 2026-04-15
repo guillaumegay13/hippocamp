@@ -59,7 +59,7 @@ export default function HomePage() {
             <ul>
               <li>Events append only.</li>
               <li>Each agent owns its own file.</li>
-              <li>Shared files are explicit Markdown writes.</li>
+              <li>GitHub artifacts are referenced, not copied.</li>
             </ul>
           </article>
         </div>

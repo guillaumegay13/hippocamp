@@ -105,7 +105,7 @@ async function main() {
     "append_event",
     {
       description:
-        "Append a dated event entry under events/YYYY-MM-DD.md. Prefer this for milestone logging instead of rewriting curated summaries.",
+        "Append a dated event entry under events/YYYY-MM-DD.md. Store references to GitHub artifacts instead of copying their content.",
       inputSchema: {
         scope: z.enum(["global", "project"]).default("project"),
         title: z.string().optional(),

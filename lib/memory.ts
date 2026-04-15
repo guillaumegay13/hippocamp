@@ -23,6 +23,28 @@ function assertNonEmptyString(value: unknown, field: string) {
   return value.trim();
 }
 
+function normalizeStringList(value: unknown, field: string) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new ValidationError(`${field} must be an array of strings.`);
+  }
+
+  const items = value.map((item) => {
+    if (typeof item !== "string") {
+      throw new ValidationError(`${field} must contain only strings.`);
+    }
+
+    return item.trim();
+  });
+
+  const normalizedItems = [...new Set(items.filter(Boolean))];
+
+  return normalizedItems.length ? normalizedItems : undefined;
+}
+
 export function sanitizeAgentName(value: unknown) {
   const agent = assertNonEmptyString(value, "agent");
 
@@ -61,6 +83,7 @@ export function validateAppendEventInput(input: unknown): AppendEventInput {
     type: assertNonEmptyString(body.type, "type"),
     project: typeof body.project === "string" && body.project.trim() ? body.project.trim() : undefined,
     commit: typeof body.commit === "string" && body.commit.trim() ? body.commit.trim() : undefined,
+    references: normalizeStringList(body.references, "references"),
     whatChanged: assertNonEmptyString(body.whatChanged, "whatChanged"),
     why: typeof body.why === "string" && body.why.trim() ? body.why.trim() : undefined,
     impact: typeof body.impact === "string" && body.impact.trim() ? body.impact.trim() : undefined,
@@ -118,6 +141,16 @@ export function createDefaultAgentFile(agent: string) {
 `;
 }
 
+function getEventReferences(input: AppendEventInput) {
+  const references = [...(input.references ?? [])];
+
+  if (input.commit) {
+    references.unshift(`commit: ${input.commit}`);
+  }
+
+  return [...new Set(references)];
+}
+
 export function formatEventEntry(input: AppendEventInput & { timestamp: string }) {
   const lines = [
     `## ${input.timestamp} — ${input.type}`,
@@ -128,8 +161,10 @@ export function formatEventEntry(input: AppendEventInput & { timestamp: string }
     lines.push(`Project: ${input.project}`);
   }
 
-  if (input.commit) {
-    lines.push(`Commit: ${input.commit}`);
+  const references = getEventReferences(input);
+
+  if (references.length) {
+    lines.push("", "References:", ...references.map((reference) => `- ${reference}`));
   }
 
   lines.push(

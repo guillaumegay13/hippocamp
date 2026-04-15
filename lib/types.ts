@@ -28,6 +28,7 @@ export interface AppendEventInput {
   type: string;
   project?: string;
   commit?: string;
+  references?: string[];
   whatChanged: string;
   why?: string;
   impact?: string;

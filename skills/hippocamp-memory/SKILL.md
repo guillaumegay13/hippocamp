@@ -37,6 +37,7 @@ For Claude Code, use `npm run install:claude`; that installer copies this skill 
 - Do not full-scan memory on every thread.
 - Prefer curated summaries over raw event history.
 - Keep curated files short and legible.
+- Do not duplicate GitHub-owned facts such as commits, PRs, issues, reviews, or CI results. Store artifact references plus the missing rationale, preference, assumption, or follow-up context.
 - Use `project` scope for project-specific state.
 - Use `global` scope only for durable personal context that should follow the user across projects.
 - Avoid rewriting unrelated memory files.

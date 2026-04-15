@@ -51,6 +51,7 @@ Configuration is loaded in `lib/config.ts`.
 - Event logs are append-only daily Markdown files under `.hippocamp/events/YYYY-MM-DD.md`.
 - Agent state lives in isolated files under `.hippocamp/agents/{agent}.md`.
 - Shared files live under `.hippocamp/shared/` and use explicit file writes.
+- Memory must not duplicate facts already tracked by GitHub commits, PRs, issues, reviews, or CI. Store references plus the missing rationale, preference, assumption, or follow-up context instead.
 - Route handlers should stay thin; shared behavior belongs in `lib/*`.
 - Reuse `lib/github.ts` for GitHub access instead of adding ad hoc `fetch` calls in routes.
 - The local MCP server uses `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/` for global memory and `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/projects/<slug>/` for per-project personal memory.

@@ -47,6 +47,7 @@ All memory lives under `.hippocamp/` in the configured GitHub repository:
 - Events are append-only.
 - Each agent owns its own file under `.hippocamp/agents/`.
 - Shared files are ordinary Markdown files managed through explicit file writes.
+- GitHub-owned facts stay in GitHub. Memory should store references to commits, PRs, issues, or CI runs plus the rationale or context that GitHub does not already capture.
 
 ### Default Markdown shapes
 
@@ -58,10 +59,12 @@ Event files are created on first write with a date heading and then append forma
 ## 2026-04-08T21:10:00Z — code_change
 Agent: agent-builder
 Project: mytrainer
-Commit: abc1234
+References:
+- commit: abc1234
+- pr: #12
 
 What changed:
-Added support for dynamic scope escalation in MCP routes.
+Captured the rationale for preserving required scopes during reauthorization.
 
 Why:
 The previous flow did not preserve required scopes for reauthorization.
@@ -143,13 +146,15 @@ Example payload:
   "agent": "agent-builder",
   "type": "code_change",
   "project": "mytrainer",
-  "commit": "abc1234",
-  "whatChanged": "Added support for dynamic scope escalation in MCP routes.",
+  "references": ["commit: abc1234", "pr: #12"],
+  "whatChanged": "Captured the rationale for preserving required scopes during reauthorization.",
   "why": "The previous flow did not preserve required scopes for reauthorization.",
   "impact": "Clients can now receive structured insufficient-scope responses.",
   "next": "Validate behavior with Claude Desktop."
 }
 ```
+
+Use `references` for GitHub artifacts and keep the event body focused on durable context, decisions, assumptions, or follow-up work. The legacy `commit` field is still accepted and rendered as a reference.
 
 ### `POST /api/memory/update-agent`
 
