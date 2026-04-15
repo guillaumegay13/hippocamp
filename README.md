@@ -4,18 +4,20 @@
   <img src="./assets/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
 </p>
 
-Hippocamp is local Git-backed memory for AI agents.
+Hippocamp is local Git-backed memory for AI coding agents.
 
-It gives Codex, Claude Code, and other MCP clients a small shared memory surface stored as plain Markdown in a repo you own. There is no database, hosted service, vector store, or token broker in the MVP.
+Agents can edit large codebases, run tests, and push commits, but every new session still starts with amnesia. Project decisions, user preferences, open threads, and "why we did this" context get scattered across chat history, scratch notes, and PR comments. The result is repeated explanations, stale assumptions, and agents rediscovering the same facts instead of continuing the work.
 
-## Why
+Hippocamp gives Codex, Claude Code, and other MCP clients a small shared memory surface they can wake up from, update, and sync. The memory is plain Markdown in a private Git repo you own.
 
-Agents forget useful context between sessions. Hippocamp keeps that context inspectable:
+No database. No hosted memory service. No vector store. No separate token broker.
 
-- memory is Markdown
-- storage is a local Git clone
-- sync is normal `git commit` and `git push`
-- agents access it through MCP tools
+## What It Stores
+
+- durable preferences and working style
+- current project state and open threads
+- meaningful events and decisions
+- references to commits, PRs, issues, reviews, and CI instead of duplicated GitHub facts
 
 ## Why Git
 
