@@ -240,7 +240,7 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
     };
   }
 
-  const commitResult = await runGit(["commit", "-m", message], repoRoot);
+  const commitResult = await runGit(["commit", "-m", message, "--", ...repoRelativePaths], repoRoot);
 
   if (!commitResult.ok) {
     throw new Error(commitResult.stderr || "git commit failed.");
