@@ -7,6 +7,8 @@ const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 
 const execFileAsync = promisify(execFile);
+const CODEX_MANAGED_START = "<!-- hippocamp:managed:start -->";
+const CODEX_MANAGED_END = "<!-- hippocamp:managed:end -->";
 
 function expandHomePath(value) {
   if (!value) {
@@ -103,6 +105,59 @@ async function ensureSkillInstalled({ repoRoot, codexHome }) {
   return targetDir;
 }
 
+function buildCodexManagedBlock() {
+  return [
+    CODEX_MANAGED_START,
+    "# Hippocamp",
+    "",
+    "- For every new top-level coding task, call the Hippocamp `wake_up` MCP tool before inspecting repository files, planning, or editing.",
+    "- Read the returned global and project memory before using other memory tools.",
+    "- Do this even when the user does not explicitly mention memory.",
+    "- Only call `search_memory` if the wake-up files are insufficient.",
+    "- If `wake_up` is unavailable or fails, say so explicitly and continue without memory instead of silently skipping it.",
+    "- After meaningful code or content changes, checkpoint project memory before the final response.",
+    "- When project state changes, use `append_event` for milestones and update curated files such as `current_state.md` and `open_threads.md` before finishing the task.",
+    "- Do not duplicate commits, PRs, issues, reviews, or CI results in memory; store references plus the missing rationale, preference, assumption, or follow-up context.",
+    "- If a project-memory write does not sync automatically, call `sync_memory` before finishing the task.",
+    CODEX_MANAGED_END,
+    "",
+  ].join("\n");
+}
+
+function upsertManagedBlock(existingContent, block) {
+  if (!existingContent) {
+    return block;
+  }
+
+  const startIndex = existingContent.indexOf(CODEX_MANAGED_START);
+  const endIndex = existingContent.indexOf(CODEX_MANAGED_END);
+
+  if (startIndex >= 0 && endIndex >= 0 && endIndex >= startIndex) {
+    const before = existingContent.slice(0, startIndex).trimEnd();
+    const after = existingContent.slice(endIndex + CODEX_MANAGED_END.length).trimStart();
+    return [before, block.trimEnd(), after].filter(Boolean).join("\n\n").concat("\n");
+  }
+
+  return `${existingContent.trimEnd()}\n\n${block}`;
+}
+
+async function ensureCodexInstructionsInstalled({ codexHome }) {
+  const agentsMdPath = path.join(codexHome, "AGENTS.md");
+  const existingContent = await fs.readFile(agentsMdPath, "utf8").catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      return "";
+    }
+
+    throw error;
+  });
+  const nextContent = upsertManagedBlock(existingContent, buildCodexManagedBlock());
+
+  await fs.mkdir(codexHome, { recursive: true });
+  await fs.writeFile(agentsMdPath, nextContent, "utf8");
+
+  return agentsMdPath;
+}
+
 async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
   const existing = await runCodex(["mcp", "get", serverName, "--json"]);
 
@@ -149,6 +204,9 @@ async function main() {
     repoRoot,
     codexHome: options.codexHome,
   });
+  const codexInstructionsPath = await ensureCodexInstructionsInstalled({
+    codexHome: options.codexHome,
+  });
 
   const server = await ensureServerInstalled({
     repoRoot,
@@ -162,8 +220,9 @@ async function main() {
         ok: true,
         codexHome: options.codexHome,
         skillPath,
+        codexInstructionsPath,
         server,
-        note: "Restart Codex to load the installed skill and MCP server.",
+        note: "Restart Codex to load the installed skill, MCP server, and refreshed AGENTS.md instructions.",
       },
       null,
       2,

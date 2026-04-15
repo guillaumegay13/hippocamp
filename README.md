@@ -46,6 +46,9 @@ npm run install:codex -- --global-root /absolute/path/to/lagoon
 npm run install:claude -- --global-root /absolute/path/to/lagoon
 ```
 
+The Codex installer refreshes `~/.codex/AGENTS.md`. The Claude installer refreshes `~/.claude/CLAUDE.md`.
+Both managed instruction blocks tell the agent to call `wake_up` at the start of new top-level coding tasks before repo exploration or edits.
+
 ## Lagoon Repo
 
 Hippocamp expects a local Git repo for memory:

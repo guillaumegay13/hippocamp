@@ -8,6 +8,7 @@ description: Use Hippocamp memory to load global identity and workflow context f
 Use this skill when the user wants persistent memory across agent sessions.
 
 This same skill can be installed into Codex or Claude Code.
+For Codex, use `npm run install:codex`; that installer copies this skill into `~/.codex/skills/hippocamp-memory/`, registers the Hippocamp MCP server, and refreshes `~/.codex/AGENTS.md`.
 For Claude Code, use `npm run install:claude`; that installer copies this skill into `~/.claude/skills/hippocamp-memory/`, registers the Hippocamp MCP server, and refreshes `~/.claude/CLAUDE.md`.
 
 ## Scope
@@ -19,7 +20,7 @@ For Claude Code, use `npm run install:claude`; that installer copies this skill 
 
 ## Default Workflow
 
-1. At the start of a top-level thread, call `wake_up`.
+1. At the start of every top-level coding task, call `wake_up` before inspecting files, planning, or editing.
 2. Read the wake-up output before searching.
 3. Only call `search_memory` if the wake-up files are insufficient.
 4. During work, use `append_event` only for meaningful milestones.
