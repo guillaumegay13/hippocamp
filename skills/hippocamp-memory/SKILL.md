@@ -1,6 +1,6 @@
 ---
 name: hippocamp-memory
-description: Use Hippocamp memory to load global identity and workflow context from the Lagoon clone and project context from a repo's .hippocamp folder. Trigger this at the start of top-level task threads, when you need durable memory recall, or when you need to checkpoint meaningful progress.
+description: Use Hippocamp memory to load global identity and workflow context from the Lagoon clone and project context from the Lagoon projects folder. Trigger this at the start of top-level task threads, when you need durable memory recall, or when you need to checkpoint meaningful progress.
 ---
 
 # Hippocamp Memory
@@ -14,8 +14,8 @@ Upgrade uses the same path: run `npm run upgrade:codex` or `npm run upgrade:clau
 
 ## Scope
 
-- Global memory lives in the `.hippocamp/` folder inside the local Lagoon clone pointed to by `HIPPOCAMP_GLOBAL_ROOT`.
-- Project memory lives under `.hippocamp/projects/<slug>/` inside that same Lagoon clone.
+- Global memory lives at the root of the local Lagoon clone pointed to by `HIPPOCAMP_GLOBAL_ROOT`.
+- Project memory lives under `projects/<slug>/` inside that same Lagoon clone.
 - The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory.
 - The Hippocamp MCP server exposes the tools that read and write those locations.
 

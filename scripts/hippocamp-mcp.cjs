@@ -73,7 +73,7 @@ async function main() {
   server.registerTool(
     "read_memory_file",
     {
-      description: "Read one memory file from either global memory or the current project's .hippocamp folder.",
+      description: "Read one memory file from either global memory or the current project's memory folder.",
       inputSchema: {
         scope: z.enum(["global", "project"]),
         path: z.string(),
@@ -121,7 +121,7 @@ async function main() {
   server.registerTool(
     "list_memory_files",
     {
-      description: "List files under global memory or the project .hippocamp folder.",
+      description: "List files under global memory or the project memory folder.",
       inputSchema: {
         scope: z.enum(["global", "project"]),
         path: z.string().optional(),
@@ -156,7 +156,7 @@ async function main() {
     "sync_memory",
     {
       description:
-        "Commit and push memory changes. Global memory syncs through the dedicated Lagoon clone; project sync only proceeds when the repo has no unrelated changes outside .hippocamp.",
+        "Commit and push memory changes through the dedicated Lagoon clone. Omitting path syncs the default memory paths.",
       inputSchema: {
         scope: z.enum(["global", "project"]),
         path: z.string().optional(),
@@ -166,17 +166,19 @@ async function main() {
     },
     async ({ scope, path, projectRoot, message }) => {
       const scopeRoot = memory.getScopeRoot(scope, projectRoot);
-      const targetPath = path
-        ? nodePath.resolve(scopeRoot, path)
-        : scope === "global"
-          ? scopeRoot
-          : nodePath.join(scopeRoot);
+      const targetPaths = path
+        ? [nodePath.resolve(scopeRoot, path)]
+        : await memory.getDefaultSyncPaths(scope, projectRoot);
+
+      if (!targetPaths.length) {
+        throw new Error("no memory paths found to sync.");
+      }
 
       return toTextResult(
         await memory.syncMemory({
           scope,
           projectRoot,
-          paths: [targetPath],
+          paths: targetPaths,
           message: message || `hippocamp: sync ${scope} memory`,
         }),
       );

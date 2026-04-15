@@ -19,7 +19,6 @@ const DEFAULT_PROJECT_FILES = [
   "current_state.md",
   "open_threads.md",
 ];
-const GLOBAL_MEMORY_DIR = ".hippocamp";
 
 function expandHomePath(value) {
   if (!value) {
@@ -42,7 +41,7 @@ function getGlobalRepoRoot() {
 }
 
 function getGlobalRoot() {
-  return path.join(getGlobalRepoRoot(), GLOBAL_MEMORY_DIR);
+  return getGlobalRepoRoot();
 }
 
 function getProjectRoot(projectRoot) {
@@ -108,6 +107,10 @@ function normalizeRelativePath(value) {
 
   if (!normalized || normalized === "." || normalized === ".." || normalized.startsWith("../")) {
     throw new Error("path must be a safe relative path.");
+  }
+
+  if (normalized.split("/").includes(".git")) {
+    throw new Error("path must not target git internals.");
   }
 
   return normalized;
@@ -215,9 +218,20 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
     };
   }
 
-  const repoRelativePaths = paths.map((item) =>
-    path.relative(repoRoot, assertPathInScope(scopeRoot, item)).split(path.sep).join(path.posix.sep) || ".",
-  );
+  const repoRelativePaths = paths.map((item) => {
+    const relativePath =
+      path.relative(repoRoot, assertPathInScope(scopeRoot, item)).split(path.sep).join(path.posix.sep) || ".";
+
+    if (relativePath === ".") {
+      throw new Error("path must point to a memory file or directory inside the Lagoon root.");
+    }
+
+    if (relativePath.split("/").includes(".git")) {
+      throw new Error("path must not target git internals.");
+    }
+
+    return relativePath;
+  });
 
   const addResult = await runGit(["add", "--", ...repoRelativePaths], repoRoot);
 
@@ -302,6 +316,23 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
   };
 }
 
+async function getDefaultSyncPaths(scope, projectRoot) {
+  const scopeRoot = getScopeRoot(scope, projectRoot);
+  const defaultNames =
+    scope === "project" ? [...DEFAULT_PROJECT_FILES, "events"] : [...DEFAULT_GLOBAL_FILES, "events", "projects"];
+  const paths = [];
+
+  for (const name of defaultNames) {
+    const targetPath = path.join(scopeRoot, name);
+
+    if (await statIfExists(targetPath)) {
+      paths.push(targetPath);
+    }
+  }
+
+  return paths;
+}
+
 async function listDirectoryEntries(scope, relativePath, projectRoot) {
   const root = getScopeRoot(scope, projectRoot);
   const targetPath =
@@ -324,6 +355,7 @@ async function listDirectoryEntries(scope, relativePath, projectRoot) {
     targetPath === root ? "" : path.relative(root, targetPath).split(path.sep).join(path.posix.sep);
 
   return entries
+    .filter((entry) => entry.name !== ".git")
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((entry) => ({
       name: entry.name,
@@ -344,6 +376,10 @@ async function walkMarkdownFiles(rootPath, currentPath = "") {
   const results = [];
 
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (entry.name === ".git") {
+      continue;
+    }
+
     const entryPath = currentPath ? path.posix.join(currentPath, entry.name) : entry.name;
 
     if (entry.isDirectory()) {
@@ -608,5 +644,6 @@ module.exports = {
   listDirectoryEntries,
   searchMemory,
   syncMemory,
+  getDefaultSyncPaths,
   wakeUp,
 };

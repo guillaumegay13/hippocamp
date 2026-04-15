@@ -8,10 +8,9 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - The local Git repo syncs to GitHub through the user's normal Git credentials.
 - The app is intentionally not a database, notes app, queue, vector store, cloud API, or auth broker.
 - MVP primitives are:
-  - `.hippocamp/events/`
-  - `.hippocamp/agents/`
-  - `.hippocamp/shared/`
-  - `.hippocamp/projects/<slug>/`
+  - `events/`
+  - `projects/<slug>/`
+  - curated root Markdown files such as `identity.md` and `preferences.md`
 
 ## Stack
 
@@ -32,10 +31,10 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 
 ## Project Invariants
 
-- Memory paths must stay under the selected `.hippocamp/` root.
-- Sync paths must stay under the selected `.hippocamp/` root.
-- Global memory lives under `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/`.
-- Project memory lives under `HIPPOCAMP_GLOBAL_ROOT/.hippocamp/projects/<slug>/`.
+- Memory paths must stay under the selected Lagoon memory root.
+- Sync paths must stay under the selected Lagoon memory root.
+- Global memory lives under `HIPPOCAMP_GLOBAL_ROOT/`.
+- Project memory lives under `HIPPOCAMP_GLOBAL_ROOT/projects/<slug>/`.
 - The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory.
 - Event logs are append-only daily Markdown files under `events/YYYY-MM-DD.md`.
 - Curated files such as `current_state.md` and `open_threads.md` use explicit file writes.

@@ -14,9 +14,9 @@ flowchart LR
   end
 
   subgraph lagoon["Local Lagoon Git repo"]
-    global[".hippocamp/*.md"]
-    project[".hippocamp/projects/<slug>/*.md"]
-    events[".hippocamp/**/events/YYYY-MM-DD.md"]
+    global["*.md"]
+    project["projects/<slug>/*.md"]
+    events["**/events/YYYY-MM-DD.md"]
   end
 
   remote["Git remote"]
@@ -47,13 +47,13 @@ HIPPOCAMP_PROJECT_ROOT         default: current working directory
 Global memory:
 
 ```text
-${HIPPOCAMP_GLOBAL_ROOT}/.hippocamp/
+${HIPPOCAMP_GLOBAL_ROOT}/
 ```
 
 Project memory:
 
 ```text
-${HIPPOCAMP_GLOBAL_ROOT}/.hippocamp/projects/<project-slug>/
+${HIPPOCAMP_GLOBAL_ROOT}/projects/<project-slug>/
 ```
 
 ## Sync
@@ -61,7 +61,7 @@ ${HIPPOCAMP_GLOBAL_ROOT}/.hippocamp/projects/<project-slug>/
 `write_memory_file` and `append_event` sync by default:
 
 1. Write the target Markdown file under the selected memory root.
-2. Stage only paths inside the selected `.hippocamp/` root.
+2. Stage only paths inside the selected Lagoon memory root.
 3. Commit with a Hippocamp message.
 4. Push the current Lagoon branch.
 5. If push fails, run `git pull --rebase --autostash` and retry once.

@@ -91,29 +91,28 @@ Once `git push --dry-run` works from `~/.lagoon`, Hippocamp can sync memory.
 Global memory lives in:
 
 ```text
-~/.lagoon/.hippocamp/
+~/.lagoon/
 ```
 
 Project memory lives in:
 
 ```text
-~/.lagoon/.hippocamp/projects/<project-slug>/
+~/.lagoon/projects/<project-slug>/
 ```
 
 Suggested files:
 
 ```text
-.hippocamp/
-  identity.md
-  how_i_work.md
-  preferences.md
-  open_loops.md
+identity.md
+how_i_work.md
+preferences.md
+open_loops.md
+events/YYYY-MM-DD.md
+projects/<project-slug>/
+  project.md
+  current_state.md
+  open_threads.md
   events/YYYY-MM-DD.md
-  projects/<project-slug>/
-    project.md
-    current_state.md
-    open_threads.md
-    events/YYYY-MM-DD.md
 ```
 
 ## MCP Tools
@@ -169,6 +168,8 @@ npm run mcp:help
 npm run mcp:smoke
 npm run install:codex
 npm run install:claude
+npm run upgrade:codex
+npm run upgrade:claude
 ```
 
 ## Configuration
