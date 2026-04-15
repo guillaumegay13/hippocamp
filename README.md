@@ -17,6 +17,15 @@ Agents forget useful context between sessions. Hippocamp keeps that context insp
 - sync is normal `git commit` and `git push`
 - agents access it through MCP tools
 
+## Why Git
+
+Git is a practical default for agent memory:
+
+- Auditable: every memory change has a diff, author, timestamp, and commit history.
+- Readable: memory stays as Markdown files that humans and agents can inspect without a special UI.
+- Collaborative: multiple agents and humans can review, branch, merge, and roll back the same memory repo.
+- Agent-native: coding agents are already connected to GitHub through MCP, CLIs, or local Git credentials, so Hippocamp does not need an external database, hosted dependency, or separate token setup.
+
 ## Install
 
 Clone this repo, install dependencies, then install the MCP server for your agent:
