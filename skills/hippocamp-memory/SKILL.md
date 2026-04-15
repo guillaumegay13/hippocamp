@@ -10,6 +10,7 @@ Use this skill when the user wants persistent memory across agent sessions.
 This same skill can be installed into Codex or Claude Code.
 For Codex, use `npm run install:codex`; that installer copies this skill into `~/.codex/skills/hippocamp-memory/`, registers the Hippocamp MCP server, and refreshes `~/.codex/AGENTS.md`.
 For Claude Code, use `npm run install:claude`; that installer copies this skill into `~/.claude/skills/hippocamp-memory/`, registers the Hippocamp MCP server, and refreshes `~/.claude/CLAUDE.md`.
+Upgrade uses the same path: run `npm run upgrade:codex` or `npm run upgrade:claude` from a source checkout, or `npx hippocamp@latest upgrade-codex` / `npx hippocamp@latest upgrade-claude` after publishing.
 
 ## Scope
 

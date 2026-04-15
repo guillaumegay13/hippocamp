@@ -30,7 +30,9 @@
     "install:codex": "node scripts/install-codex.cjs",
     "mcp": "node scripts/hippocamp-mcp.cjs",
     "mcp:help": "node scripts/hippocamp-mcp.cjs --help",
-    "mcp:smoke": "node scripts/hippocamp-mcp.cjs --smoke"
+    "mcp:smoke": "node scripts/hippocamp-mcp.cjs --smoke",
+    "upgrade:claude": "node scripts/install-claude.cjs",
+    "upgrade:codex": "node scripts/install-codex.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

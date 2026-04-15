@@ -7,6 +7,8 @@ const COMMANDS = {
   mcp: "hippocamp-mcp.cjs",
   "install-codex": "install-codex.cjs",
   "install-claude": "install-claude.cjs",
+  "upgrade-codex": "install-codex.cjs",
+  "upgrade-claude": "install-claude.cjs",
 };
 
 function printHelp() {
@@ -16,11 +18,15 @@ Usage:
   hippocamp mcp
   hippocamp install-codex
   hippocamp install-claude
+  hippocamp upgrade-codex
+  hippocamp upgrade-claude
 
 Commands:
   mcp             Run the local MCP server
   install-codex   Install the Hippocamp skill and MCP server into Codex
   install-claude  Install the Hippocamp skill and MCP server into Claude Code
+  upgrade-codex   Upgrade the Codex Hippocamp install
+  upgrade-claude  Upgrade the Claude Code Hippocamp install
 `);
 }
 

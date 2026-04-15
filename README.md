@@ -39,6 +39,22 @@ After publishing, the intended one-line install shape is:
 npx hippocamp install-codex
 ```
 
+Upgrade uses the same install path, so agents can refresh themselves without a separate state model:
+
+```bash
+npx hippocamp@latest upgrade-codex
+npx hippocamp@latest upgrade-claude
+```
+
+From a source checkout:
+
+```bash
+git pull --ff-only
+npm install
+npm run upgrade:codex
+npm run upgrade:claude
+```
+
 Both installers default to `~/.lagoon` as the memory repo. You can override it:
 
 ```bash

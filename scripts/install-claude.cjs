@@ -111,6 +111,7 @@ function buildClaudeManagedBlock() {
     "- When project state changes, use `append_event` for milestones and update curated files such as `current_state.md` and `open_threads.md` before finishing the task.",
     "- Do not duplicate commits, PRs, issues, reviews, or CI results in memory; store references plus the missing rationale, preference, assumption, or follow-up context.",
     "- If a project-memory write does not sync automatically, call `sync_memory` before finishing the task.",
+    "- If the user asks to upgrade Hippocamp for Claude Code, run `npx hippocamp@latest upgrade-claude`; from a source checkout, run `git pull --ff-only`, `npm install`, then `npm run upgrade:claude`.",
     "- Before writing, reviewing, or refactoring code, read and follow `/Users/guillaumegay/.agents/skills/karpathy-guidelines/SKILL.md` unless the user explicitly asks to skip it.",
     CLAUDE_MANAGED_END,
     "",
