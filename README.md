@@ -120,11 +120,13 @@ how_i_work.md
 preferences.md
 open_loops.md
 events/YYYY-MM-DD.md
+events/YYYY-MM-DD.index.json
 projects/<project-slug>/
   project.md
   current_state.md
   open_threads.md
   events/YYYY-MM-DD.md
+  events/YYYY-MM-DD.index.json
 ```
 
 ## MCP Tools
@@ -144,15 +146,18 @@ Typical agent flow:
 1. Call `wake_up` at the start of a top-level task.
 2. Read the returned global and project memory.
 3. Use `search_memory` only when wake-up files are not enough.
-4. Use `append_event` for meaningful milestones.
+4. Use `append_event` for meaningful milestones, with concise cues when possible.
 5. Update curated files like `current_state.md` and `open_threads.md` before finishing.
 
 Writes sync by default. If sync fails or is skipped, call `sync_memory`.
+
+Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar keeps cue-based fuzzy search fast and rebuildable.
 
 ## Memory Rules
 
 - Keep memory concise.
 - Prefer curated summaries over raw event history.
+- Give events a short `Cues:` section so fuzzy search can recall them without scanning full bodies first.
 - Do not duplicate GitHub-owned facts such as commits, PRs, issues, reviews, or CI results.
 - Store artifact references plus the missing rationale, preference, assumption, or follow-up context.
 - Use project scope for project-specific state.
@@ -161,6 +166,11 @@ Writes sync by default. If sync fails or is skipped, call `sync_memory`.
 Example event content:
 
 ```md
+Cues:
+- local-first
+- token-free
+- install-story
+
 References:
 - commit: abc1234
 - pr: #12

@@ -105,17 +105,18 @@ async function main() {
     "append_event",
     {
       description:
-        "Append a dated event entry under events/YYYY-MM-DD.md. Store references to GitHub artifacts instead of copying their content.",
+        "Append a dated event entry under events/YYYY-MM-DD.md and update the sibling cue index. Store references to GitHub artifacts instead of copying their content.",
       inputSchema: {
         scope: z.enum(["global", "project"]).default("project"),
         title: z.string().optional(),
+        cues: z.array(z.string()).optional(),
         content: z.string(),
         sync: z.boolean().optional(),
         projectRoot: z.string().optional(),
       },
     },
-    async ({ scope, title, content, sync, projectRoot }) =>
-      toTextResult(await memory.appendEvent({ scope, title, content, projectRoot, sync })),
+    async ({ scope, title, cues, content, sync, projectRoot }) =>
+      toTextResult(await memory.appendEvent({ scope, title, cues, content, projectRoot, sync })),
   );
 
   server.registerTool(
@@ -140,7 +141,7 @@ async function main() {
     "search_memory",
     {
       description:
-        "Search Markdown memory files. Use this only when the wake-up files are insufficient, not as the default startup path.",
+        "Fuzzy-search memory files. Event search ranks indexed cues and headings first. Use this only when the wake-up files are insufficient, not as the default startup path.",
       inputSchema: {
         query: z.string(),
         scope: z.enum(["global", "project", "both"]).default("both"),

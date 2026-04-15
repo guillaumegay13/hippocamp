@@ -20,6 +20,9 @@ const DEFAULT_PROJECT_FILES = [
   "open_threads.md",
 ];
 
+const EVENT_INDEX_VERSION = 1;
+const EVENT_SEARCH_THRESHOLD = 20;
+
 function expandHomePath(value) {
   if (!value) {
     return value;
@@ -170,6 +173,50 @@ async function statIfExists(filePath) {
 
 function ensureTrailingNewline(content) {
   return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function tokenizeSearchText(value) {
+  const normalized = normalizeSearchText(value);
+  return normalized ? normalized.split(/\s+/).filter(Boolean) : [];
+}
+
+function normalizeCue(value) {
+  return tokenizeSearchText(value).join("-");
+}
+
+function normalizeCueList(cues) {
+  const values = Array.isArray(cues) ? cues : [];
+  return [...new Set(values.map(normalizeCue).filter(Boolean))];
+}
+
+function splitInlineCueValues(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function hasCuesSection(content) {
+  return content.split(/\r?\n/).some((line) => /^Cues:\s*/i.test(line.trim()));
+}
+
+function formatCuesSection(cues) {
+  const normalizedCues = normalizeCueList(cues);
+
+  if (!normalizedCues.length) {
+    return "";
+  }
+
+  return ["Cues:", ...normalizedCues.map((cue) => `- ${cue}`)].join("\n");
 }
 
 async function ensureParentDirectory(filePath) {
@@ -395,6 +442,234 @@ async function walkMarkdownFiles(rootPath, currentPath = "") {
   return results;
 }
 
+function parseEventHeading(line) {
+  const heading = line.replace(/^##\s+/, "").trim();
+  const match = heading.match(/^(\S+)(?:\s+[—-]\s+(.+))?$/);
+
+  if (!match) {
+    return {
+      id: normalizeCue(heading) || heading,
+      heading,
+    };
+  }
+
+  return {
+    id: match[1],
+    heading: match[2]?.trim() || heading,
+  };
+}
+
+function extractCuesFromEventLines(lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].trim().match(/^Cues:\s*(.*)$/i);
+
+    if (!match) {
+      continue;
+    }
+
+    const cues = splitInlineCueValues(match[1]);
+
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = lines[cursor];
+      const bullet = line.match(/^\s*-\s+(.+?)\s*$/);
+
+      if (bullet) {
+        cues.push(bullet[1]);
+        continue;
+      }
+
+      if (!line.trim()) {
+        continue;
+      }
+
+      break;
+    }
+
+    return normalizeCueList(cues);
+  }
+
+  return [];
+}
+
+function parseEventBlocks(content) {
+  const lines = content.split(/\r?\n/);
+  const headingIndexes = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^##\s+/.test(lines[index])) {
+      headingIndexes.push(index);
+    }
+  }
+
+  return headingIndexes.map((startIndex, index) => {
+    const endIndex = headingIndexes[index + 1] ?? lines.length;
+    const blockLines = lines.slice(startIndex, endIndex);
+    const heading = parseEventHeading(blockLines[0]);
+    const bodyLines = blockLines.slice(1);
+
+    return {
+      id: heading.id,
+      heading: heading.heading,
+      cues: extractCuesFromEventLines(bodyLines),
+      content: blockLines.join("\n").trim(),
+      body: bodyLines.join("\n").trim(),
+      startLine: startIndex + 1,
+    };
+  });
+}
+
+function buildEventIndex(markdownContent, markdownPath) {
+  return {
+    version: EVENT_INDEX_VERSION,
+    path: path.posix.basename(markdownPath),
+    events: parseEventBlocks(markdownContent).map((event) => ({
+      id: event.id,
+      heading: event.heading,
+      cues: event.cues,
+    })),
+  };
+}
+
+async function writeEventIndex(markdownPath, markdownRelativePath) {
+  const content = (await readFileIfExists(markdownPath)) || "";
+  const indexPath = markdownPath.replace(/\.md$/, ".index.json");
+  const index = buildEventIndex(content, markdownRelativePath);
+
+  await fs.writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, "utf8");
+
+  return indexPath;
+}
+
+function createQueryInfo(query) {
+  const original = requireNonEmptyString(query, "query");
+  const tokens = tokenizeSearchText(original);
+
+  return {
+    original,
+    normalized: tokens.join(" "),
+    cue: tokens.join("-"),
+    tokens,
+  };
+}
+
+function stripPlural(value) {
+  return value.length > 3 && value.endsWith("s") ? value.slice(0, -1) : value;
+}
+
+function editDistance(left, right) {
+  if (left === right) {
+    return 0;
+  }
+
+  if (!left.length) {
+    return right.length;
+  }
+
+  if (!right.length) {
+    return left.length;
+  }
+
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+
+  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+    const current = [leftIndex + 1];
+
+    for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+      const insertion = current[rightIndex] + 1;
+      const deletion = previous[rightIndex + 1] + 1;
+      const substitution = previous[rightIndex] + (left[leftIndex] === right[rightIndex] ? 0 : 1);
+      current.push(Math.min(insertion, deletion, substitution));
+    }
+
+    previous = current;
+  }
+
+  return previous[right.length];
+}
+
+function tokenSimilarity(left, right) {
+  if (!left || !right) {
+    return 0;
+  }
+
+  const normalizedLeft = stripPlural(left);
+  const normalizedRight = stripPlural(right);
+
+  if (normalizedLeft === normalizedRight) {
+    return 1;
+  }
+
+  if (
+    (normalizedLeft.length >= 4 && normalizedRight.includes(normalizedLeft)) ||
+    (normalizedRight.length >= 4 && normalizedLeft.includes(normalizedRight))
+  ) {
+    return 0.9;
+  }
+
+  const maxLength = Math.max(normalizedLeft.length, normalizedRight.length);
+
+  if (maxLength < 4) {
+    return 0;
+  }
+
+  return 1 - editDistance(normalizedLeft, normalizedRight) / maxLength;
+}
+
+function scoreSearchValues(queryInfo, values) {
+  const normalizedValues = values
+    .map((value) => normalizeSearchText(value))
+    .filter(Boolean);
+
+  if (!queryInfo.tokens.length || !normalizedValues.length) {
+    return 0;
+  }
+
+  const phraseScore = normalizedValues.reduce((bestScore, value) => {
+    if (value === queryInfo.normalized || value.replace(/\s+/g, "-") === queryInfo.cue) {
+      return Math.max(bestScore, 1);
+    }
+
+    if (queryInfo.normalized && value.includes(queryInfo.normalized)) {
+      return Math.max(bestScore, 0.92);
+    }
+
+    if (queryInfo.normalized && queryInfo.normalized.includes(value)) {
+      return Math.max(bestScore, 0.82);
+    }
+
+    return bestScore;
+  }, 0);
+
+  const valueTokens = [...new Set(normalizedValues.flatMap((value) => value.split(/\s+/)))];
+  let exactMatches = 0;
+  let fuzzyMatches = 0;
+
+  for (const queryToken of queryInfo.tokens) {
+    const bestTokenScore = valueTokens.reduce(
+      (bestScore, valueToken) => Math.max(bestScore, tokenSimilarity(queryToken, valueToken)),
+      0,
+    );
+
+    if (bestTokenScore >= 1) {
+      exactMatches += 1;
+    }
+
+    if (bestTokenScore >= 0.72) {
+      fuzzyMatches += 1;
+    }
+  }
+
+  const exactScore = (exactMatches / queryInfo.tokens.length) * 0.86;
+  const fuzzyScore = (fuzzyMatches / queryInfo.tokens.length) * 0.7;
+
+  return Math.max(phraseScore, exactScore, fuzzyScore);
+}
+
+function createFallbackSnippet(content) {
+  const compact = content.replace(/\s+/g, " ").trim();
+  return compact.length > 220 ? `${compact.slice(0, 217)}...` : compact;
+}
+
 function createSearchSnippet(content, query) {
   const haystack = content.toLowerCase();
   const needle = query.toLowerCase();
@@ -463,6 +738,7 @@ async function writeMemoryFile({ scope, path: relativePath, content, projectRoot
 async function appendEvent({
   scope = "project",
   content,
+  cues,
   projectRoot,
   sync = true,
   title,
@@ -470,8 +746,13 @@ async function appendEvent({
   timestamp = new Date().toISOString(),
 }) {
   const body = requireNonEmptyString(content, "content");
+  const normalizedCues = normalizeCueList(cues);
+  const eventBody =
+    normalizedCues.length && !hasCuesSection(body)
+      ? `${formatCuesSection(normalizedCues)}\n\n${body.trim()}`
+      : body.trim();
   const heading = title ? `## ${timestamp} — ${title.trim()}` : `## ${timestamp}`;
-  const eventBlock = `${heading}\n\n${body.trim()}\n`;
+  const eventBlock = `${heading}\n\n${eventBody}\n`;
   const relativePath = `events/${date}.md`;
   const target = resolveScopedPath(scope, relativePath, projectRoot);
   const existing = await readFileIfExists(target.absolutePath);
@@ -481,12 +762,13 @@ async function appendEvent({
 
   await ensureParentDirectory(target.absolutePath);
   await fs.writeFile(target.absolutePath, nextContent, "utf8");
+  const indexPath = await writeEventIndex(target.absolutePath, target.path);
 
   const syncResult = sync
     ? await syncMemory({
         scope,
         projectRoot,
-        paths: [target.absolutePath],
+        paths: [target.absolutePath, indexPath],
         message: `hippocamp: append ${scope} event ${date}`,
       })
     : {
@@ -501,12 +783,215 @@ async function appendEvent({
     path: target.path,
     timestamp,
     title: title?.trim() || null,
+    cues: parseEventBlocks(eventBlock)[0]?.cues || [],
+    indexPath,
     sync: syncResult,
   };
 }
 
+async function readJsonFileIfExists(filePath) {
+  const content = await readFileIfExists(filePath);
+
+  if (content === null) {
+    return null;
+  }
+
+  return JSON.parse(content);
+}
+
+async function listEventFiles(root) {
+  const eventsDir = path.join(root, "events");
+  const stats = await statIfExists(eventsDir);
+
+  if (!stats || !stats.isDirectory()) {
+    return {
+      eventsDir,
+      indexes: [],
+      markdownFiles: [],
+    };
+  }
+
+  const entries = await fs.readdir(eventsDir, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
+
+  return {
+    eventsDir,
+    indexes: files.filter((name) => name.endsWith(".index.json")),
+    markdownFiles: files.filter((name) => name.endsWith(".md")),
+  };
+}
+
+function scoreEventEntry(queryInfo, event) {
+  const cueScore = scoreSearchValues(queryInfo, event.cues || []);
+  const headingScore = scoreSearchValues(queryInfo, [event.heading || "", event.id || ""]);
+  const score = cueScore * 100 + headingScore * 60;
+  const match = cueScore >= headingScore ? "cues" : "heading";
+
+  return {
+    score,
+    match,
+  };
+}
+
+async function getEventBlockById(markdownPath, eventId) {
+  const content = await readFileIfExists(markdownPath);
+
+  if (content === null) {
+    return null;
+  }
+
+  return parseEventBlocks(content).find((event) => event.id === eventId) || null;
+}
+
+async function searchEventIndexes({ scope, root, queryInfo }) {
+  const eventFiles = await listEventFiles(root);
+  const indexedMarkdownFiles = new Set();
+  const candidates = [];
+
+  for (const indexName of eventFiles.indexes) {
+    const indexPath = path.join(eventFiles.eventsDir, indexName);
+    let index;
+
+    try {
+      index = await readJsonFileIfExists(indexPath);
+    } catch {
+      index = null;
+    }
+
+    const markdownName = typeof index?.path === "string" ? index.path : indexName.replace(/\.index\.json$/, ".md");
+
+    if (!index || !Array.isArray(index.events)) {
+      continue;
+    }
+
+    indexedMarkdownFiles.add(markdownName);
+
+    for (const event of index.events) {
+      const eventScore = scoreEventEntry(queryInfo, event);
+
+      if (eventScore.score < EVENT_SEARCH_THRESHOLD) {
+        continue;
+      }
+
+      candidates.push({
+        scope,
+        path: `events/${markdownName}`,
+        markdownPath: path.join(eventFiles.eventsDir, markdownName),
+        id: event.id,
+        heading: event.heading,
+        cues: normalizeCueList(event.cues),
+        score: Math.round(eventScore.score),
+        match: eventScore.match,
+      });
+    }
+  }
+
+  for (const markdownName of eventFiles.markdownFiles) {
+    if (indexedMarkdownFiles.has(markdownName)) {
+      continue;
+    }
+
+    const markdownPath = path.join(eventFiles.eventsDir, markdownName);
+    const content = await readFileIfExists(markdownPath);
+
+    if (content === null) {
+      continue;
+    }
+
+    for (const event of parseEventBlocks(content)) {
+      const eventScore = scoreEventEntry(queryInfo, event);
+
+      if (eventScore.score < EVENT_SEARCH_THRESHOLD) {
+        continue;
+      }
+
+      candidates.push({
+        scope,
+        path: `events/${markdownName}`,
+        markdownPath,
+        id: event.id,
+        heading: event.heading,
+        cues: event.cues,
+        score: Math.round(eventScore.score),
+        match: eventScore.match,
+      });
+    }
+  }
+
+  const results = [];
+  const sortedCandidates = candidates.sort((left, right) => right.score - left.score).slice(0, 60);
+
+  for (const candidate of sortedCandidates) {
+    const block = await getEventBlockById(candidate.markdownPath, candidate.id);
+
+    if (!block) {
+      continue;
+    }
+
+    results.push({
+      scope: candidate.scope,
+      path: candidate.path,
+      id: candidate.id,
+      heading: candidate.heading,
+      cues: candidate.cues,
+      score: candidate.score,
+      match: candidate.match,
+      snippet: createSearchSnippet(block.content, queryInfo.original) || createFallbackSnippet(block.body),
+    });
+  }
+
+  return {
+    scannedFiles: eventFiles.indexes.length + eventFiles.markdownFiles.length - indexedMarkdownFiles.size,
+    results,
+  };
+}
+
+async function searchMarkdownFiles({ scope, root, queryInfo }) {
+  const markdownFiles = await walkMarkdownFiles(root);
+  const scopedFiles =
+    scope === "global"
+      ? markdownFiles.filter((relativePath) => !relativePath.startsWith("projects/"))
+      : markdownFiles;
+  const results = [];
+  let scannedFiles = 0;
+
+  for (const relativePath of scopedFiles) {
+    if (relativePath.startsWith("events/")) {
+      continue;
+    }
+
+    scannedFiles += 1;
+
+    const absolutePath = path.join(root, relativePath);
+    const content = await fs.readFile(absolutePath, "utf8");
+    const pathScore = scoreSearchValues(queryInfo, [relativePath]);
+    const bodyScore = scoreSearchValues(queryInfo, [content]);
+    const score = pathScore * 70 + bodyScore * 40;
+
+    if (score < EVENT_SEARCH_THRESHOLD) {
+      continue;
+    }
+
+    results.push({
+      scope,
+      path: relativePath,
+      score: Math.round(score),
+      match: pathScore >= bodyScore ? "path" : "body",
+      snippet: createSearchSnippet(content, queryInfo.original) || createFallbackSnippet(content),
+    });
+  }
+
+  return {
+    scannedFiles,
+    results,
+  };
+}
+
 async function searchMemory({ query, scope = "both", projectRoot, maxResults = 10 }) {
-  const normalizedQuery = requireNonEmptyString(query, "query");
+  const queryInfo = createQueryInfo(query);
   const clampedMaxResults = Math.max(1, Math.min(Number(maxResults) || 10, 20));
   const scopes = scope === "both" ? ["global", "project"] : [scope];
   const results = [];
@@ -514,43 +999,19 @@ async function searchMemory({ query, scope = "both", projectRoot, maxResults = 1
 
   for (const itemScope of scopes) {
     const root = getScopeRoot(itemScope, projectRoot);
-    const markdownFiles = await walkMarkdownFiles(root);
-    const scopedFiles =
-      itemScope === "global"
-        ? markdownFiles.filter((relativePath) => !relativePath.startsWith("projects/"))
-        : markdownFiles;
+    const eventSearch = await searchEventIndexes({ scope: itemScope, root, queryInfo });
+    const markdownSearch = await searchMarkdownFiles({ scope: itemScope, root, queryInfo });
 
-    for (const relativePath of scopedFiles) {
-      scannedFiles += 1;
-
-      if (results.length >= clampedMaxResults) {
-        break;
-      }
-
-      const absolutePath = path.join(root, relativePath);
-      const content = await fs.readFile(absolutePath, "utf8");
-      const snippet = createSearchSnippet(content, normalizedQuery);
-
-      if (!snippet) {
-        continue;
-      }
-
-      results.push({
-        scope: itemScope,
-        path: relativePath,
-        snippet,
-      });
-    }
-
-    if (results.length >= clampedMaxResults) {
-      break;
-    }
+    scannedFiles += eventSearch.scannedFiles + markdownSearch.scannedFiles;
+    results.push(...eventSearch.results, ...markdownSearch.results);
   }
 
+  const rankedResults = results.sort((left, right) => right.score - left.score).slice(0, clampedMaxResults);
+
   return {
-    query: normalizedQuery,
+    query: queryInfo.original,
     scannedFiles,
-    results,
+    results: rankedResults,
   };
 }
 
