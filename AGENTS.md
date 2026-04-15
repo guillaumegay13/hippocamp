@@ -5,7 +5,8 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 ## Purpose
 
 - The product stores agent memory as Markdown files in a local Git repo, usually `~/.lagoon`.
-- The local Git repo syncs to GitHub through the user's normal Git credentials.
+- The local Git repo syncs to a usually private GitHub remote through the user's normal Git credentials.
+- Git sync is intentional: it provides audit history, private cloud backup, and cross-machine or cross-agent continuity without a Hippocamp-specific database or token.
 - The app is intentionally not a database, notes app, queue, vector store, cloud API, or auth broker.
 - MVP primitives are:
   - `events/`

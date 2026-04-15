@@ -24,6 +24,7 @@ Git is a practical default for agent memory:
 - Auditable: every memory change has a diff, author, timestamp, and commit history.
 - Readable: memory stays as Markdown files that humans and agents can inspect without a special UI.
 - Collaborative: multiple agents and humans can review, branch, merge, and roll back the same memory repo.
+- Portable: a private remote lets the same memory follow you across machines and agent environments.
 - Agent-native: coding agents are already connected to GitHub through MCP, CLIs, or local Git credentials, so Hippocamp does not need an external database, hosted dependency, or separate token setup.
 
 ## Install
@@ -82,7 +83,7 @@ Hippocamp expects a local Git repo for memory:
 git clone git@github.com:YOUR_USER/lagoon.git ~/.lagoon
 ```
 
-The repo can be private. Hippocamp does not need a GitHub token for local MCP mode. It uses your normal local Git credentials.
+The repo should usually be private. Pushing memory to a private remote keeps it available across machines and agent environments while still using normal Git access controls. Hippocamp does not need a GitHub token for local MCP mode; it uses your normal local Git credentials.
 
 If push auth is not configured yet, use your preferred GitHub setup. With GitHub CLI:
 
