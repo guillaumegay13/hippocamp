@@ -21,11 +21,13 @@
   ],
   "bin": {
     "hippocamp": "scripts/hippocamp.cjs",
+    "hippocamp-dream": "scripts/hippocamp-dream.cjs",
     "hippocamp-mcp": "scripts/hippocamp-mcp.cjs",
     "hippocamp-install-codex": "scripts/install-codex.cjs",
     "hippocamp-install-claude": "scripts/install-claude.cjs"
   },
   "scripts": {
+    "dream": "node scripts/hippocamp-dream.cjs",
     "install:claude": "node scripts/install-claude.cjs",
     "install:codex": "node scripts/install-codex.cjs",
     "mcp": "node scripts/hippocamp-mcp.cjs",

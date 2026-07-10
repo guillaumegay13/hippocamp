@@ -1,0 +1,136 @@
+name: Hippocamp Dream
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: hippocamp-dream
+  cancel-in-progress: false
+
+jobs:
+  dream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      HIPPOCAMP_GLOBAL_ROOT: ${{ github.workspace }}
+      HIPPOCAMP_DREAM_THRESHOLD_CHARS: "20000"
+      HIPPOCAMP_DREAM_TARGET_CHARS: "15000"
+      HIPPOCAMP_DREAM_MODEL: ${{ secrets.HIPPOCAMP_DREAM_MODEL }}
+      MANIFEST_BASE_URL: ${{ secrets.MANIFEST_BASE_URL }}
+      MANIFEST_API_KEY: ${{ secrets.MANIFEST_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Configure git
+        run: |
+          git config user.name "hippocamp-dream[bot]"
+          git config user.email "hippocamp-dream[bot]@users.noreply.github.com"
+
+      - name: Find projects over threshold
+        run: |
+          npx -y hippocamp@latest dream \
+            --all \
+            --dry-run \
+            --json \
+            --threshold-chars "$HIPPOCAMP_DREAM_THRESHOLD_CHARS" \
+            > /tmp/hippocamp-dream-scan.json
+
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const scan = JSON.parse(fs.readFileSync("/tmp/hippocamp-dream-scan.json", "utf8"));
+          const projects = scan.results
+            .filter((item) => item.skipped === "dry_run")
+            .map((item) => item.project);
+          fs.writeFileSync("/tmp/hippocamp-dream-projects.txt", `${projects.join("\n")}\n`);
+          console.log(`Dream candidates: ${projects.length ? projects.join(", ") : "none"}`);
+          NODE
+
+      - name: Create or update Dream PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r project; do
+            [ -n "$project" ] || continue
+
+            branch="dream/${project}"
+            git fetch origin main
+            git checkout -B "$branch" origin/main
+
+            npx -y hippocamp@latest dream \
+              --project "$project" \
+              --write \
+              --json \
+              --threshold-chars "$HIPPOCAMP_DREAM_THRESHOLD_CHARS" \
+              --target-chars "$HIPPOCAMP_DREAM_TARGET_CHARS" \
+              > "/tmp/hippocamp-dream-${project}.json"
+
+            if git diff --quiet -- "projects/${project}/current_state.md" "projects/${project}/open_threads.md"; then
+              echo "No Dream diff for ${project}"
+              git checkout main
+              git reset --hard origin/main
+              continue
+            fi
+
+            git add "projects/${project}/current_state.md" "projects/${project}/open_threads.md"
+            git commit -m "Dream compact ${project} memory"
+            git push --force-with-lease origin "$branch"
+
+            node - "$project" "/tmp/hippocamp-dream-${project}.json" > "/tmp/hippocamp-dream-${project}.md" <<'NODE'
+            const fs = require("node:fs");
+            const project = process.argv[2];
+            const payload = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+            const result = payload.results[0];
+            const lines = [
+              `Dream compacted \`${project}\` curated memory.`,
+              "",
+              "Before:",
+              `- wake_up: ${result.wakeUpChars} chars`,
+              `- current_state.md: ${result.files["current_state.md"]} bytes`,
+              `- open_threads.md: ${result.files["open_threads.md"]} bytes`,
+              "",
+              "Context:",
+              `- open threads found: ${result.context.openThreads}`,
+              `- threads with event evidence: ${result.context.threadsWithEvidence}`,
+              `- event evidence snippets: ${result.context.evidenceItems}`,
+              `- evidence budget used: ${result.context.evidenceChars}/${result.context.evidenceBudgetChars} chars`,
+              "",
+              "After:",
+              `- wake_up: ${result.afterWakeUpChars} chars`,
+              `- current_state.md + open_threads.md: ${result.afterBytes} bytes`,
+              "",
+              "Policy:",
+              "- touched only `current_state.md` and `open_threads.md`",
+              "- used bounded cue-indexed event evidence for thread decisions",
+              "- did not modify append-only events or cue indexes",
+              "- moved historical detail out of wake-up context",
+            ];
+            console.log(lines.join("\n"));
+            NODE
+
+            existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
+            title="Dream compact ${project} memory"
+
+            if [ -n "$existing" ]; then
+              gh pr edit "$existing" --title "$title" --body-file "/tmp/hippocamp-dream-${project}.md"
+            else
+              gh pr create --title "$title" --body-file "/tmp/hippocamp-dream-${project}.md" --head "$branch" --base main
+            fi
+
+            git checkout main
+            git reset --hard origin/main
+          done < /tmp/hippocamp-dream-projects.txt
