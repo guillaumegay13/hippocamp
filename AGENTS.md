@@ -22,12 +22,14 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 
 ## Repository Map
 
-- `scripts/hippocamp.cjs`: small CLI wrapper for `mcp`, `install-codex`, and `install-claude`.
+- `scripts/hippocamp.cjs`: small CLI wrapper for `dream`, `mcp`, `install-codex`, and `install-claude`.
+- `scripts/hippocamp-dream.cjs`: offline Dream CLI for scheduled compaction of curated project wake-up files.
 - `scripts/hippocamp-memory.cjs`: local filesystem-backed Hippocamp memory helpers for MCP use.
 - `scripts/hippocamp-mcp.cjs`: local stdio MCP server for Hippocamp memory tools.
 - `scripts/install-claude.cjs`: one-step installer for Claude Code MCP setup and user-level `CLAUDE.md` guidance.
 - `scripts/install-codex.cjs`: one-step installer for the Hippocamp skill and MCP server in Codex.
 - `skills/hippocamp-memory/SKILL.md`: installable skill that tells agents how to use Hippocamp memory.
+- `assets/github-actions/hippocamp-dream.yml`: scheduled workflow template for Lagoon repos that opens one Dream PR per project.
 - `assets/brand/hippocamp-mascot.png`: README mascot asset.
 
 ## Project Invariants
@@ -43,6 +45,8 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - Default sync is automatic through the local Lagoon repo.
 - Local MCP mode must not require `GITHUB_TOKEN`, GitHub App auth, or a cloud service.
 - Memory must not duplicate facts already tracked by GitHub commits, PRs, issues, reviews, or CI. Store references plus the missing rationale, preference, assumption, or follow-up context instead.
+- Dream compaction sends `current_state.md`, `open_threads.md`, and bounded cue-indexed event evidence for open-thread decisions. It must not dump full event logs, cue indexes, or raw GitHub-owned facts into the model prompt.
+- The Dream GitHub Actions workflow is a Lagoon repo template. It should remain schedule-only and create reviewable PRs rather than pushing directly to `main`.
 
 ## Change Rules
 
@@ -59,11 +63,12 @@ When changing code, use the smallest verification that proves the change:
 - Run `node --check scripts/*.cjs` for script syntax changes.
 - Run `npm run mcp:help` when changing MCP registration or commands.
 - Run `npm run mcp:smoke` when changing memory reads, root resolution, or wake-up behavior.
+- Run `npm run dream -- --help` when changing Dream CLI arguments.
 - There is no dedicated test suite yet, so do not claim test coverage that does not exist.
 
 ## Notes For Future Agents
 
 - The cloud/API version is intentionally deferred.
 - Do not reintroduce Next.js, GitHub API token auth, or GitHub App auth for the local MVP.
-- Dream PRs, branch-per-agent workflows, and automatic compaction should be designed later as a separate feature.
+- Keep Dream minimal: scheduled CLI compaction, current/open curated files plus bounded thread evidence, one PR per project.
 - The local install story should stay: install MCP, point at Lagoon, rely on normal Git auth.

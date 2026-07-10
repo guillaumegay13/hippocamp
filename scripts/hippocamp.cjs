@@ -4,6 +4,7 @@ const { spawn } = require("node:child_process");
 const path = require("node:path");
 
 const COMMANDS = {
+  dream: "hippocamp-dream.cjs",
   mcp: "hippocamp-mcp.cjs",
   "install-codex": "install-codex.cjs",
   "install-claude": "install-claude.cjs",
@@ -15,6 +16,7 @@ function printHelp() {
   console.log(`Hippocamp
 
 Usage:
+  hippocamp dream
   hippocamp mcp
   hippocamp install-codex
   hippocamp install-claude
@@ -22,6 +24,7 @@ Usage:
   hippocamp upgrade-claude
 
 Commands:
+  dream           Run offline Dream memory compaction
   mcp             Run the local MCP server
   install-codex   Install the Hippocamp skill and MCP server into Codex
   install-claude  Install the Hippocamp skill and MCP server into Claude Code

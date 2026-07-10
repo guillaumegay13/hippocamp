@@ -153,6 +153,32 @@ Writes sync by default. If sync fails or is skipped, call `sync_memory`.
 
 Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar keeps cue-based fuzzy search fast and rebuildable.
 
+## Dream
+
+Dream is offline compaction for project wake-up context. It rewrites only:
+
+```text
+projects/<project-slug>/current_state.md
+projects/<project-slug>/open_threads.md
+```
+
+It does not dump event logs into the model prompt, does not rewrite append-only events, and does not run during normal MCP wake-up. When a project is over the threshold, Dream builds a capped thread evidence pack by searching cue-indexed project events for `open_threads.md` bullets. The evidence budget follows `--target-chars`, so the same size target controls both the desired output and the supporting context. This gives the model enough context to keep, rewrite, close, or promote threads without loading raw history.
+
+Dry-run is the default:
+
+```bash
+npm run dream -- --all --dry-run --json
+npm run dream -- --project my-project --write
+```
+
+`--write` requires a Manifest/OpenAI-compatible Responses API endpoint. The default environment variables are:
+
+- `MANIFEST_BASE_URL`
+- `MANIFEST_API_KEY`
+- `HIPPOCAMP_DREAM_MODEL` (defaults to `auto`; override if you want a specific provider/model)
+
+The GitHub Actions template at `assets/github-actions/hippocamp-dream.yml` is meant to be copied into the private Lagoon memory repo as `.github/workflows/hippocamp-dream.yml`. It runs on a schedule only, scans projects over the wake-up threshold, and creates or updates one PR per project so each memory compaction is reviewable.
+
 ## Memory Rules
 
 - Keep memory concise.
@@ -188,6 +214,7 @@ This reduces onboarding friction for open-source users and avoids cloud auth con
 npm run mcp
 npm run mcp:help
 npm run mcp:smoke
+npm run dream
 npm run install:codex
 npm run install:claude
 npm run upgrade:codex
@@ -200,6 +227,11 @@ Environment variables are optional for local use:
 
 - `HIPPOCAMP_GLOBAL_ROOT`: local Lagoon clone path. Default: `~/.lagoon`
 - `HIPPOCAMP_PROJECT_ROOT`: project root used to infer the current project slug. Default: current working directory
+- `MANIFEST_BASE_URL`: OpenAI-compatible base URL used by `hippocamp dream --write`
+- `MANIFEST_API_KEY`: API key used by `hippocamp dream --write`
+- `HIPPOCAMP_DREAM_MODEL`: model used by Dream. Default: `auto`
+- `HIPPOCAMP_DREAM_THRESHOLD_CHARS`: wake-up size required before Dream proposes compaction. Default: `20000`
+- `HIPPOCAMP_DREAM_TARGET_CHARS`: target combined size for `current_state.md` and `open_threads.md`. Default: `15000`
 
 ## What This Is Not
 
