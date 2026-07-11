@@ -3,6 +3,7 @@ name: Hippocamp Dream
 on:
   schedule:
     - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -91,36 +92,36 @@ jobs:
             git push --force-with-lease origin "$branch"
 
             node - "$project" "/tmp/hippocamp-dream-${project}.json" > "/tmp/hippocamp-dream-${project}.md" <<'NODE'
-            const fs = require("node:fs");
-            const project = process.argv[2];
-            const payload = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-            const result = payload.results[0];
-            const lines = [
-              `Dream compacted \`${project}\` curated memory.`,
-              "",
-              "Before:",
-              `- wake_up: ${result.wakeUpChars} chars`,
-              `- current_state.md: ${result.files["current_state.md"]} bytes`,
-              `- open_threads.md: ${result.files["open_threads.md"]} bytes`,
-              "",
-              "Context:",
-              `- open threads found: ${result.context.openThreads}`,
-              `- threads with event evidence: ${result.context.threadsWithEvidence}`,
-              `- event evidence snippets: ${result.context.evidenceItems}`,
-              `- evidence budget used: ${result.context.evidenceChars}/${result.context.evidenceBudgetChars} chars`,
-              "",
-              "After:",
-              `- wake_up: ${result.afterWakeUpChars} chars`,
-              `- current_state.md + open_threads.md: ${result.afterBytes} bytes`,
-              "",
-              "Policy:",
-              "- touched only `current_state.md` and `open_threads.md`",
-              "- used bounded cue-indexed event evidence for thread decisions",
-              "- did not modify append-only events or cue indexes",
-              "- moved historical detail out of wake-up context",
-            ];
-            console.log(lines.join("\n"));
-            NODE
+          const fs = require("node:fs");
+          const project = process.argv[2];
+          const payload = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+          const result = payload.results[0];
+          const lines = [
+            `Dream compacted \`${project}\` curated memory.`,
+            "",
+            "Before:",
+            `- wake_up: ${result.wakeUpChars} chars`,
+            `- current_state.md: ${result.files["current_state.md"]} bytes`,
+            `- open_threads.md: ${result.files["open_threads.md"]} bytes`,
+            "",
+            "Context:",
+            `- open threads found: ${result.context.openThreads}`,
+            `- threads with event evidence: ${result.context.threadsWithEvidence}`,
+            `- event evidence snippets: ${result.context.evidenceItems}`,
+            `- evidence budget used: ${result.context.evidenceChars}/${result.context.evidenceBudgetChars} chars`,
+            "",
+            "After:",
+            `- wake_up: ${result.afterWakeUpChars} chars`,
+            `- current_state.md + open_threads.md: ${result.afterBytes} bytes`,
+            "",
+            "Policy:",
+            "- touched only `current_state.md` and `open_threads.md`",
+            "- used bounded cue-indexed event evidence for thread decisions",
+            "- did not modify append-only events or cue indexes",
+            "- moved historical detail out of wake-up context",
+          ];
+          console.log(lines.join("\n"));
+          NODE
 
             existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
             title="Dream compact ${project} memory"
