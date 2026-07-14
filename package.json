@@ -28,6 +28,7 @@
   },
   "scripts": {
     "dream": "node scripts/hippocamp-dream.cjs",
+    "dream:railway": "bash assets/railway/run-dream.sh",
     "install:claude": "node scripts/install-claude.cjs",
     "install:codex": "node scripts/install-codex.cjs",
     "mcp": "node scripts/hippocamp-mcp.cjs",

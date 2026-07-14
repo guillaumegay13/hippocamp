@@ -30,6 +30,8 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - `scripts/install-codex.cjs`: one-step installer for the Hippocamp skill and MCP server in Codex.
 - `skills/hippocamp-memory/SKILL.md`: installable skill that tells agents how to use Hippocamp memory.
 - `assets/github-actions/hippocamp-dream.yml`: scheduled workflow template for Lagoon repos that opens one Dream PR per project.
+- `assets/railway/run-dream.sh`: short-lived hosted Dream runner that clones Lagoon and opens one Dream PR per project.
+- `Dockerfile.railway` and `railway.json`: optional Railway cron deployment for overnight Dream runs.
 - `assets/brand/hippocamp-mascot.png`: README mascot asset.
 
 ## Project Invariants
@@ -47,6 +49,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - Memory must not duplicate facts already tracked by GitHub commits, PRs, issues, reviews, or CI. Store references plus the missing rationale, preference, assumption, or follow-up context instead.
 - Dream compaction sends `current_state.md`, `open_threads.md`, and bounded cue-indexed event evidence for open-thread decisions. It must not dump full event logs, cue indexes, or raw GitHub-owned facts into the model prompt.
 - The Dream GitHub Actions workflow is a Lagoon repo template. It should remain schedule-only and create reviewable PRs rather than pushing directly to `main`.
+- The Railway Dream deployment is optional infrastructure. It must exit after each run, keep credentials in environment variables, and preserve the same reviewable-PR policy.
 
 ## Change Rules
 
