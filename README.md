@@ -181,6 +181,23 @@ npm run dream -- --project my-project --write
 
 The GitHub Actions template at `assets/github-actions/hippocamp-dream.yml` is meant to be copied into the private Lagoon memory repo as `.github/workflows/hippocamp-dream.yml`. It runs on a schedule only, scans projects over the wake-up threshold, and creates or updates one PR per project so each memory compaction is reviewable.
 
+### Railway
+
+Railway can run Dream overnight even when your computer is offline. The included cron service starts once per day at `03:17 UTC`, clones the private Lagoon repo, creates or updates one Dream PR per candidate project, and exits.
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/hippocamp)
+
+Required template variables:
+
+- `LAGOON_REPOSITORY`: private memory repo in `owner/repository` form
+- `GITHUB_TOKEN`: fine-grained GitHub token limited to that repo, with read/write access to Contents and Pull requests
+- `MANIFEST_BASE_URL`: Manifest/OpenAI-compatible base URL
+- `MANIFEST_API_KEY`: API key for Dream model requests
+
+Optional variables keep the CLI defaults: `HIPPOCAMP_DREAM_MODEL=auto`, `HIPPOCAMP_DREAM_THRESHOLD_CHARS=20000`, and `HIPPOCAMP_DREAM_TARGET_CHARS=15000`.
+
+Railway is an optional deployment target. Local MCP reads and writes do not use Railway or require these hosted credentials.
+
 ## Memory Rules
 
 - Keep memory concise.
@@ -217,6 +234,7 @@ npm run mcp
 npm run mcp:help
 npm run mcp:smoke
 npm run dream
+npm run dream:railway
 npm run install:codex
 npm run install:claude
 npm run upgrade:codex
