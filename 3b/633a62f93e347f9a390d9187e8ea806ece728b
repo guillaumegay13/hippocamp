@@ -1,0 +1,31 @@
+Dockerfile.railway
+  s_93bfbcb2a8df36::t_08b55701e5ff14 1-15
+assets/railway/run-dream.sh
+  s_93bfbcb2a8df36::t_08b55701e5ff14 1-137
+railway.json
+  s_93bfbcb2a8df36::t_08b55701e5ff14 1-12
+package.json
+  s_93bfbcb2a8df36::t_08b55701e5ff14 31
+README.md
+  s_93bfbcb2a8df36::t_08b55701e5ff14 182-196,233
+AGENTS.md
+  s_93bfbcb2a8df36::t_08b55701e5ff14 33-34,52
+package-lock.json
+  s_93bfbcb2a8df36::t_031a8ca907e878 17,328-330,419-421,424,443-445,568-570,580-582,631-633,844-846,849-850,987-989,993-994
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "3b633a62f93e347f9a390d9187e8ea806ece728b",
+  "prompts": {},
+  "sessions": {
+    "s_93bfbcb2a8df36": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6010-541c-7d61-8729-4dc9c1ebfa26",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
