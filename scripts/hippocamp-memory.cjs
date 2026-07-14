@@ -69,6 +69,36 @@ function findGitRootSync(startPath) {
   }
 }
 
+function findRepositoryRootSync(startPath) {
+  const gitRoot = findGitRootSync(startPath);
+
+  if (!gitRoot) {
+    return null;
+  }
+
+  const gitFile = path.join(gitRoot, ".git");
+
+  if (!fsSync.statSync(gitFile).isFile()) {
+    return gitRoot;
+  }
+
+  const match = fsSync.readFileSync(gitFile, "utf8").trim().match(/^gitdir:\s*(.+)$/i);
+
+  if (!match) {
+    return gitRoot;
+  }
+
+  const gitDir = path.resolve(gitRoot, match[1]);
+  const commonDirFile = path.join(gitDir, "commondir");
+
+  if (!fsSync.existsSync(commonDirFile)) {
+    return gitRoot;
+  }
+
+  const commonDir = path.resolve(gitDir, fsSync.readFileSync(commonDirFile, "utf8").trim());
+  return path.basename(commonDir) === ".git" ? path.dirname(commonDir) : gitRoot;
+}
+
 function slugifyProjectName(value) {
   const slug = value
     .toLowerCase()
@@ -80,8 +110,8 @@ function slugifyProjectName(value) {
 
 function getProjectSlug(projectRoot) {
   const resolvedProjectRoot = getProjectRoot(projectRoot);
-  const gitRoot = findGitRootSync(resolvedProjectRoot);
-  return slugifyProjectName(path.basename(gitRoot || resolvedProjectRoot));
+  const repositoryRoot = findRepositoryRootSync(resolvedProjectRoot);
+  return slugifyProjectName(path.basename(repositoryRoot || resolvedProjectRoot));
 }
 
 function getScopeRoot(scope, projectRoot) {
