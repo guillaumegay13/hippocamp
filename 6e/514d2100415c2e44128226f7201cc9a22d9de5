@@ -1,0 +1,23 @@
+.github/workflows/ci.yml
+  s_93bfbcb2a8df36::t_4a315e74d57b5c 1-24
+.github/workflows/publish.yml
+  s_93bfbcb2a8df36::t_4a315e74d57b5c 1-27
+README.md
+  s_93bfbcb2a8df36::t_4a315e74d57b5c 224-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "6e514d2100415c2e44128226f7201cc9a22d9de5",
+  "prompts": {},
+  "sessions": {
+    "s_93bfbcb2a8df36": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6010-541c-7d61-8729-4dc9c1ebfa26",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
