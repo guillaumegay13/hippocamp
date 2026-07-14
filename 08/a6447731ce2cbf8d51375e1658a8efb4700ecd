@@ -1,0 +1,21 @@
+scripts/hippocamp-memory.cjs
+  s_93bfbcb2a8df36::t_a8558637ce6283 72-101,113-114
+README.md
+  s_93bfbcb2a8df36::t_a8558637ce6283 230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "08a6447731ce2cbf8d51375e1658a8efb4700ecd",
+  "prompts": {},
+  "sessions": {
+    "s_93bfbcb2a8df36": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6010-541c-7d61-8729-4dc9c1ebfa26",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
