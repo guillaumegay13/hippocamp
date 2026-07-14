@@ -185,6 +185,8 @@ The GitHub Actions template at `assets/github-actions/hippocamp-dream.yml` is me
 
 Railway can run Dream overnight even when your computer is offline. The included cron service starts once per day at `03:17 UTC`, clones the private Lagoon repo, creates or updates one Dream PR per candidate project, and exits.
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/hippocamp)
+
 Required template variables:
 
 - `LAGOON_REPOSITORY`: private memory repo in `owner/repository` form
