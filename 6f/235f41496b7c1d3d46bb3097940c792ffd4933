@@ -1,0 +1,19 @@
+railway.json
+  s_93bfbcb2a8df36::t_581e3219fa886f 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "6f235f41496b7c1d3d46bb3097940c792ffd4933",
+  "prompts": {},
+  "sessions": {
+    "s_93bfbcb2a8df36": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6010-541c-7d61-8729-4dc9c1ebfa26",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
