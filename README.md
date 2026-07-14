@@ -221,6 +221,18 @@ npm run upgrade:codex
 npm run upgrade:claude
 ```
 
+## Releases
+
+Pull requests and pushes to `main` run syntax and MCP smoke checks in GitHub Actions.
+
+To publish a package version:
+
+1. Update the version in `package.json` and `package-lock.json`, then merge it to `main`.
+2. Publish a GitHub Release whose tag is `v<version>`.
+3. The `Publish Package` workflow verifies the tag, runs the MCP checks, and publishes to npm through trusted publishing.
+
+The npm package must trust the GitHub Actions workflow `publish.yml` in `guillaumegay13/hippocamp`. This uses short-lived OIDC credentials instead of an npm token.
+
 ## Configuration
 
 Environment variables are optional for local use:
