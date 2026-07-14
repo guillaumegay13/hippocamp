@@ -6,6 +6,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .DS_Store
+.context/
+.worktrees/
 .env
 .env.local
 .env.development.local

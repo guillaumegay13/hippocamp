@@ -1,5 +1,7 @@
 # Hippocamp
 
+[![CI](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml/badge.svg)](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml)
+
 <p align="center">
   <img src="./assets/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
 </p>
