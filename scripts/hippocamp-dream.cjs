@@ -441,7 +441,19 @@ function parseDreamJson(content) {
   const trimmed = content.trim();
   const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   const jsonText = match ? match[1].trim() : trimmed;
-  const parsed = JSON.parse(jsonText);
+  let parsed;
+
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (error) {
+    const object = jsonText.match(/\{[\s\S]*\}/)?.[0];
+
+    if (!object) {
+      throw error;
+    }
+
+    parsed = JSON.parse(object);
+  }
 
   if (typeof parsed.current_state_md !== "string" || typeof parsed.open_threads_md !== "string") {
     throw new Error("Dream response must include current_state_md and open_threads_md strings.");
