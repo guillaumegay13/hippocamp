@@ -10,6 +10,12 @@ const DEFAULT_THRESHOLD_CHARS = 20000;
 const DEFAULT_TARGET_CHARS = 15000;
 const DEFAULT_MODEL = "auto";
 const TARGET_BYTE_TOLERANCE = 0.02;
+const DREAM_MODEL_MAX_ATTEMPTS = 3;
+const DREAM_MODEL_RETRY_DELAY_MS = 2000;
+// Manifest returns HTTP 200 with a "[🦚 Manifest <code>] ..." banner as the
+// assistant message when the router cannot fulfil a request (model unavailable,
+// overloaded, throttled). It is not JSON, so treat it as a retryable failure.
+const MANIFEST_BANNER_PATTERN = /^\s*\[\s*🦚/u;
 
 function numberFromEnv(name, fallback) {
   const value = process.env[name];
@@ -398,6 +404,14 @@ function getResponseText(payload) {
   return "";
 }
 
+function isManifestBanner(content) {
+  return MANIFEST_BANNER_PATTERN.test(content);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function callDreamModel({ apiKey, baseUrl, messages, model }) {
   if (!apiKey) {
     throw new Error("Missing API key. Set MANIFEST_API_KEY or pass --api-key.");
@@ -407,34 +421,54 @@ async function callDreamModel({ apiKey, baseUrl, messages, model }) {
     throw new Error("This command requires Node.js fetch support.");
   }
 
-  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/responses`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      input: createResponsesInput(messages),
-      model,
-      store: false,
-      text: createDreamTextFormat(),
-    }),
-  });
+  let lastBanner = null;
 
-  const text = await response.text();
+  for (let attempt = 1; attempt <= DREAM_MODEL_MAX_ATTEMPTS; attempt += 1) {
+    const response = await fetch(`${normalizeBaseUrl(baseUrl)}/responses`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        input: createResponsesInput(messages),
+        model,
+        store: false,
+        text: createDreamTextFormat(),
+      }),
+    });
 
-  if (!response.ok) {
-    throw new Error(`Dream model request failed (${response.status}): ${text}`);
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`Dream model request failed (${response.status}): ${text}`);
+    }
+
+    const payload = JSON.parse(text);
+    const content = getResponseText(payload);
+
+    if (typeof content !== "string" || !content.trim()) {
+      throw new Error("Dream model response did not include output text.");
+    }
+
+    if (isManifestBanner(content)) {
+      lastBanner = content.trim();
+
+      if (attempt < DREAM_MODEL_MAX_ATTEMPTS) {
+        await delay(DREAM_MODEL_RETRY_DELAY_MS * attempt);
+        continue;
+      }
+
+      throw new Error(
+        `Dream model returned a Manifest router banner instead of JSON after ${DREAM_MODEL_MAX_ATTEMPTS} attempts: ${lastBanner}`,
+      );
+    }
+
+    return content;
   }
 
-  const payload = JSON.parse(text);
-  const content = getResponseText(payload);
-
-  if (typeof content !== "string" || !content.trim()) {
-    throw new Error("Dream model response did not include output text.");
-  }
-
-  return content;
+  // Unreachable: the loop either returns content or throws on the final attempt.
+  throw new Error(`Dream model returned a Manifest router banner instead of JSON: ${lastBanner}`);
 }
 
 function parseDreamJson(content) {
@@ -632,7 +666,15 @@ async function main() {
   printText(results);
 }
 
-main().catch((error) => {
-  console.error("Hippocamp Dream failed:", error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("Hippocamp Dream failed:", error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  callDreamModel,
+  isManifestBanner,
+  parseDreamJson,
+};
