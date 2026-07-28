@@ -24,18 +24,21 @@
     "hippocamp-dream": "scripts/hippocamp-dream.cjs",
     "hippocamp-mcp": "scripts/hippocamp-mcp.cjs",
     "hippocamp-install-codex": "scripts/install-codex.cjs",
-    "hippocamp-install-claude": "scripts/install-claude.cjs"
+    "hippocamp-install-claude": "scripts/install-claude.cjs",
+    "hippocamp-install-grok": "scripts/install-grok.cjs"
   },
   "scripts": {
     "dream": "node scripts/hippocamp-dream.cjs",
     "dream:railway": "bash assets/railway/run-dream.sh",
     "install:claude": "node scripts/install-claude.cjs",
     "install:codex": "node scripts/install-codex.cjs",
+    "install:grok": "node scripts/install-grok.cjs",
     "mcp": "node scripts/hippocamp-mcp.cjs",
     "mcp:help": "node scripts/hippocamp-mcp.cjs --help",
     "mcp:smoke": "node scripts/hippocamp-mcp.cjs --smoke",
     "upgrade:claude": "node scripts/install-claude.cjs",
-    "upgrade:codex": "node scripts/install-codex.cjs"
+    "upgrade:codex": "node scripts/install-codex.cjs",
+    "upgrade:grok": "node scripts/install-grok.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

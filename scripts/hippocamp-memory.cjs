@@ -309,6 +309,10 @@ function detectAgentFromEnvironment() {
     return "cursor";
   }
 
+  if (process.env.GROK_HOME || process.env.GROK_BUILD || process.env.XAI_GROK) {
+    return "grok";
+  }
+
   return null;
 }
 

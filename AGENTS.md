@@ -22,12 +22,13 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 
 ## Repository Map
 
-- `scripts/hippocamp.cjs`: small CLI wrapper for `dream`, `mcp`, `install-codex`, and `install-claude`.
+- `scripts/hippocamp.cjs`: small CLI wrapper for `dream`, `mcp`, `install-codex`, `install-claude`, and `install-grok`.
 - `scripts/hippocamp-dream.cjs`: offline Dream CLI for scheduled compaction of curated project wake-up files.
 - `scripts/hippocamp-memory.cjs`: local filesystem-backed Hippocamp memory helpers for MCP use.
 - `scripts/hippocamp-mcp.cjs`: local stdio MCP server for Hippocamp memory tools.
 - `scripts/install-claude.cjs`: one-step installer for Claude Code MCP setup and user-level `CLAUDE.md` guidance.
 - `scripts/install-codex.cjs`: one-step installer for the Hippocamp skill and MCP server in Codex.
+- `scripts/install-grok.cjs`: one-step installer for the Hippocamp skill, Grok home rules, and MCP server in Grok Build.
 - `skills/hippocamp-memory/SKILL.md`: installable skill that tells agents how to use Hippocamp memory.
 - `assets/github-actions/hippocamp-dream.yml`: scheduled workflow template for Lagoon repos that opens one Dream PR per project.
 - `assets/railway/run-dream.sh`: short-lived hosted Dream runner that clones Lagoon and opens one Dream PR per project.
