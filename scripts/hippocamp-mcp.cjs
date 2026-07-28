@@ -25,6 +25,8 @@ Runs a local stdio MCP server for Hippocamp memory.
 Environment:
   HIPPOCAMP_GLOBAL_ROOT   Local path to the Lagoon clone. Default: ~/.lagoon
   HIPPOCAMP_PROJECT_ROOT  Project root used to infer the current project slug. Default: current working directory
+  HIPPOCAMP_AGENT         Optional agent label for event provenance. Usually set by installers.
+  HIPPOCAMP_SESSION       Optional session id. Defaults to a process-lifetime mcp-XXXXXXXX id.
 
 Tools:
   wake_up
@@ -105,7 +107,7 @@ async function main() {
     "append_event",
     {
       description:
-        "Append a dated event entry under events/YYYY-MM-DD.md and update the sibling cue index. Store references to GitHub artifacts instead of copying their content.",
+        "Append a dated event entry under events/YYYY-MM-DD.md and update the sibling cue index. Automatically stamps Agent/Session provenance when available. Store references to GitHub artifacts instead of copying their content.",
       inputSchema: {
         scope: z.enum(["global", "project"]).default("project"),
         title: z.string().optional(),
@@ -115,8 +117,20 @@ async function main() {
         projectRoot: z.string().optional(),
       },
     },
-    async ({ scope, title, cues, content, sync, projectRoot }) =>
-      toTextResult(await memory.appendEvent({ scope, title, cues, content, projectRoot, sync })),
+    async ({ scope, title, cues, content, sync, projectRoot }) => {
+      const clientVersion = server.server?.getClientVersion?.();
+      return toTextResult(
+        await memory.appendEvent({
+          scope,
+          title,
+          cues,
+          content,
+          projectRoot,
+          sync,
+          clientName: clientVersion?.name,
+        }),
+      );
+    },
   );
 
   server.registerTool(
