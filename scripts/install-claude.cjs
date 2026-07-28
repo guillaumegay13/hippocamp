@@ -213,6 +213,8 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
     serverName,
     "--env",
     `HIPPOCAMP_GLOBAL_ROOT=${globalRoot}`,
+    "--env",
+    "HIPPOCAMP_AGENT=claude",
     "--",
     process.execPath,
     scriptPath,

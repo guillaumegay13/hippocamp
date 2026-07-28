@@ -1,3 +1,4 @@
+const crypto = require("node:crypto");
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const { execFile } = require("node:child_process");
@@ -22,6 +23,23 @@ const DEFAULT_PROJECT_FILES = [
 
 const EVENT_INDEX_VERSION = 1;
 const EVENT_SEARCH_THRESHOLD = 20;
+const PROCESS_SESSION_ID = `mcp-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
+
+const AGENT_NAME_ALIASES = {
+  claude: "claude",
+  "claude-code": "claude",
+  "claude code": "claude",
+  anthropic: "claude",
+  codex: "codex",
+  "openai-codex": "codex",
+  cursor: "cursor",
+  "cursor-ide": "cursor",
+  windsurf: "windsurf",
+  grok: "grok",
+  "grok-build": "grok",
+  vscode: "vscode",
+  "visual-studio-code": "vscode",
+};
 
 function expandHomePath(value) {
   if (!value) {
@@ -247,6 +265,120 @@ function formatCuesSection(cues) {
   }
 
   return ["Cues:", ...normalizedCues.map((cue) => `- ${cue}`)].join("\n");
+}
+
+function normalizeAgentName(value) {
+  const raw = String(value || "").trim().toLowerCase();
+
+  if (!raw) {
+    return null;
+  }
+
+  const withoutVersion = raw.replace(/\/.*$/, "").replace(/\s+v?\d+(\.\d+)*$/i, "").trim();
+  const compact = withoutVersion.replace(/_/g, "-");
+
+  if (AGENT_NAME_ALIASES[compact]) {
+    return AGENT_NAME_ALIASES[compact];
+  }
+
+  if (AGENT_NAME_ALIASES[withoutVersion]) {
+    return AGENT_NAME_ALIASES[withoutVersion];
+  }
+
+  const firstToken = compact.split(/[\s/]+/).filter(Boolean)[0];
+
+  if (firstToken && AGENT_NAME_ALIASES[firstToken]) {
+    return AGENT_NAME_ALIASES[firstToken];
+  }
+
+  const slug = normalizeCue(compact);
+
+  return slug || null;
+}
+
+function detectAgentFromEnvironment() {
+  if (process.env.CLAUDE_CODE || process.env.CLAUDECODE || process.env.CLAUDE_CODE_ENTRYPOINT) {
+    return "claude";
+  }
+
+  if (process.env.CODEX_HOME || process.env.CODEX_CI || process.env.OPENAI_CODEX) {
+    return "codex";
+  }
+
+  if (process.env.CURSOR_TRACE_ID || process.env.CURSOR_AGENT || process.env.CURSOR_SESSION_ID) {
+    return "cursor";
+  }
+
+  return null;
+}
+
+function resolveWriteAttribution({ agent, session, clientName } = {}) {
+  const resolvedAgent =
+    normalizeAgentName(agent) ||
+    normalizeAgentName(process.env.HIPPOCAMP_AGENT) ||
+    normalizeAgentName(clientName) ||
+    detectAgentFromEnvironment();
+
+  const envSession = String(process.env.HIPPOCAMP_SESSION || "").trim();
+  const resolvedSession = String(session || "").trim() || envSession || PROCESS_SESSION_ID;
+
+  return {
+    agent: resolvedAgent || null,
+    session: resolvedSession || null,
+  };
+}
+
+function formatAttributionSection({ agent, session } = {}) {
+  const lines = [];
+
+  if (agent) {
+    lines.push(`Agent: ${agent}`);
+  }
+
+  if (session) {
+    lines.push(`Session: ${session}`);
+  }
+
+  return lines.join("\n");
+}
+
+function extractAttributionFromEventLines(lines) {
+  let agent = null;
+  let session = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      if (agent || session) {
+        break;
+      }
+
+      continue;
+    }
+
+    const agentMatch = trimmed.match(/^Agent:\s*(.+)$/i);
+
+    if (agentMatch) {
+      agent = normalizeAgentName(agentMatch[1]) || agentMatch[1].trim();
+      continue;
+    }
+
+    const sessionMatch = trimmed.match(/^Session:\s*(.+)$/i);
+
+    if (sessionMatch) {
+      session = sessionMatch[1].trim();
+      continue;
+    }
+
+    // Provenance lines sit at the top of the body; stop at cues or free text.
+    break;
+  }
+
+  return {
+    agent: agent || null,
+    session: session || null,
+  };
 }
 
 async function ensureParentDirectory(filePath) {
@@ -536,10 +668,13 @@ function parseEventBlocks(content) {
     const blockLines = lines.slice(startIndex, endIndex);
     const heading = parseEventHeading(blockLines[0]);
     const bodyLines = blockLines.slice(1);
+    const attribution = extractAttributionFromEventLines(bodyLines);
 
     return {
       id: heading.id,
       heading: heading.heading,
+      agent: attribution.agent,
+      session: attribution.session,
       cues: extractCuesFromEventLines(bodyLines),
       content: blockLines.join("\n").trim(),
       body: bodyLines.join("\n").trim(),
@@ -552,11 +687,23 @@ function buildEventIndex(markdownContent, markdownPath) {
   return {
     version: EVENT_INDEX_VERSION,
     path: path.posix.basename(markdownPath),
-    events: parseEventBlocks(markdownContent).map((event) => ({
-      id: event.id,
-      heading: event.heading,
-      cues: event.cues,
-    })),
+    events: parseEventBlocks(markdownContent).map((event) => {
+      const entry = {
+        id: event.id,
+        heading: event.heading,
+        cues: event.cues,
+      };
+
+      if (event.agent) {
+        entry.agent = event.agent;
+      }
+
+      if (event.session) {
+        entry.session = event.session;
+      }
+
+      return entry;
+    }),
   };
 }
 
@@ -774,13 +921,19 @@ async function appendEvent({
   title,
   date = new Date().toISOString().slice(0, 10),
   timestamp = new Date().toISOString(),
+  agent,
+  session,
+  clientName,
 }) {
   const body = requireNonEmptyString(content, "content");
+  const attribution = resolveWriteAttribution({ agent, session, clientName });
   const normalizedCues = normalizeCueList(cues);
-  const eventBody =
+  const cuedBody =
     normalizedCues.length && !hasCuesSection(body)
       ? `${formatCuesSection(normalizedCues)}\n\n${body.trim()}`
       : body.trim();
+  const attributionSection = formatAttributionSection(attribution);
+  const eventBody = attributionSection ? `${attributionSection}\n\n${cuedBody}` : cuedBody;
   const heading = title ? `## ${timestamp} — ${title.trim()}` : `## ${timestamp}`;
   const eventBlock = `${heading}\n\n${eventBody}\n`;
   const relativePath = `events/${date}.md`;
@@ -807,13 +960,17 @@ async function appendEvent({
         reason: "sync_disabled",
       };
 
+  const parsed = parseEventBlocks(eventBlock)[0];
+
   return {
     scope,
     root: target.root,
     path: target.path,
     timestamp,
     title: title?.trim() || null,
-    cues: parseEventBlocks(eventBlock)[0]?.cues || [],
+    agent: parsed?.agent || attribution.agent,
+    session: parsed?.session || attribution.session,
+    cues: parsed?.cues || [],
     indexPath,
     sync: syncResult,
   };
@@ -1137,4 +1294,6 @@ module.exports = {
   syncMemory,
   getDefaultSyncPaths,
   wakeUp,
+  resolveWriteAttribution,
+  PROCESS_SESSION_ID,
 };

@@ -208,9 +208,14 @@ Railway is an optional deployment target. Local MCP reads and writes do not use 
 - Use project scope for project-specific state.
 - Use global scope only for durable context that should follow you across projects.
 
+Events are stamped automatically with agent/session provenance when available (`Agent:` / `Session:` lines). Installers set `HIPPOCAMP_AGENT`; session defaults to a process-lifetime id. No manual config is required.
+
 Example event content:
 
 ```md
+Agent: claude
+Session: mcp-a1b2c3d4
+
 Cues:
 - local-first
 - token-free
