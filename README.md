@@ -47,6 +47,13 @@ npm install
 npm run install:claude
 ```
 
+For Grok Build:
+
+```bash
+npm install
+npm run install:grok
+```
+
 After publishing, the intended one-line install shape is:
 
 ```bash
@@ -58,6 +65,7 @@ Upgrade uses the same install path, so agents can refresh themselves without a s
 ```bash
 npx hippocamp@latest upgrade-codex
 npx hippocamp@latest upgrade-claude
+npx hippocamp@latest upgrade-grok
 ```
 
 From a source checkout:
@@ -67,17 +75,19 @@ git pull --ff-only
 npm install
 npm run upgrade:codex
 npm run upgrade:claude
+npm run upgrade:grok
 ```
 
-Both installers default to `~/.lagoon` as the memory repo. You can override it:
+Installers default to `~/.lagoon` as the memory repo. You can override it:
 
 ```bash
 npm run install:codex -- --global-root /absolute/path/to/lagoon
 npm run install:claude -- --global-root /absolute/path/to/lagoon
+npm run install:grok -- --global-root /absolute/path/to/lagoon
 ```
 
-The Codex installer refreshes `~/.codex/AGENTS.md`. The Claude installer refreshes `~/.claude/CLAUDE.md`.
-Both managed instruction blocks tell the agent to call `wake_up` at the start of new top-level coding tasks before repo exploration or edits.
+The Codex installer refreshes `~/.codex/AGENTS.md`. The Claude installer refreshes `~/.claude/CLAUDE.md`. The Grok installer refreshes `~/.grok/rules/hippocamp.md` and registers the MCP server with `HIPPOCAMP_AGENT=grok`.
+Managed instruction blocks tell the agent to call `wake_up` at the start of new top-level coding tasks before repo exploration or edits.
 
 ## Lagoon Repo
 
@@ -242,8 +252,10 @@ npm run dream
 npm run dream:railway
 npm run install:codex
 npm run install:claude
+npm run install:grok
 npm run upgrade:codex
 npm run upgrade:claude
+npm run upgrade:grok
 ```
 
 ## Releases
