@@ -16,6 +16,10 @@ const DREAM_MODEL_RETRY_DELAY_MS = 2000;
 // assistant message when the router cannot fulfil a request (model unavailable,
 // overloaded, throttled). It is not JSON, so treat it as a retryable failure.
 const MANIFEST_BANNER_PATTERN = /^\s*\[\s*🦚/u;
+// Manifest surfaces upstream throttling and provider outages as HTTP errors.
+// A 429 is returned both for exhausted subscription quota and for a route that
+// is briefly cooling down, so retry these rather than failing the whole run.
+const RETRYABLE_HTTP_STATUSES = new Set([408, 429]);
 
 function numberFromEnv(name, fallback) {
   const value = process.env[name];
@@ -408,6 +412,10 @@ function isManifestBanner(content) {
   return MANIFEST_BANNER_PATTERN.test(content);
 }
 
+function isRetryableStatus(status) {
+  return RETRYABLE_HTTP_STATUSES.has(status) || status >= 500;
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -422,25 +430,42 @@ async function callDreamModel({ apiKey, baseUrl, messages, model }) {
   }
 
   let lastBanner = null;
+  const endpoint = `${normalizeBaseUrl(baseUrl)}/responses`;
 
   for (let attempt = 1; attempt <= DREAM_MODEL_MAX_ATTEMPTS; attempt += 1) {
-    const response = await fetch(`${normalizeBaseUrl(baseUrl)}/responses`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        input: createResponsesInput(messages),
-        model,
-        store: false,
-        text: createDreamTextFormat(),
-      }),
-    });
+    let response;
+    let text;
 
-    const text = await response.text();
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          input: createResponsesInput(messages),
+          model,
+          store: false,
+          text: createDreamTextFormat(),
+        }),
+      });
+      text = await response.text();
+    } catch (error) {
+      if (attempt < DREAM_MODEL_MAX_ATTEMPTS) {
+        await delay(DREAM_MODEL_RETRY_DELAY_MS * attempt);
+        continue;
+      }
+
+      throw new Error(`Dream model request failed after ${DREAM_MODEL_MAX_ATTEMPTS} attempts: ${error.message}`);
+    }
 
     if (!response.ok) {
+      if (isRetryableStatus(response.status) && attempt < DREAM_MODEL_MAX_ATTEMPTS) {
+        await delay(DREAM_MODEL_RETRY_DELAY_MS * attempt);
+        continue;
+      }
+
       throw new Error(`Dream model request failed (${response.status}): ${text}`);
     }
 
@@ -676,5 +701,6 @@ if (require.main === module) {
 module.exports = {
   callDreamModel,
   isManifestBanner,
+  isRetryableStatus,
   parseDreamJson,
 };
