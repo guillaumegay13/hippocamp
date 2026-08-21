@@ -1,0 +1,21 @@
+assets/railway/run-dream.sh
+  s_02d688ca560f08::t_0ca0673f39d542 148
+scripts/hippocamp-dream.cjs
+  s_02d688ca560f08::t_beb94c97b42419 435-458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "60d6c06c37f1a7b73f2d13003449bc258684d5d2",
+  "prompts": {},
+  "sessions": {
+    "s_02d688ca560f08": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdcd3a2e0ffepRZk4nllbRWrdD",
+        "model": "auto"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
