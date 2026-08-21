@@ -430,12 +430,14 @@ async function callDreamModel({ apiKey, baseUrl, messages, model }) {
   }
 
   let lastBanner = null;
+  const endpoint = `${normalizeBaseUrl(baseUrl)}/responses`;
 
   for (let attempt = 1; attempt <= DREAM_MODEL_MAX_ATTEMPTS; attempt += 1) {
     let response;
+    let text;
 
     try {
-      response = await fetch(`${normalizeBaseUrl(baseUrl)}/responses`, {
+      response = await fetch(endpoint, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -448,6 +450,7 @@ async function callDreamModel({ apiKey, baseUrl, messages, model }) {
           text: createDreamTextFormat(),
         }),
       });
+      text = await response.text();
     } catch (error) {
       if (attempt < DREAM_MODEL_MAX_ATTEMPTS) {
         await delay(DREAM_MODEL_RETRY_DELAY_MS * attempt);
@@ -456,8 +459,6 @@ async function callDreamModel({ apiKey, baseUrl, messages, model }) {
 
       throw new Error(`Dream model request failed after ${DREAM_MODEL_MAX_ATTEMPTS} attempts: ${error.message}`);
     }
-
-    const text = await response.text();
 
     if (!response.ok) {
       if (isRetryableStatus(response.status) && attempt < DREAM_MODEL_MAX_ATTEMPTS) {
