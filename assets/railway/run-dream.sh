@@ -62,6 +62,8 @@ process.stdout.write(`${projects.join("\n")}${projects.length ? "\n" : ""}`);
 console.error(`Dream candidates: ${projects.length ? projects.join(", ") : "none"}`);
 NODE
 
+failed=()
+
 while IFS= read -r project; do
   [[ -n "$project" ]] || continue
 
@@ -72,13 +74,18 @@ while IFS= read -r project; do
   git fetch origin main
   git checkout -B "$branch" origin/main
 
-  node "$runner_root/scripts/hippocamp-dream.cjs" \
+  if ! node "$runner_root/scripts/hippocamp-dream.cjs" \
     --project "$project" \
     --write \
     --json \
     --threshold-chars "$HIPPOCAMP_DREAM_THRESHOLD_CHARS" \
     --target-chars "$HIPPOCAMP_DREAM_TARGET_CHARS" \
-    > "$result_file"
+    > "$result_file"; then
+    echo "Dream failed for ${project}; continuing with remaining projects." >&2
+    failed+=("$project")
+    git checkout -- .
+    continue
+  fi
 
   if git diff --quiet -- "projects/${project}/current_state.md" "projects/${project}/open_threads.md"; then
     echo "No Dream diff for ${project}"
@@ -135,3 +142,8 @@ NODE
     gh pr create --repo "$LAGOON_REPOSITORY" --title "$title" --body-file "$body_file" --head "$branch" --base main
   fi
 done < "$work_root/projects.txt"
+
+if ((${#failed[@]})); then
+  echo "Dream failed for: ${failed[*]}" >&2
+  exit 1
+fi
