@@ -1,0 +1,19 @@
+scripts/hippocamp-dream.cjs
+  s_02d688ca560f08::t_1aac66a7f9187c 433,437,440,453
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "a8e16b036003cc941e5a3105057b43a719e94acb",
+  "prompts": {},
+  "sessions": {
+    "s_02d688ca560f08": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdcd3a2e0ffepRZk4nllbRWrdD",
+        "model": "auto"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
