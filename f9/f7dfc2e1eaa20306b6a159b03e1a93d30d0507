@@ -1,0 +1,20 @@
+assets/railway/run-dream.sh
+  s_b544610fa3e64f::t_e11de934afc7f6 142
+  s_b544610fa3e64f::t_06ae7631e27146 140-141,143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "f9f7dfc2e1eaa20306b6a159b03e1a93d30d0507",
+  "prompts": {},
+  "sessions": {
+    "s_b544610fa3e64f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0514e-e6de-7ea1-a9d7-e74f9067f0da",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
