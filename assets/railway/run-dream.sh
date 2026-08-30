@@ -137,7 +137,10 @@ NODE
   title="Dream compact ${project} memory"
 
   if [[ -n "$existing" ]]; then
-    gh pr edit "$existing" --repo "$LAGOON_REPOSITORY" --title "$title" --body-file "$body_file"
+    gh api --method PATCH "repos/${LAGOON_REPOSITORY}/pulls/${existing}" \
+      --raw-field title="$title" \
+      --field "body=@${body_file}" \
+      >/dev/null
   else
     gh pr create --repo "$LAGOON_REPOSITORY" --title "$title" --body-file "$body_file" --head "$branch" --base main
   fi
