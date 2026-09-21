@@ -107,6 +107,25 @@ test("search uses indexed events and returns coherent evidence", async (t) => {
   assert.match(indexed.results[0].snippet, /Use indexed search only\./);
   assert.doesNotMatch(indexed.results[0].snippet, /\.\.\./);
 
+  await memory.appendEvent({
+    content: `Decision:\n${"x".repeat(1300)}`,
+    cues: ["oversized-metadata"],
+    date: "2026-09-21",
+    projectRoot,
+    scope: "project",
+    sync: false,
+    timestamp: "2026-09-21T11:00:00.000Z",
+    title: "Large metadata-only match",
+  });
+
+  const oversized = await memory.searchMemory({
+    projectRoot,
+    query: "oversized metadata",
+    scope: "project",
+  });
+
+  assert.deepEqual(oversized.results, []);
+
   const projectMemoryRoot = path.join(lagoonRoot, "projects", "search-project");
   await fs.writeFile(
     path.join(projectMemoryRoot, "current_state.md"),

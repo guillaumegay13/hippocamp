@@ -863,6 +863,7 @@ function createSearchExcerpt(content, queryInfo) {
     .split(/\n\s*\n+/)
     .map((block) => block.trim())
     .filter(Boolean)
+    .filter((block) => !/^(?:Agent:|Session:|Cues:)\s*/i.test(block))
     .map((block) => ({
       block,
       score: scoreSearchValues(queryInfo, [block]),
