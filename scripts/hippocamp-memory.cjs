@@ -22,7 +22,9 @@ const DEFAULT_PROJECT_FILES = [
 ];
 
 const EVENT_INDEX_VERSION = 1;
-const EVENT_SEARCH_THRESHOLD = 20;
+const EVENT_SEARCH_THRESHOLD = 50;
+const MARKDOWN_SEARCH_THRESHOLD = 20;
+const SEARCH_EXCERPT_MAX_CHARS = 1200;
 const PROCESS_SESSION_ID = `mcp-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
 const AGENT_NAME_ALIASES = {
@@ -846,31 +848,35 @@ function scoreSearchValues(queryInfo, values) {
   return Math.max(phraseScore, exactScore, fuzzyScore);
 }
 
-function createFallbackSnippet(content) {
-  const compact = content.replace(/\s+/g, " ").trim();
-  return compact.length > 220 ? `${compact.slice(0, 217)}...` : compact;
-}
+function createSearchExcerpt(content, queryInfo) {
+  const trimmed = content.trim();
 
-function createSearchSnippet(content, query) {
-  const haystack = content.toLowerCase();
-  const needle = query.toLowerCase();
-  const index = haystack.indexOf(needle);
-
-  if (index < 0) {
+  if (!trimmed) {
     return null;
   }
 
-  const radius = 80;
-  const start = Math.max(0, index - radius);
-  const end = Math.min(content.length, index + query.length + radius);
-  const prefix = start > 0 ? "..." : "";
-  const suffix = end < content.length ? "..." : "";
-  const snippet = content
-    .slice(start, end)
-    .replace(/\s+/g, " ")
-    .trim();
+  if (trimmed.length <= SEARCH_EXCERPT_MAX_CHARS) {
+    return trimmed;
+  }
 
-  return `${prefix}${snippet}${suffix}`;
+  const blocks = trimmed
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .filter((block) => !/^(?:Agent:|Session:|Cues:)\s*/i.test(block))
+    .map((block) => ({
+      block,
+      score: scoreSearchValues(queryInfo, [block]),
+    }))
+    .filter((item) => item.block.length <= SEARCH_EXCERPT_MAX_CHARS)
+    .sort((left, right) => right.score - left.score);
+  const matchedBlock = blocks.find((item) => item.score >= EVENT_SEARCH_THRESHOLD / 100);
+
+  if (matchedBlock) {
+    return matchedBlock.block;
+  }
+
+  return null;
 }
 
 async function readMemoryFile({ scope, path: relativePath, projectRoot }) {
@@ -1039,7 +1045,6 @@ async function getEventBlockById(markdownPath, eventId) {
 
 async function searchEventIndexes({ scope, root, queryInfo }) {
   const eventFiles = await listEventFiles(root);
-  const indexedMarkdownFiles = new Set();
   const candidates = [];
 
   for (const indexName of eventFiles.indexes) {
@@ -1057,8 +1062,6 @@ async function searchEventIndexes({ scope, root, queryInfo }) {
     if (!index || !Array.isArray(index.events)) {
       continue;
     }
-
-    indexedMarkdownFiles.add(markdownName);
 
     for (const event of index.events) {
       const eventScore = scoreEventEntry(queryInfo, event);
@@ -1080,38 +1083,6 @@ async function searchEventIndexes({ scope, root, queryInfo }) {
     }
   }
 
-  for (const markdownName of eventFiles.markdownFiles) {
-    if (indexedMarkdownFiles.has(markdownName)) {
-      continue;
-    }
-
-    const markdownPath = path.join(eventFiles.eventsDir, markdownName);
-    const content = await readFileIfExists(markdownPath);
-
-    if (content === null) {
-      continue;
-    }
-
-    for (const event of parseEventBlocks(content)) {
-      const eventScore = scoreEventEntry(queryInfo, event);
-
-      if (eventScore.score < EVENT_SEARCH_THRESHOLD) {
-        continue;
-      }
-
-      candidates.push({
-        scope,
-        path: `events/${markdownName}`,
-        markdownPath,
-        id: event.id,
-        heading: event.heading,
-        cues: event.cues,
-        score: Math.round(eventScore.score),
-        match: eventScore.match,
-      });
-    }
-  }
-
   const results = [];
   const sortedCandidates = candidates.sort((left, right) => right.score - left.score).slice(0, 60);
 
@@ -1119,6 +1090,12 @@ async function searchEventIndexes({ scope, root, queryInfo }) {
     const block = await getEventBlockById(candidate.markdownPath, candidate.id);
 
     if (!block) {
+      continue;
+    }
+
+    const snippet = createSearchExcerpt(block.body, queryInfo);
+
+    if (!snippet) {
       continue;
     }
 
@@ -1130,12 +1107,12 @@ async function searchEventIndexes({ scope, root, queryInfo }) {
       cues: candidate.cues,
       score: candidate.score,
       match: candidate.match,
-      snippet: createSearchSnippet(block.content, queryInfo.original) || createFallbackSnippet(block.body),
+      snippet,
     });
   }
 
   return {
-    scannedFiles: eventFiles.indexes.length + eventFiles.markdownFiles.length - indexedMarkdownFiles.size,
+    scannedFiles: eventFiles.indexes.length,
     results,
   };
 }
@@ -1162,7 +1139,13 @@ async function searchMarkdownFiles({ scope, root, queryInfo }) {
     const bodyScore = scoreSearchValues(queryInfo, [content]);
     const score = pathScore * 70 + bodyScore * 40;
 
-    if (score < EVENT_SEARCH_THRESHOLD) {
+    if (score < MARKDOWN_SEARCH_THRESHOLD) {
+      continue;
+    }
+
+    const snippet = createSearchExcerpt(content, queryInfo);
+
+    if (!snippet) {
       continue;
     }
 
@@ -1171,7 +1154,7 @@ async function searchMarkdownFiles({ scope, root, queryInfo }) {
       path: relativePath,
       score: Math.round(score),
       match: pathScore >= bodyScore ? "path" : "body",
-      snippet: createSearchSnippet(content, queryInfo.original) || createFallbackSnippet(content),
+      snippet,
     });
   }
 
@@ -1181,9 +1164,9 @@ async function searchMarkdownFiles({ scope, root, queryInfo }) {
   };
 }
 
-async function searchMemory({ query, scope = "both", projectRoot, maxResults = 10 }) {
+async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5 }) {
   const queryInfo = createQueryInfo(query);
-  const clampedMaxResults = Math.max(1, Math.min(Number(maxResults) || 10, 20));
+  const clampedMaxResults = Math.max(1, Math.min(Number(maxResults) || 5, 20));
   const scopes = scope === "both" ? ["global", "project"] : [scope];
   const results = [];
   let scannedFiles = 0;

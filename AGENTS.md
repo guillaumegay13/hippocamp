@@ -50,8 +50,9 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - Local MCP mode must not require `GITHUB_TOKEN`, GitHub App auth, or a cloud service.
 - Memory must not duplicate facts already tracked by GitHub commits, PRs, issues, reviews, or CI. Store references plus the missing rationale, preference, assumption, or follow-up context instead.
 - Dream compaction sends `current_state.md`, `open_threads.md`, and bounded cue-indexed event evidence for open-thread decisions. It must not dump full event logs, cue indexes, or raw GitHub-owned facts into the model prompt.
-- The Dream GitHub Actions workflow is a Lagoon repo template. It should remain schedule-only and create reviewable PRs rather than pushing directly to `main`.
-- The Railway Dream deployment is optional infrastructure. It must exit after each run, keep credentials in environment variables, and preserve the same reviewable-PR policy.
+- Dream must compact coherent Markdown snapshots and fail without writing when the snapshot cannot fit. It must not crop wake-up files.
+- The Dream GitHub Actions workflow is a Lagoon repo template. It should remain schedule-only and create PRs rather than pushing directly to `main`. Auto-merge is allowed only for repositories named `lagoon` after exact changed-file validation.
+- The Railway Dream deployment is optional infrastructure. It must exit after each run, keep credentials in environment variables, and preserve the same PR policy.
 
 ## Change Rules
 
@@ -66,14 +67,14 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 When changing code, use the smallest verification that proves the change:
 
 - Run `node --check scripts/*.cjs` for script syntax changes.
+- Run `npm test` for Dream compaction or memory search changes.
 - Run `npm run mcp:help` when changing MCP registration or commands.
 - Run `npm run mcp:smoke` when changing memory reads, root resolution, or wake-up behavior.
 - Run `npm run dream -- --help` when changing Dream CLI arguments.
-- There is no dedicated test suite yet, so do not claim test coverage that does not exist.
 
 ## Notes For Future Agents
 
 - The cloud/API version is intentionally deferred.
 - Do not reintroduce Next.js, GitHub API token auth, or GitHub App auth for the local MVP.
-- Keep Dream minimal: scheduled CLI compaction, current/open curated files plus bounded thread evidence, one PR per project.
+- Keep Dream minimal: scheduled coherent compaction, current/open curated files plus bounded thread evidence, one PR per project.
 - The local install story should stay: install MCP, point at Lagoon, rely on normal Git auth.

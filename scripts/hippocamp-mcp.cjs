@@ -155,7 +155,7 @@ async function main() {
     "search_memory",
     {
       description:
-        "Fuzzy-search memory files. Event search ranks indexed cues and headings first. Use this only when the wake-up files are insufficient, not as the default startup path.",
+        "Search task-specific memory. Event search uses cue indexes and returns only bounded coherent evidence; it does not scan unindexed event logs as a fallback.",
       inputSchema: {
         query: z.string(),
         scope: z.enum(["global", "project", "both"]).default("both"),

@@ -36,6 +36,7 @@
     "mcp": "node scripts/hippocamp-mcp.cjs",
     "mcp:help": "node scripts/hippocamp-mcp.cjs --help",
     "mcp:smoke": "node scripts/hippocamp-mcp.cjs --smoke",
+    "test": "node --test test/*.test.cjs",
     "upgrade:claude": "node scripts/install-claude.cjs",
     "upgrade:codex": "node scripts/install-codex.cjs",
     "upgrade:grok": "node scripts/install-grok.cjs"
