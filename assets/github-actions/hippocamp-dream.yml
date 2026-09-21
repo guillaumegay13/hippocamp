@@ -22,7 +22,9 @@ jobs:
       HIPPOCAMP_GLOBAL_ROOT: ${{ github.workspace }}
       HIPPOCAMP_DREAM_THRESHOLD_CHARS: "20000"
       HIPPOCAMP_DREAM_TARGET_CHARS: "15000"
+      HIPPOCAMP_DREAM_AUTO_MERGE: "true"
       HIPPOCAMP_DREAM_MODEL: ${{ secrets.HIPPOCAMP_DREAM_MODEL }}
+      LAGOON_REPOSITORY: ${{ github.repository }}
       MANIFEST_BASE_URL: ${{ secrets.MANIFEST_BASE_URL }}
       MANIFEST_API_KEY: ${{ secrets.MANIFEST_API_KEY }}
 
@@ -64,6 +66,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          enable_lagoon_auto_merge() {
+            local project="$1"
+            local pr_number="$2"
+
+            [ "$HIPPOCAMP_DREAM_AUTO_MERGE" = "true" ] || return 0
+
+            if [ "${LAGOON_REPOSITORY##*/}" != "lagoon" ]; then
+              echo "Skipping auto-merge: ${LAGOON_REPOSITORY} is not a repository named lagoon." >&2
+              return 0
+            fi
+
+            local changed_path
+            while IFS= read -r changed_path; do
+              case "$changed_path" in
+                "projects/${project}/current_state.md"|"projects/${project}/open_threads.md") ;;
+                *)
+                  echo "Refusing auto-merge: unexpected changed path ${changed_path}." >&2
+                  return 1
+                  ;;
+              esac
+            done < <(git diff --name-only origin/main...HEAD)
+
+            gh pr merge "$pr_number" --auto --squash --delete-branch
+          }
 
           while IFS= read -r project; do
             [ -n "$project" ] || continue
@@ -113,6 +140,7 @@ jobs:
             "After:",
             `- wake_up: ${result.afterWakeUpChars} chars`,
             `- current_state.md + open_threads.md: ${result.afterBytes} bytes`,
+            `- coherent compaction passes: ${result.compactionPasses}`,
             "",
             "Policy:",
             "- touched only `current_state.md` and `open_threads.md`",
@@ -128,9 +156,14 @@ jobs:
 
             if [ -n "$existing" ]; then
               gh pr edit "$existing" --title "$title" --body-file "/tmp/hippocamp-dream-${project}.md"
+              pr_number="$existing"
             else
-              gh pr create --title "$title" --body-file "/tmp/hippocamp-dream-${project}.md" --head "$branch" --base main
+              gh pr create --title "$title" --body-file "/tmp/hippocamp-dream-${project}.md" --head "$branch" --base main >/dev/null
+              pr_number="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
             fi
+
+            [ -n "$pr_number" ] || { echo "Could not resolve Dream PR number for ${project}." >&2; exit 1; }
+            enable_lagoon_auto_merge "$project" "$pr_number"
 
             git checkout main
             git reset --hard origin/main

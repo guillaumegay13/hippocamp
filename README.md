@@ -157,13 +157,13 @@ Typical agent flow:
 
 1. Call `wake_up` at the start of a top-level task.
 2. Read the returned global and project memory.
-3. Use `search_memory` only when wake-up files are not enough.
+3. Use `search_memory` for task-specific recall after wake-up.
 4. Use `append_event` for meaningful milestones, with concise cues when possible.
 5. Update curated files like `current_state.md` and `open_threads.md` before finishing.
 
 Writes sync by default. If sync fails or is skipped, call `sync_memory`.
 
-Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar keeps cue-based fuzzy search fast and rebuildable.
+Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar keeps cue-based fuzzy search fast and rebuildable. Search returns small coherent evidence blocks from indexed events. If no indexed result is strong enough, it returns no event result instead of scanning whole event logs.
 
 ## Dream
 
@@ -174,7 +174,9 @@ projects/<project-slug>/current_state.md
 projects/<project-slug>/open_threads.md
 ```
 
-It does not dump event logs into the model prompt, does not rewrite append-only events, and does not run during normal MCP wake-up. When a project is over the threshold, Dream builds a capped thread evidence pack by searching cue-indexed project events for `open_threads.md` bullets. The evidence budget follows `--target-chars`, so the same size target controls both the desired output and the supporting context. This gives the model enough context to keep, rewrite, close, or promote threads without loading raw history.
+It does not dump event logs into the model prompt, does not rewrite append-only events, and does not run during normal MCP wake-up. When a project is over the threshold, Dream builds a capped thread evidence pack by searching cue-indexed project events for `open_threads.md` bullets. The evidence budget follows `--target-chars`, so the same size target controls both the desired output and the supporting context.
+
+Dream uses an Eve-style compaction loop. It rewrites the complete curated snapshot, measures the result, and compacts that coherent result again when it is still over the target. It never crops a wake-up file. After three passes, it fails without writing either file if the snapshot still does not fit.
 
 Dry-run is the default:
 
@@ -189,11 +191,11 @@ npm run dream -- --project my-project --write
 - `MANIFEST_API_KEY`
 - `HIPPOCAMP_DREAM_MODEL` (defaults to `auto`; override if you want a specific provider/model)
 
-The GitHub Actions template at `assets/github-actions/hippocamp-dream.yml` is meant to be copied into the private Lagoon memory repo as `.github/workflows/hippocamp-dream.yml`. It runs on a schedule only, scans projects over the wake-up threshold, and creates or updates one PR per project so each memory compaction is reviewable.
+The GitHub Actions template at `assets/github-actions/hippocamp-dream.yml` is meant to be copied into the private Lagoon memory repo as `.github/workflows/hippocamp-dream.yml`. It runs on a schedule only, scans projects over the wake-up threshold, and creates or updates one PR per project. With `HIPPOCAMP_DREAM_AUTO_MERGE=true`, Dream enables squash auto-merge only when the repository name is `lagoon` and the PR changes only the two curated project files.
 
 ### Railway
 
-Railway can run Dream overnight even when your computer is offline. The included cron service starts once per day at `03:17 UTC`, clones the private Lagoon repo, creates or updates one Dream PR per candidate project, and exits.
+Railway can run Dream overnight even when your computer is offline. The included cron service starts once per day at `03:17 UTC`, clones the private Lagoon repo, creates or updates one Dream PR per candidate project, and exits. Set `HIPPOCAMP_DREAM_AUTO_MERGE=true` to enable the same Lagoon-only auto-merge policy.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/hippocamp)
 
@@ -204,7 +206,7 @@ Required template variables:
 - `MANIFEST_BASE_URL`: Manifest/OpenAI-compatible base URL
 - `MANIFEST_API_KEY`: API key for Dream model requests
 
-Optional variables keep the CLI defaults: `HIPPOCAMP_DREAM_MODEL=auto`, `HIPPOCAMP_DREAM_THRESHOLD_CHARS=20000`, and `HIPPOCAMP_DREAM_TARGET_CHARS=15000`.
+Optional variables keep the CLI defaults: `HIPPOCAMP_DREAM_MODEL=auto`, `HIPPOCAMP_DREAM_THRESHOLD_CHARS=20000`, and `HIPPOCAMP_DREAM_TARGET_CHARS=15000`. `HIPPOCAMP_DREAM_AUTO_MERGE=true` enables guarded auto-merge for a repository named `lagoon`.
 
 Railway is an optional deployment target. Local MCP reads and writes do not use Railway or require these hosted credentials.
 
@@ -282,6 +284,7 @@ Environment variables are optional for local use:
 - `HIPPOCAMP_DREAM_MODEL`: model used by Dream. Default: `auto`
 - `HIPPOCAMP_DREAM_THRESHOLD_CHARS`: wake-up size required before Dream proposes compaction. Default: `20000`
 - `HIPPOCAMP_DREAM_TARGET_CHARS`: target combined size for `current_state.md` and `open_threads.md`. Default: `15000`
+- `HIPPOCAMP_DREAM_AUTO_MERGE`: set to `true` for guarded squash auto-merge in a repository named `lagoon`
 
 ## What This Is Not
 

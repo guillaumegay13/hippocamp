@@ -25,6 +25,7 @@ export GH_TOKEN="$GITHUB_TOKEN"
 export HIPPOCAMP_DREAM_MODEL="${HIPPOCAMP_DREAM_MODEL:-auto}"
 export HIPPOCAMP_DREAM_TARGET_CHARS="${HIPPOCAMP_DREAM_TARGET_CHARS:-15000}"
 export HIPPOCAMP_DREAM_THRESHOLD_CHARS="${HIPPOCAMP_DREAM_THRESHOLD_CHARS:-20000}"
+export HIPPOCAMP_DREAM_AUTO_MERGE="${HIPPOCAMP_DREAM_AUTO_MERGE:-false}"
 
 runner_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 work_root="$(mktemp -d)"
@@ -63,6 +64,31 @@ console.error(`Dream candidates: ${projects.length ? projects.join(", ") : "none
 NODE
 
 failed=()
+
+enable_lagoon_auto_merge() {
+  local project="$1"
+  local pr_number="$2"
+
+  [[ "$HIPPOCAMP_DREAM_AUTO_MERGE" == "true" ]] || return 0
+
+  if [[ "${LAGOON_REPOSITORY##*/}" != "lagoon" ]]; then
+    echo "Skipping auto-merge: ${LAGOON_REPOSITORY} is not a repository named lagoon." >&2
+    return 0
+  fi
+
+  local changed_path
+  while IFS= read -r changed_path; do
+    case "$changed_path" in
+      "projects/${project}/current_state.md"|"projects/${project}/open_threads.md") ;;
+      *)
+        echo "Refusing auto-merge: unexpected changed path ${changed_path}." >&2
+        return 1
+        ;;
+    esac
+  done < <(git diff --name-only origin/main...HEAD)
+
+  gh pr merge "$pr_number" --repo "$LAGOON_REPOSITORY" --auto --squash --delete-branch
+}
 
 while IFS= read -r project; do
   [[ -n "$project" ]] || continue
@@ -123,6 +149,7 @@ const lines = [
   "After:",
   `- wake_up: ${result.afterWakeUpChars} chars`,
   `- current_state.md + open_threads.md: ${result.afterBytes} bytes`,
+  `- coherent compaction passes: ${result.compactionPasses}`,
   "",
   "Policy:",
   "- touched only `current_state.md` and `open_threads.md`",
@@ -141,9 +168,14 @@ NODE
       --raw-field title="$title" \
       --field "body=@${body_file}" \
       >/dev/null
+    pr_number="$existing"
   else
-    gh pr create --repo "$LAGOON_REPOSITORY" --title "$title" --body-file "$body_file" --head "$branch" --base main
+    gh pr create --repo "$LAGOON_REPOSITORY" --title "$title" --body-file "$body_file" --head "$branch" --base main >/dev/null
+    pr_number="$(gh pr list --repo "$LAGOON_REPOSITORY" --head "$branch" --state open --json number --jq '.[0].number // empty')"
   fi
+
+  [[ -n "$pr_number" ]] || { echo "Could not resolve Dream PR number for ${project}." >&2; exit 1; }
+  enable_lagoon_auto_merge "$project" "$pr_number"
 done < "$work_root/projects.txt"
 
 if ((${#failed[@]})); then

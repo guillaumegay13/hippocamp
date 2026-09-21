@@ -10,6 +10,7 @@ const DEFAULT_THRESHOLD_CHARS = 20000;
 const DEFAULT_TARGET_CHARS = 15000;
 const DEFAULT_MODEL = "auto";
 const TARGET_BYTE_TOLERANCE = 0.02;
+const DREAM_COMPACTION_MAX_PASSES = 3;
 const DREAM_MODEL_MAX_ATTEMPTS = 3;
 const DREAM_MODEL_RETRY_DELAY_MS = 2000;
 // Manifest returns HTTP 200 with a "[🦚 Manifest <code>] ..." banner as the
@@ -355,6 +356,37 @@ function createPrompt({ report, targetChars, threadEvidence }) {
   ];
 }
 
+function createCompactionRetryPrompt({ output, targetChars }) {
+  return [
+    {
+      role: "system",
+      content: [
+        "You are Hippocamp Dream, an offline memory curator.",
+        "The previous compaction pass was still too large.",
+        "Rewrite the complete snapshot again as a shorter, coherent snapshot.",
+        "Preserve the goal, important instructions, technical decisions, active state, and open work.",
+        "Remove repetition and historical detail before shortening individual facts.",
+        "Do not crop text, leave partial bullets, or invent facts.",
+        "Return strict JSON only, with keys current_state_md and open_threads_md.",
+        "current_state_md must start with '# Current State'.",
+        "open_threads_md must start with '# Open Threads'.",
+      ].join(" "),
+    },
+    {
+      role: "user",
+      content: [
+        `Target combined size for current_state.md and open_threads.md: ${targetChars} chars`,
+        "",
+        "## current_state.md",
+        output.currentState,
+        "",
+        "## open_threads.md",
+        output.openThreads,
+      ].join("\n"),
+    },
+  ];
+}
+
 function normalizeBaseUrl(value) {
   const trimmed = String(value || "").trim().replace(/\/+$/, "");
 
@@ -532,7 +564,7 @@ function getMaxOutputBytes(targetChars) {
   return Math.ceil(targetChars * (1 + TARGET_BYTE_TOLERANCE));
 }
 
-function validateDreamOutput(output, beforeBytes, targetChars) {
+function validateDreamStructure(output) {
   if (!output.currentState.startsWith("# Current State")) {
     throw new Error("Dream current_state_md must start with '# Current State'.");
   }
@@ -540,20 +572,44 @@ function validateDreamOutput(output, beforeBytes, targetChars) {
   if (!output.openThreads.startsWith("# Open Threads")) {
     throw new Error("Dream open_threads_md must start with '# Open Threads'.");
   }
+}
 
-  const afterBytes = getDreamOutputBytes(output);
-
-  if (afterBytes >= beforeBytes) {
-    throw new Error(`Dream output is not smaller than the input (${afterBytes} >= ${beforeBytes} bytes).`);
-  }
-
+async function compactDreamOutput({ apiKey, baseUrl, beforeBytes, model, report, targetChars, threadEvidence }) {
   const maxBytes = getMaxOutputBytes(targetChars);
+  let previousBytes = beforeBytes;
+  let previousOutput = null;
 
-  if (afterBytes > maxBytes) {
-    throw new Error(`Dream output exceeds --target-chars (${afterBytes} > ${maxBytes} bytes).`);
+  for (let pass = 1; pass <= DREAM_COMPACTION_MAX_PASSES; pass += 1) {
+    const messages = previousOutput
+      ? createCompactionRetryPrompt({ output: previousOutput, targetChars })
+      : createPrompt({ report, targetChars, threadEvidence });
+    const content = await callDreamModel({ apiKey, baseUrl, messages, model });
+    const output = parseDreamJson(content);
+    validateDreamStructure(output);
+
+    const afterBytes = getDreamOutputBytes(output);
+
+    if (afterBytes >= previousBytes) {
+      throw new Error(
+        `Dream compaction pass ${pass} did not reduce the snapshot (${afterBytes} >= ${previousBytes} bytes).`,
+      );
+    }
+
+    if (afterBytes <= maxBytes) {
+      return {
+        afterBytes,
+        output,
+        passes: pass,
+      };
+    }
+
+    previousBytes = afterBytes;
+    previousOutput = output;
   }
 
-  return afterBytes;
+  throw new Error(
+    `Dream output exceeds --target-chars after ${DREAM_COMPACTION_MAX_PASSES} coherent compaction passes (${previousBytes} > ${maxBytes} bytes).`,
+  );
 }
 
 async function writeDreamOutput(report, output) {
@@ -567,6 +623,7 @@ function toPublicReport(result) {
     afterWakeUpChars: result.afterWakeUpChars,
     beforeBytes: result.beforeBytes,
     changed: result.changed,
+    compactionPasses: result.compactionPasses,
     context: {
       evidenceBudgetChars: result.threadEvidence.evidenceBudgetChars,
       evidenceChars: result.threadEvidence.evidenceChars,
@@ -616,22 +673,24 @@ async function dreamProject(slug, options) {
     };
   }
 
-  const content = await callDreamModel({
+  const compacted = await compactDreamOutput({
     apiKey: options.apiKey,
     baseUrl: options.baseUrl,
-    messages: createPrompt({ report, targetChars: options.targetChars, threadEvidence }),
+    beforeBytes,
     model: options.model,
+    report,
+    targetChars: options.targetChars,
+    threadEvidence,
   });
-  const output = parseDreamJson(content);
-  const afterBytes = validateDreamOutput(output, beforeBytes, options.targetChars);
 
-  await writeDreamOutput(report, output);
+  await writeDreamOutput(report, compacted.output);
 
   return {
-    afterBytes,
+    afterBytes: compacted.afterBytes,
     afterWakeUpChars: (await memory.wakeUp({ projectRoot: getSyntheticProjectRoot(report.slug) })).text.length,
     beforeBytes,
     changed: true,
+    compactionPasses: compacted.passes,
     report,
     skipped: null,
     threadEvidence,
@@ -651,6 +710,7 @@ function printText(results) {
         `threads=${result.context.openThreads}`,
         `matchedThreads=${result.context.threadsWithEvidence}`,
         `evidence=${result.context.evidenceItems}`,
+        result.compactionPasses ? `passes=${result.compactionPasses}` : null,
         result.afterBytes ? `after=${result.afterBytes}` : null,
         result.afterWakeUpChars ? `afterWake=${result.afterWakeUpChars}` : null,
       ]
@@ -700,6 +760,8 @@ if (require.main === module) {
 
 module.exports = {
   callDreamModel,
+  compactDreamOutput,
+  getDreamOutputBytes,
   isManifestBanner,
   isRetryableStatus,
   parseDreamJson,
