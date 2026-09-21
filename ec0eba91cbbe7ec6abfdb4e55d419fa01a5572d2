@@ -1,0 +1,63 @@
+lib/memory.ts
+  87fc4862b6b59449 26-47,86,144-151,164-167
+scripts/install-claude.cjs
+  87fc4862b6b59449 110
+scripts/hippocamp-mcp.cjs
+  87fc4862b6b59449 108
+AGENTS.md
+  87fc4862b6b59449 54
+app/page.tsx
+  87fc4862b6b59449 62
+README.md
+  87fc4862b6b59449 50,62-64,67,149-150,157
+skills/hippocamp-memory/SKILL.md
+  87fc4862b6b59449 40
+lib/types.ts
+  87fc4862b6b59449 31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "ec0eba91cbbe7ec6abfdb4e55d419fa01a5572d2",
+  "prompts": {
+    "3ba874a8e6f33cb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d9005-f05f-7683-b2ee-0d1809f067f3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 390,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    },
+    "74a320d3bf6ea2b3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "473539d9-4a4d-4d34-94be-463fd06aa5f3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 62,
+      "overriden_lines": 0
+    },
+    "87fc4862b6b59449": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8fb0-6335-76c1-a441-ca700eaca3f2",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 52,
+      "overriden_lines": 0
+    }
+  }
+}

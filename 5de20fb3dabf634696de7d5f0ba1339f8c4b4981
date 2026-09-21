@@ -1,0 +1,33 @@
+assets/github-actions/hippocamp-dream.yml
+  s_521f162a9d29cb::t_62a195dd8d6041 6
+  s_521f162a9d29cb::t_b3fdc9160d3825 95-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "5de20fb3dabf634696de7d5f0ba1339f8c4b4981",
+  "prompts": {
+    "a8f01cbca466b30a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dbf9e-541e-77c0-8d0a-76550e040e40",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>",
+      "total_additions": 63,
+      "total_deletions": 6,
+      "accepted_lines": 63,
+      "overriden_lines": 0
+    }
+  },
+  "sessions": {
+    "s_521f162a9d29cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "46745339-c4d8-40ed-969a-208424fb803f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+skills/hippocamp-memory/SKILL.md
+  03b2d1a0b4c3ca26 10-11,16-17
+.gitignore
+  03b2d1a0b4c3ca26 14
+scripts/hippocamp-memory.cjs
+  03b2d1a0b4c3ca26 1,52-84,91,133-141,205,207,219,482-485,487,524,563,590,603
+AGENTS.md
+  03b2d1a0b4c3ca26 50,58-60
+README.md
+  03b2d1a0b4c3ca26 3-5,248,252,263-264,281-282,286
+scripts/hippocamp-mcp.cjs
+  03b2d1a0b4c3ca26 27
+scripts/install-claude.cjs
+  03b2d1a0b4c3ca26 13,108-110,151-188,238-240,255,257
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "db1d966ae066afa7fc1019f492b24f2b9eb8512c",
+  "prompts": {
+    "03b2d1a0b4c3ca26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8b7e-bdc4-7ca0-9066-6ac01319b4c3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 128,
+      "total_deletions": 57,
+      "accepted_lines": 127,
+      "overriden_lines": 0
+    }
+  }
+}

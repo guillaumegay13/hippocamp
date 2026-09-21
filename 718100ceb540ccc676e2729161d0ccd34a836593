@@ -1,0 +1,36 @@
+.gitignore
+  3ba874a8e6f33cb3 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "718100ceb540ccc676e2729161d0ccd34a836593",
+  "prompts": {
+    "3ba874a8e6f33cb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d9005-f05f-7683-b2ee-0d1809f067f3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 21,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    },
+    "74a320d3bf6ea2b3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "473539d9-4a4d-4d34-94be-463fd06aa5f3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}

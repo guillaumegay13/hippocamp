@@ -1,0 +1,29 @@
+scripts/install-claude.cjs
+  3ba874a8e6f33cb3 105-107,109
+skills/hippocamp-memory/SKILL.md
+  3ba874a8e6f33cb3 11,23
+scripts/install-codex.cjs
+  3ba874a8e6f33cb3 10-11,108-160,207,223,225
+README.md
+  3ba874a8e6f33cb3 49-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "2d31759c1b5ca5812e96816632ec5c145631749a",
+  "prompts": {
+    "3ba874a8e6f33cb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d9005-f05f-7683-b2ee-0d1809f067f3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 69,
+      "total_deletions": 4,
+      "accepted_lines": 69,
+      "overriden_lines": 0
+    }
+  }
+}

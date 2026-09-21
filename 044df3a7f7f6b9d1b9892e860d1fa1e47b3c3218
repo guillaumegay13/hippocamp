@@ -1,0 +1,23 @@
+scripts/hippocamp-memory.cjs
+  3ba874a8e6f33cb3 243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "044df3a7f7f6b9d1b9892e860d1fa1e47b3c3218",
+  "prompts": {
+    "3ba874a8e6f33cb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d9005-f05f-7683-b2ee-0d1809f067f3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}

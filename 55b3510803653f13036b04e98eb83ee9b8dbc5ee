@@ -1,0 +1,27 @@
+README.md
+  03b2d1a0b4c3ca26 1,3-5
+app/globals.css
+  03b2d1a0b4c3ca26 48-54,78-113,201-203
+app/page.tsx
+  03b2d1a0b4c3ca26 1-2,18-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "55b3510803653f13036b04e98eb83ee9b8dbc5ee",
+  "prompts": {
+    "03b2d1a0b4c3ca26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8b7e-bdc4-7ca0-9066-6ac01319b4c3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Guillaume Gay",
+      "messages": [],
+      "total_additions": 1142,
+      "total_deletions": 9,
+      "accepted_lines": 1142,
+      "overriden_lines": 0
+    }
+  }
+}

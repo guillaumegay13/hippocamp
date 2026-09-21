@@ -1,0 +1,46 @@
+package.json
+  s_b98074fec78fb5::t_a355421b32febb 24,30
+README.md
+  s_b98074fec78fb5::t_9543967e47d113 156-164,168-181,217,230-234
+  s_b98074fec78fb5::t_6c8db6b593e6d9 165
+  s_b98074fec78fb5::t_cc627a5568df9d 166-167
+.env.example
+  s_b98074fec78fb5::t_03ae8f8a5e4082 3-7
+scripts/hippocamp-dream.cjs
+  s_b98074fec78fb5::t_6c2556465a13f8 242,251,254-272,274-275,278-279,283,450,466
+  s_b98074fec78fb5::t_7f2deb96276869 245,276,282,285-287,291,330,432-434,449,453-454
+  s_b98074fec78fb5::t_d1c7adf0cf9744 1-12,19-30,33-52,55-234,295-302,306-325,331-425,427-428,436-448,455-461,463-464,467-473,475-480,482-490,492-495,497-509,513,515-556
+  s_b98074fec78fb5::t_97b65834453bd4 305,329
+  s_b98074fec78fb5::t_02e77f084bf551 13-18,31-32,53-54
+  s_b98074fec78fb5::t_17df5264a888ca 426,491,514
+  s_b98074fec78fb5::t_31b156e357b5d5 452
+  s_b98074fec78fb5::t_8306b877ad4cc6 246,284,430-431,451
+  s_b98074fec78fb5::t_c644c50735cb96 511
+  s_b98074fec78fb5::t_4278a3d5886309 235-241,243-244,247-250,252-253,273,280-281,288-290,292-294,303-304,326-328,429,435,462,465,474,481,496,510,512
+  s_b98074fec78fb5::t_ab8ca905d1df24 277
+AGENTS.md
+  s_b98074fec78fb5::t_b536bfefc824dd 48,73
+  s_b98074fec78fb5::t_4d0a518ffe5da9 25-26,32,49,66
+scripts/hippocamp.cjs
+  s_b98074fec78fb5::t_5af304e56e9471 7,19,27
+assets/github-actions/hippocamp-dream.yml
+  s_b98074fec78fb5::t_1ccca01bdee103 1-105,112-117,119-136
+  s_b98074fec78fb5::t_db03b9f15ab35f 107,110
+  s_b98074fec78fb5::t_a607482e52173a 106,108-109,111,118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "82de2b09a9ede954077a952722cbd65a90aa13bb",
+  "prompts": {},
+  "sessions": {
+    "s_b98074fec78fb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b22-7805-74e0-8163-6dfc9dc9c815",
+        "model": "gpt-5.5"
+      },
+      "human_author": null
+    }
+  }
+}

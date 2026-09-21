@@ -1,0 +1,20 @@
+scripts/hippocamp-dream.cjs
+  s_8aa6fc10de74d6::t_08d25edb8acdbb 19-21,415-418,452-456,692
+  s_8aa6fc10de74d6::t_d5eb6ea8ccea89 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "ff9a316d7d8ad3d186732095adcfb5e26bde0682",
+  "prompts": {},
+  "sessions": {
+    "s_8aa6fc10de74d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13fe3e98-e342-4da6-b0dc-297a817278fa",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

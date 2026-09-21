@@ -1,0 +1,20 @@
+README.md
+  s_93bfbcb2a8df36::t_9ec8c59edec1a1 188
+  s_93bfbcb2a8df36::t_0734510c576fa1 189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "2c98ece4e2d2ba6131cfb0eec9b480ed471bbcdd",
+  "prompts": {},
+  "sessions": {
+    "s_93bfbcb2a8df36": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6010-541c-7d61-8729-4dc9c1ebfa26",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
