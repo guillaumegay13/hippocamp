@@ -30,7 +30,7 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
 6. When appending events, include concise `Cues:` values or pass the `cues` argument so fuzzy recall can find the event later.
 7. `write_memory_file` and `append_event` sync by default.
 8. If a sync is skipped or fails, call `sync_memory` explicitly.
-9. At the end of the task, use `write_memory_file` to update curated files such as:
+9. At the end of the task, if project state actually changed, use `write_memory_file` to update curated files such as:
    - `current_state.md`
    - `open_threads.md`
    - `identity.md`
@@ -41,6 +41,8 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
 
 - Do not full-scan memory on every thread.
 - Prefer curated summaries over raw event history.
+- Do not re-read `current_state.md` or `open_threads.md` after `wake_up`; they are already loaded.
+- For small tasks, `append_event` is enough; skip curated file rewrites.
 - Use event cues as short recall handles; `search_memory` fuzzy-ranks indexed cues and headings.
 - Search returns bounded coherent evidence and does not scan unindexed event logs as a fallback.
 - Keep curated files short and legible.
