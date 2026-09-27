@@ -1,0 +1,25 @@
+assets/railway/run-dream.sh
+  s_ed626b25b01aa0::t_3984fe2b610930 90
+README.md
+  s_ed626b25b01aa0::t_48965350d59e81 194,209,287
+skills/hippocamp-memory/SKILL.md
+  s_ed626b25b01aa0::t_48965350d59e81 47-48
+assets/github-actions/hippocamp-dream.yml
+  s_ed626b25b01aa0::t_3984fe2b610930 92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fe766a849bbf46c6be97ef6f3bc17b33ad5526e7",
+  "prompts": {},
+  "sessions": {
+    "s_ed626b25b01aa0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f997039b-cf77-4b87-96b4-6b4ca5cd305e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
