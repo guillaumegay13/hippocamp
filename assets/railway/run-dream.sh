@@ -87,7 +87,7 @@ enable_lagoon_auto_merge() {
     esac
   done < <(git diff --name-only origin/main...HEAD)
 
-  gh pr merge "$pr_number" --repo "$LAGOON_REPOSITORY" --auto --squash --delete-branch
+  gh pr merge "$pr_number" --repo "$LAGOON_REPOSITORY" --squash --delete-branch
 }
 
 while IFS= read -r project; do

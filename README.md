@@ -191,7 +191,7 @@ npm run dream -- --project my-project --write
 - `MANIFEST_API_KEY`
 - `HIPPOCAMP_DREAM_MODEL` (defaults to `auto`; override if you want a specific provider/model)
 
-The GitHub Actions template at `assets/github-actions/hippocamp-dream.yml` is meant to be copied into the private Lagoon memory repo as `.github/workflows/hippocamp-dream.yml`. It runs on a schedule only, scans projects over the wake-up threshold, and creates or updates one PR per project. With `HIPPOCAMP_DREAM_AUTO_MERGE=true`, Dream enables squash auto-merge only when the repository name is `lagoon` and the PR changes only the two curated project files.
+The GitHub Actions template at `assets/github-actions/hippocamp-dream.yml` is meant to be copied into the private Lagoon memory repo as `.github/workflows/hippocamp-dream.yml`. It runs on a schedule only, scans projects over the wake-up threshold, and creates or updates one PR per project. With `HIPPOCAMP_DREAM_AUTO_MERGE=true`, Dream squash-merges the PR only when the repository name is `lagoon` and the PR changes only the two curated project files.
 
 ### Railway
 
@@ -206,7 +206,7 @@ Required template variables:
 - `MANIFEST_BASE_URL`: Manifest/OpenAI-compatible base URL
 - `MANIFEST_API_KEY`: API key for Dream model requests
 
-Optional variables keep the CLI defaults: `HIPPOCAMP_DREAM_MODEL=auto`, `HIPPOCAMP_DREAM_THRESHOLD_CHARS=20000`, and `HIPPOCAMP_DREAM_TARGET_CHARS=15000`. `HIPPOCAMP_DREAM_AUTO_MERGE=true` enables guarded auto-merge for a repository named `lagoon`.
+Optional variables keep the CLI defaults: `HIPPOCAMP_DREAM_MODEL=auto`, `HIPPOCAMP_DREAM_THRESHOLD_CHARS=20000`, and `HIPPOCAMP_DREAM_TARGET_CHARS=15000`. `HIPPOCAMP_DREAM_AUTO_MERGE=true` enables a guarded squash merge for a repository named `lagoon`.
 
 Railway is an optional deployment target. Local MCP reads and writes do not use Railway or require these hosted credentials.
 
@@ -284,7 +284,7 @@ Environment variables are optional for local use:
 - `HIPPOCAMP_DREAM_MODEL`: model used by Dream. Default: `auto`
 - `HIPPOCAMP_DREAM_THRESHOLD_CHARS`: wake-up size required before Dream proposes compaction. Default: `20000`
 - `HIPPOCAMP_DREAM_TARGET_CHARS`: target combined size for `current_state.md` and `open_threads.md`. Default: `15000`
-- `HIPPOCAMP_DREAM_AUTO_MERGE`: set to `true` for guarded squash auto-merge in a repository named `lagoon`
+- `HIPPOCAMP_DREAM_AUTO_MERGE`: set to `true` for a guarded squash merge in a repository named `lagoon`
 
 ## What This Is Not
 

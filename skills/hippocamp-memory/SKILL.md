@@ -44,6 +44,8 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
 - Use event cues as short recall handles; `search_memory` fuzzy-ranks indexed cues and headings.
 - Search returns bounded coherent evidence and does not scan unindexed event logs as a fallback.
 - Keep curated files short and legible.
+- Rewrite `current_state.md` as a short snapshot of what is true now. Do not prepend dated entries to it; milestone detail belongs in `append_event` only.
+- Remove resolved items from `open_threads.md` instead of keeping them.
 - Do not duplicate GitHub-owned facts such as commits, PRs, issues, reviews, or CI results. Store artifact references plus the missing rationale, preference, assumption, or follow-up context.
 - Use `project` scope for project-specific state.
 - Use `global` scope only for durable personal context that should follow the user across projects.
