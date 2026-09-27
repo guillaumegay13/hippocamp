@@ -1,0 +1,25 @@
+scripts/install-claude.cjs
+  s_ed626b25b01aa0::t_792a2137a9ebda 113-114
+skills/hippocamp-memory/SKILL.md
+  s_ed626b25b01aa0::t_34558163930428 33,44-45
+scripts/install-grok.cjs
+  s_ed626b25b01aa0::t_792a2137a9ebda 122-123
+scripts/install-codex.cjs
+  s_ed626b25b01aa0::t_792a2137a9ebda 121-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5ad2e4d389d12bfea8622c60e286ccb5d3d34e7f",
+  "prompts": {},
+  "sessions": {
+    "s_ed626b25b01aa0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f997039b-cf77-4b87-96b4-6b4ca5cd305e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
