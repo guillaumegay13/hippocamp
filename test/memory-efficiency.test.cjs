@@ -157,3 +157,67 @@ test("search uses indexed events and returns coherent evidence", async (t) => {
 
   assert.deepEqual(unindexed.results, []);
 });
+
+test("search ranks indexed event bodies with typo tolerance", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-body-search-"));
+  const projectRoot = path.join(tempRoot, "body-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  for (const [title, cues, content] of [
+    ["Deploy note", ["deploy"], "The zanzibar migration needs a rollback plan."],
+    ["Unrelated note", ["billing"], "Invoices are generated monthly."],
+  ]) {
+    await memory.appendEvent({ content, cues, projectRoot, scope: "project", sync: false, title });
+  }
+
+  const search = await memory.searchMemory({ projectRoot, query: "zanzibr rollback", scope: "project" });
+
+  assert.equal(search.results.length, 1);
+  assert.equal(search.results[0].heading, "Deploy note");
+  assert.equal(search.results[0].match, "body");
+});
+
+test("search returns whole sentences from an oversized matching paragraph", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-long-paragraph-"));
+  const projectRoot = path.join(tempRoot, "long-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const filler = "The weekly sync covered routine updates. ".repeat(40);
+  await memory.appendEvent({
+    content: `${filler}The kestrel database moved to eu-west-3. ${filler}`,
+    cues: ["infra"],
+    projectRoot,
+    scope: "project",
+    sync: false,
+    title: "Weekly sync",
+  });
+
+  const search = await memory.searchMemory({ projectRoot, query: "kestrel database", scope: "project" });
+
+  assert.equal(search.results.length, 1);
+  assert.match(search.results[0].snippet, /The kestrel database moved to eu-west-3\./);
+  assert.ok(search.results[0].snippet.length <= 1200);
+  assert.match(search.results[0].snippet, /^The weekly sync|^The kestrel/);
+});

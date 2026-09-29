@@ -43,7 +43,7 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
 - Prefer curated summaries over raw event history.
 - Do not re-read `current_state.md` or `open_threads.md` after `wake_up`; they are already loaded.
 - For small tasks, `append_event` is enough; skip curated file rewrites.
-- Use event cues as short recall handles; `search_memory` fuzzy-ranks indexed cues and headings.
+- Use event cues as short recall handles; `search_memory` ranks indexed events by cues, title, and body with typo tolerance, and cues weigh the most.
 - Search returns bounded coherent evidence and does not scan unindexed event logs as a fallback.
 - Keep curated files short and legible.
 - Rewrite `current_state.md` as a short snapshot of what is true now. Do not prepend dated entries to it; milestone detail belongs in `append_event` only.

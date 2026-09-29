@@ -5,6 +5,7 @@ const { execFile } = require("node:child_process");
 const path = require("node:path");
 const os = require("node:os");
 const { promisify } = require("node:util");
+const MiniSearch = require("minisearch");
 
 const execFileAsync = promisify(execFile);
 
@@ -22,9 +23,12 @@ const DEFAULT_PROJECT_FILES = [
 ];
 
 const EVENT_INDEX_VERSION = 1;
-const EVENT_SEARCH_THRESHOLD = 50;
-const MARKDOWN_SEARCH_THRESHOLD = 20;
+const SEARCH_CANDIDATE_LIMIT = 60;
+const SEARCH_FIELD_BOOST = { cues: 3, heading: 2 };
+const SEARCH_FUZZY_DISTANCE = 0.2;
+const SEARCH_INDEX_CACHE_LIMIT = 8;
 const SEARCH_EXCERPT_MAX_CHARS = 1200;
+const searchIndexCache = new Map();
 const PROCESS_SESSION_ID = `mcp-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
 const AGENT_NAME_ALIASES = {
@@ -857,6 +861,38 @@ function scoreSearchValues(queryInfo, values) {
   return Math.max(phraseScore, exactScore, fuzzyScore);
 }
 
+// Split a paragraph over the excerpt limit into whole-sentence chunks so a
+// long matching paragraph is still searchable without cropping mid-sentence.
+function splitOversizedBlock(block) {
+  if (block.length <= SEARCH_EXCERPT_MAX_CHARS) {
+    return [block];
+  }
+
+  const chunks = [];
+  let current = "";
+
+  for (const sentence of block.split(/(?<=[.!?])\s+|\n+/)) {
+    const next = current ? `${current} ${sentence}` : sentence;
+
+    if (next.length <= SEARCH_EXCERPT_MAX_CHARS) {
+      current = next;
+      continue;
+    }
+
+    if (current) {
+      chunks.push(current);
+    }
+
+    current = sentence.length <= SEARCH_EXCERPT_MAX_CHARS ? sentence : "";
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}
+
 function createSearchExcerpt(content, queryInfo) {
   const trimmed = content.trim();
 
@@ -873,19 +909,23 @@ function createSearchExcerpt(content, queryInfo) {
     .map((block) => block.trim())
     .filter(Boolean)
     .filter((block) => !/^(?:Agent:|Session:|Cues:)\s*/i.test(block))
-    .map((block) => ({
-      block,
-      score: scoreSearchValues(queryInfo, [block]),
-    }))
-    .filter((item) => item.block.length <= SEARCH_EXCERPT_MAX_CHARS)
-    .sort((left, right) => right.score - left.score);
-  const matchedBlock = blocks.find((item) => item.score >= EVENT_SEARCH_THRESHOLD / 100);
+    .flatMap(splitOversizedBlock);
 
-  if (matchedBlock) {
-    return matchedBlock.block;
+  if (!blocks.length) {
+    return null;
   }
 
-  return null;
+  const index = new MiniSearch({
+    fields: ["text"],
+    idField: "position",
+    tokenize: tokenizeSearchText,
+    processTerm: (term) => term,
+  });
+
+  index.addAll(blocks.map((text, position) => ({ position, text })));
+
+  const [best] = index.search(queryInfo.normalized, { fuzzy: SEARCH_FUZZY_DISTANCE });
+  return best ? blocks[best.id] : null;
 }
 
 async function readMemoryFile({ scope, path: relativePath, projectRoot }) {
@@ -1035,31 +1075,8 @@ async function listEventFiles(root) {
   };
 }
 
-function scoreEventEntry(queryInfo, event) {
-  const cueScore = scoreSearchValues(queryInfo, event.cues || []);
-  const headingScore = scoreSearchValues(queryInfo, [event.heading || "", event.id || ""]);
-  const score = cueScore * 100 + headingScore * 60;
-  const match = cueScore >= headingScore ? "cues" : "heading";
-
-  return {
-    score,
-    match,
-  };
-}
-
-async function getEventBlockById(markdownPath, eventId) {
-  const content = await readFileIfExists(markdownPath);
-
-  if (content === null) {
-    return null;
-  }
-
-  return parseEventBlocks(content).find((event) => event.id === eventId) || null;
-}
-
-async function searchEventIndexes({ scope, root, queryInfo }) {
-  const eventFiles = await listEventFiles(root);
-  const candidates = [];
+async function collectEventDocuments({ scope, eventFiles }) {
+  const documents = [];
 
   for (const indexName of eventFiles.indexes) {
     const indexPath = path.join(eventFiles.eventsDir, indexName);
@@ -1077,129 +1094,212 @@ async function searchEventIndexes({ scope, root, queryInfo }) {
       continue;
     }
 
-    for (const event of index.events) {
-      const eventScore = scoreEventEntry(queryInfo, event);
+    const content = await readFileIfExists(path.join(eventFiles.eventsDir, markdownName));
+    const blocks = new Map();
 
-      if (eventScore.score < EVENT_SEARCH_THRESHOLD) {
+    for (const block of parseEventBlocks(content || "")) {
+      if (!blocks.has(block.id)) {
+        blocks.set(block.id, block);
+      }
+    }
+
+    for (const event of index.events) {
+      const block = blocks.get(event.id);
+
+      if (!block) {
         continue;
       }
 
-      candidates.push({
+      documents.push({
         scope,
         path: `events/${markdownName}`,
-        markdownPath: path.join(eventFiles.eventsDir, markdownName),
         id: event.id,
         heading: event.heading,
         cues: normalizeCueList(event.cues),
-        score: Math.round(eventScore.score),
-        match: eventScore.match,
+        body: block.body,
       });
     }
   }
 
-  const results = [];
-  const sortedCandidates = candidates.sort((left, right) => right.score - left.score).slice(0, 60);
-
-  for (const candidate of sortedCandidates) {
-    const block = await getEventBlockById(candidate.markdownPath, candidate.id);
-
-    if (!block) {
-      continue;
-    }
-
-    const snippet = createSearchExcerpt(block.body, queryInfo);
-
-    if (!snippet) {
-      continue;
-    }
-
-    results.push({
-      scope: candidate.scope,
-      path: candidate.path,
-      id: candidate.id,
-      heading: candidate.heading,
-      cues: candidate.cues,
-      score: candidate.score,
-      match: candidate.match,
-      snippet,
-    });
-  }
-
   return {
     scannedFiles: eventFiles.indexes.length,
-    results,
+    documents,
   };
 }
 
-async function searchMarkdownFiles({ scope, root, queryInfo }) {
+async function listCuratedMarkdownFiles(scope, root) {
   const markdownFiles = await walkMarkdownFiles(root);
-  const scopedFiles =
-    scope === "global"
-      ? markdownFiles.filter((relativePath) => !relativePath.startsWith("projects/"))
-      : markdownFiles;
-  const results = [];
-  let scannedFiles = 0;
 
-  for (const relativePath of scopedFiles) {
-    if (relativePath.startsWith("events/")) {
-      continue;
-    }
+  return markdownFiles.filter(
+    (relativePath) =>
+      !relativePath.startsWith("events/") && (scope !== "global" || !relativePath.startsWith("projects/")),
+  );
+}
 
-    scannedFiles += 1;
+async function collectMarkdownDocuments({ scope, root, curatedFiles }) {
+  const documents = [];
 
-    const absolutePath = path.join(root, relativePath);
-    const content = await fs.readFile(absolutePath, "utf8");
-    const pathScore = scoreSearchValues(queryInfo, [relativePath]);
-    const bodyScore = scoreSearchValues(queryInfo, [content]);
-    const score = pathScore * 70 + bodyScore * 40;
-
-    if (score < MARKDOWN_SEARCH_THRESHOLD) {
-      continue;
-    }
-
-    const snippet = createSearchExcerpt(content, queryInfo);
-
-    if (!snippet) {
-      continue;
-    }
-
-    results.push({
+  for (const relativePath of curatedFiles) {
+    documents.push({
       scope,
       path: relativePath,
-      score: Math.round(score),
-      match: pathScore >= bodyScore ? "path" : "body",
-      snippet,
+      body: await fs.readFile(path.join(root, relativePath), "utf8"),
     });
   }
 
   return {
-    scannedFiles,
-    results,
+    scannedFiles: documents.length,
+    documents,
   };
+}
+
+function buildSearchIndex(documents) {
+  const index = new MiniSearch({
+    fields: ["cues", "heading", "body"],
+    idField: "position",
+    tokenize: tokenizeSearchText,
+    processTerm: (term) => term,
+  });
+
+  index.addAll(
+    documents.map((document, position) => ({
+      position,
+      cues: (document.cues || []).join(" "),
+      heading: document.heading || document.path,
+      body: document.body,
+    })),
+  );
+
+  return index;
+}
+
+function rankSearchDocuments(queryInfo, { index, documents }) {
+  return index
+    .search(queryInfo.normalized, {
+      boost: SEARCH_FIELD_BOOST,
+      fuzzy: SEARCH_FUZZY_DISTANCE,
+    })
+    .slice(0, SEARCH_CANDIDATE_LIMIT)
+    .map((hit) => ({
+      document: documents[hit.id],
+      score: Math.round(hit.score * 100) / 100,
+    }));
+}
+
+function toSearchResult(queryInfo, { document, score }) {
+  const snippet = createSearchExcerpt(document.body, queryInfo);
+
+  if (!snippet) {
+    return null;
+  }
+
+  if (!document.id) {
+    return {
+      scope: document.scope,
+      path: document.path,
+      score,
+      match: scoreSearchValues(queryInfo, [document.path]) > 0 ? "path" : "body",
+      snippet,
+    };
+  }
+
+  const cueScore = scoreSearchValues(queryInfo, document.cues);
+  const headingScore = scoreSearchValues(queryInfo, [document.heading || "", document.id]);
+
+  return {
+    scope: document.scope,
+    path: document.path,
+    id: document.id,
+    heading: document.heading,
+    cues: document.cues,
+    score,
+    match: cueScore > 0 && cueScore >= headingScore ? "cues" : headingScore > 0 ? "heading" : "body",
+    snippet,
+  };
+}
+
+async function loadSearchIndex(scopes, projectRoot) {
+  const sources = [];
+  const signature = [];
+
+  for (const scope of scopes) {
+    const root = getScopeRoot(scope, projectRoot);
+    const eventFiles = await listEventFiles(root);
+    const curatedFiles = await listCuratedMarkdownFiles(scope, root);
+    const filePaths = [
+      ...[...eventFiles.indexes, ...eventFiles.markdownFiles].map((name) => path.join(eventFiles.eventsDir, name)),
+      ...curatedFiles.map((relativePath) => path.join(root, relativePath)),
+    ];
+
+    for (const filePath of filePaths) {
+      const stats = await statIfExists(filePath);
+      signature.push(`${filePath}:${stats?.mtimeMs}:${stats?.size}`);
+    }
+
+    sources.push({ scope, root, eventFiles, curatedFiles });
+  }
+
+  const cacheKey = sources.map((source) => `${source.scope}:${source.root}`).join("|");
+  const cached = searchIndexCache.get(cacheKey);
+  const signatureText = signature.join("\n");
+
+  if (cached?.signature === signatureText) {
+    return cached;
+  }
+
+  const documents = [];
+  let scannedFiles = 0;
+
+  for (const source of sources) {
+    const eventDocuments = await collectEventDocuments(source);
+    const markdownDocuments = await collectMarkdownDocuments(source);
+
+    scannedFiles += eventDocuments.scannedFiles + markdownDocuments.scannedFiles;
+    documents.push(...eventDocuments.documents, ...markdownDocuments.documents);
+  }
+
+  const loaded = {
+    signature: signatureText,
+    documents,
+    scannedFiles,
+    index: buildSearchIndex(documents),
+  };
+
+  searchIndexCache.delete(cacheKey);
+  searchIndexCache.set(cacheKey, loaded);
+
+  if (searchIndexCache.size > SEARCH_INDEX_CACHE_LIMIT) {
+    searchIndexCache.delete(searchIndexCache.keys().next().value);
+  }
+
+  return loaded;
 }
 
 async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5 }) {
   const queryInfo = createQueryInfo(query);
   const clampedMaxResults = Math.max(1, Math.min(Number(maxResults) || 5, 20));
   const scopes = scope === "both" ? ["global", "project"] : [scope];
+  const search = await loadSearchIndex(scopes, projectRoot);
   const results = [];
-  let scannedFiles = 0;
 
-  for (const itemScope of scopes) {
-    const root = getScopeRoot(itemScope, projectRoot);
-    const eventSearch = await searchEventIndexes({ scope: itemScope, root, queryInfo });
-    const markdownSearch = await searchMarkdownFiles({ scope: itemScope, root, queryInfo });
+  if (queryInfo.tokens.length && search.documents.length) {
+    for (const candidate of rankSearchDocuments(queryInfo, search)) {
+      const result = toSearchResult(queryInfo, candidate);
 
-    scannedFiles += eventSearch.scannedFiles + markdownSearch.scannedFiles;
-    results.push(...eventSearch.results, ...markdownSearch.results);
+      if (result) {
+        results.push(result);
+      }
+
+      if (results.length >= clampedMaxResults) {
+        break;
+      }
+    }
   }
-
-  const rankedResults = results.sort((left, right) => right.score - left.score).slice(0, clampedMaxResults);
 
   return {
     query: queryInfo.original,
-    scannedFiles,
-    results: rankedResults,
+    scannedFiles: search.scannedFiles,
+    results,
   };
 }
 
