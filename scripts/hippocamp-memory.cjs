@@ -5,6 +5,7 @@ const { execFile } = require("node:child_process");
 const path = require("node:path");
 const os = require("node:os");
 const { promisify } = require("node:util");
+const MiniSearch = require("minisearch");
 
 const execFileAsync = promisify(execFile);
 
@@ -23,7 +24,9 @@ const DEFAULT_PROJECT_FILES = [
 
 const EVENT_INDEX_VERSION = 1;
 const EVENT_SEARCH_THRESHOLD = 50;
-const MARKDOWN_SEARCH_THRESHOLD = 20;
+const SEARCH_CANDIDATE_LIMIT = 60;
+const SEARCH_FIELD_BOOST = { cues: 3, heading: 2 };
+const SEARCH_FUZZY_DISTANCE = 0.2;
 const SEARCH_EXCERPT_MAX_CHARS = 1200;
 const PROCESS_SESSION_ID = `mcp-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
@@ -885,7 +888,7 @@ function createSearchExcerpt(content, queryInfo) {
     return matchedBlock.block;
   }
 
-  return null;
+  return blocks[0]?.score > 0 ? blocks[0].block : null;
 }
 
 async function readMemoryFile({ scope, path: relativePath, projectRoot }) {
@@ -1035,31 +1038,9 @@ async function listEventFiles(root) {
   };
 }
 
-function scoreEventEntry(queryInfo, event) {
-  const cueScore = scoreSearchValues(queryInfo, event.cues || []);
-  const headingScore = scoreSearchValues(queryInfo, [event.heading || "", event.id || ""]);
-  const score = cueScore * 100 + headingScore * 60;
-  const match = cueScore >= headingScore ? "cues" : "heading";
-
-  return {
-    score,
-    match,
-  };
-}
-
-async function getEventBlockById(markdownPath, eventId) {
-  const content = await readFileIfExists(markdownPath);
-
-  if (content === null) {
-    return null;
-  }
-
-  return parseEventBlocks(content).find((event) => event.id === eventId) || null;
-}
-
-async function searchEventIndexes({ scope, root, queryInfo }) {
+async function collectEventDocuments({ scope, root }) {
   const eventFiles = await listEventFiles(root);
-  const candidates = [];
+  const documents = [];
 
   for (const indexName of eventFiles.indexes) {
     const indexPath = path.join(eventFiles.eventsDir, indexName);
@@ -1077,104 +1058,123 @@ async function searchEventIndexes({ scope, root, queryInfo }) {
       continue;
     }
 
-    for (const event of index.events) {
-      const eventScore = scoreEventEntry(queryInfo, event);
+    const content = await readFileIfExists(path.join(eventFiles.eventsDir, markdownName));
+    const blocks = new Map();
 
-      if (eventScore.score < EVENT_SEARCH_THRESHOLD) {
+    for (const block of parseEventBlocks(content || "")) {
+      if (!blocks.has(block.id)) {
+        blocks.set(block.id, block);
+      }
+    }
+
+    for (const event of index.events) {
+      const block = blocks.get(event.id);
+
+      if (!block) {
         continue;
       }
 
-      candidates.push({
+      documents.push({
         scope,
         path: `events/${markdownName}`,
-        markdownPath: path.join(eventFiles.eventsDir, markdownName),
         id: event.id,
         heading: event.heading,
         cues: normalizeCueList(event.cues),
-        score: Math.round(eventScore.score),
-        match: eventScore.match,
+        body: block.body,
       });
     }
   }
 
-  const results = [];
-  const sortedCandidates = candidates.sort((left, right) => right.score - left.score).slice(0, 60);
-
-  for (const candidate of sortedCandidates) {
-    const block = await getEventBlockById(candidate.markdownPath, candidate.id);
-
-    if (!block) {
-      continue;
-    }
-
-    const snippet = createSearchExcerpt(block.body, queryInfo);
-
-    if (!snippet) {
-      continue;
-    }
-
-    results.push({
-      scope: candidate.scope,
-      path: candidate.path,
-      id: candidate.id,
-      heading: candidate.heading,
-      cues: candidate.cues,
-      score: candidate.score,
-      match: candidate.match,
-      snippet,
-    });
-  }
-
   return {
     scannedFiles: eventFiles.indexes.length,
-    results,
+    documents,
   };
 }
 
-async function searchMarkdownFiles({ scope, root, queryInfo }) {
+async function collectMarkdownDocuments({ scope, root }) {
   const markdownFiles = await walkMarkdownFiles(root);
   const scopedFiles =
     scope === "global"
       ? markdownFiles.filter((relativePath) => !relativePath.startsWith("projects/"))
       : markdownFiles;
-  const results = [];
-  let scannedFiles = 0;
+  const documents = [];
 
   for (const relativePath of scopedFiles) {
     if (relativePath.startsWith("events/")) {
       continue;
     }
 
-    scannedFiles += 1;
-
-    const absolutePath = path.join(root, relativePath);
-    const content = await fs.readFile(absolutePath, "utf8");
-    const pathScore = scoreSearchValues(queryInfo, [relativePath]);
-    const bodyScore = scoreSearchValues(queryInfo, [content]);
-    const score = pathScore * 70 + bodyScore * 40;
-
-    if (score < MARKDOWN_SEARCH_THRESHOLD) {
-      continue;
-    }
-
-    const snippet = createSearchExcerpt(content, queryInfo);
-
-    if (!snippet) {
-      continue;
-    }
-
-    results.push({
+    documents.push({
       scope,
       path: relativePath,
-      score: Math.round(score),
-      match: pathScore >= bodyScore ? "path" : "body",
-      snippet,
+      body: await fs.readFile(path.join(root, relativePath), "utf8"),
     });
   }
 
   return {
-    scannedFiles,
-    results,
+    scannedFiles: documents.length,
+    documents,
+  };
+}
+
+function rankSearchDocuments(queryInfo, documents) {
+  const index = new MiniSearch({
+    fields: ["cues", "heading", "body"],
+    idField: "position",
+    tokenize: tokenizeSearchText,
+    processTerm: (term) => term,
+  });
+
+  index.addAll(
+    documents.map((document, position) => ({
+      position,
+      cues: (document.cues || []).join(" "),
+      heading: document.heading || document.path,
+      body: document.body,
+    })),
+  );
+
+  return index
+    .search(queryInfo.normalized, {
+      boost: SEARCH_FIELD_BOOST,
+      fuzzy: SEARCH_FUZZY_DISTANCE,
+    })
+    .slice(0, SEARCH_CANDIDATE_LIMIT)
+    .map((hit) => ({
+      document: documents[hit.id],
+      score: Math.round(hit.score * 100) / 100,
+    }));
+}
+
+function toSearchResult(queryInfo, { document, score }) {
+  const snippet = createSearchExcerpt(document.body, queryInfo);
+
+  if (!snippet) {
+    return null;
+  }
+
+  if (!document.id) {
+    return {
+      scope: document.scope,
+      path: document.path,
+      score,
+      match: scoreSearchValues(queryInfo, [document.path]) > 0 ? "path" : "body",
+      snippet,
+    };
+  }
+
+  const cueScore = scoreSearchValues(queryInfo, document.cues);
+  const headingScore = scoreSearchValues(queryInfo, [document.heading || "", document.id]);
+
+  return {
+    scope: document.scope,
+    path: document.path,
+    id: document.id,
+    heading: document.heading,
+    cues: document.cues,
+    score,
+    match: cueScore > 0 && cueScore >= headingScore ? "cues" : headingScore > 0 ? "heading" : "body",
+    snippet,
   };
 }
 
@@ -1182,24 +1182,38 @@ async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5
   const queryInfo = createQueryInfo(query);
   const clampedMaxResults = Math.max(1, Math.min(Number(maxResults) || 5, 20));
   const scopes = scope === "both" ? ["global", "project"] : [scope];
-  const results = [];
+  const documents = [];
   let scannedFiles = 0;
 
   for (const itemScope of scopes) {
     const root = getScopeRoot(itemScope, projectRoot);
-    const eventSearch = await searchEventIndexes({ scope: itemScope, root, queryInfo });
-    const markdownSearch = await searchMarkdownFiles({ scope: itemScope, root, queryInfo });
+    const eventDocuments = await collectEventDocuments({ scope: itemScope, root });
+    const markdownDocuments = await collectMarkdownDocuments({ scope: itemScope, root });
 
-    scannedFiles += eventSearch.scannedFiles + markdownSearch.scannedFiles;
-    results.push(...eventSearch.results, ...markdownSearch.results);
+    scannedFiles += eventDocuments.scannedFiles + markdownDocuments.scannedFiles;
+    documents.push(...eventDocuments.documents, ...markdownDocuments.documents);
   }
 
-  const rankedResults = results.sort((left, right) => right.score - left.score).slice(0, clampedMaxResults);
+  const results = [];
+
+  if (queryInfo.tokens.length && documents.length) {
+    for (const candidate of rankSearchDocuments(queryInfo, documents)) {
+      const result = toSearchResult(queryInfo, candidate);
+
+      if (result) {
+        results.push(result);
+      }
+
+      if (results.length >= clampedMaxResults) {
+        break;
+      }
+    }
+  }
 
   return {
     query: queryInfo.original,
     scannedFiles,
-    results: rankedResults,
+    results,
   };
 }
 

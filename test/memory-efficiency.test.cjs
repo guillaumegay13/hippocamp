@@ -157,3 +157,33 @@ test("search uses indexed events and returns coherent evidence", async (t) => {
 
   assert.deepEqual(unindexed.results, []);
 });
+
+test("search ranks indexed event bodies with typo tolerance", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-body-search-"));
+  const projectRoot = path.join(tempRoot, "body-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  for (const [title, cues, content] of [
+    ["Deploy note", ["deploy"], "The zanzibar migration needs a rollback plan."],
+    ["Unrelated note", ["billing"], "Invoices are generated monthly."],
+  ]) {
+    await memory.appendEvent({ content, cues, projectRoot, scope: "project", sync: false, title });
+  }
+
+  const search = await memory.searchMemory({ projectRoot, query: "zanzibr rollback", scope: "project" });
+
+  assert.equal(search.results.length, 1);
+  assert.equal(search.results[0].heading, "Deploy note");
+  assert.equal(search.results[0].match, "body");
+});
