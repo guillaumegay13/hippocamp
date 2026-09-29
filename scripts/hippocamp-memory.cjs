@@ -119,6 +119,15 @@ function findRepositoryRootSync(startPath) {
   return path.basename(commonDir) === ".git" ? path.dirname(commonDir) : gitRoot;
 }
 
+function isProjectRepository(projectRoot) {
+  const resolvedProjectRoot = getProjectRoot(projectRoot);
+  return (
+    fsSync.existsSync(resolvedProjectRoot) &&
+    fsSync.statSync(resolvedProjectRoot).isDirectory() &&
+    findGitRootSync(resolvedProjectRoot) !== null
+  );
+}
+
 function slugifyProjectName(value) {
   const slug = value
     .toLowerCase()
@@ -894,6 +903,11 @@ async function readMemoryFile({ scope, path: relativePath, projectRoot }) {
 
 async function writeMemoryFile({ scope, path: relativePath, content, projectRoot, sync = true }) {
   const target = resolveScopedPath(scope, relativePath, projectRoot);
+
+  if (target.path === "events" || target.path.startsWith("events/")) {
+    throw new Error("events/ is append-only. Use append_event with a title and cues instead.");
+  }
+
   const nextContent = ensureTrailingNewline(requireNonEmptyString(content, "content"));
 
   await ensureParentDirectory(target.absolutePath);
@@ -1272,6 +1286,7 @@ module.exports = {
   getGlobalRoot,
   getProjectRoot,
   getProjectSlug,
+  isProjectRepository,
   getScopeRoot,
   readMemoryFile,
   writeMemoryFile,

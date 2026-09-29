@@ -44,7 +44,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory.
 - Event logs are append-only daily Markdown files under `events/YYYY-MM-DD.md`, with sibling `events/YYYY-MM-DD.index.json` cue indexes.
 - Curated files such as `current_state.md` and `open_threads.md` use explicit file writes.
-- Event entries should include concise `Cues:` values for fuzzy recall when possible.
+- MCP `append_event` requires a title and 1-8 cues; MCP `write_memory_file` rejects paths under `events/`; an explicit `projectRoot` must be a directory inside a Git repository.
 - `append_event` auto-stamps `Agent:` / `Session:` provenance when resolvable (installer env, MCP client name, or process session id). No manual user config.
 - Default sync is automatic through the local Lagoon repo.
 - Local MCP mode must not require `GITHUB_TOKEN`, GitHub App auth, or a cloud service.

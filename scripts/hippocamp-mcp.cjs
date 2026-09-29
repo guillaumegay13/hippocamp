@@ -6,6 +6,13 @@ const nodePath = require("node:path");
 const { z } = require("zod");
 const memory = require("./hippocamp-memory.cjs");
 
+const projectRootSchema = z
+  .string()
+  .optional()
+  .refine((value) => !value || memory.isProjectRepository(value), {
+    message: "projectRoot must be an existing directory inside a Git repository. Omit it to use the current project.",
+  });
+
 function toTextResult(payload) {
   return {
     content: [
@@ -66,7 +73,7 @@ async function main() {
       description:
         "Load the default global and project wake-up files. Use this at the start of a top-level task thread.",
       inputSchema: {
-        projectRoot: z.string().optional(),
+        projectRoot: projectRootSchema,
       },
     },
     async ({ projectRoot }) => toTextResult(await memory.wakeUp({ projectRoot })),
@@ -79,7 +86,7 @@ async function main() {
       inputSchema: {
         scope: z.enum(["global", "project"]),
         path: z.string(),
-        projectRoot: z.string().optional(),
+        projectRoot: projectRootSchema,
       },
     },
     async ({ scope, path, projectRoot }) =>
@@ -90,13 +97,13 @@ async function main() {
     "write_memory_file",
     {
       description:
-        "Create or overwrite one memory file. Use this for curated files like identity.md, current_state.md, or open_threads.md.",
+        "Create or overwrite one memory file. Use this for curated files like identity.md, current_state.md, or open_threads.md. Paths under events/ are rejected; use append_event.",
       inputSchema: {
         scope: z.enum(["global", "project"]),
         path: z.string(),
         content: z.string(),
         sync: z.boolean().optional(),
-        projectRoot: z.string().optional(),
+        projectRoot: projectRootSchema,
       },
     },
     async ({ scope, path, content, sync, projectRoot }) =>
@@ -107,14 +114,14 @@ async function main() {
     "append_event",
     {
       description:
-        "Append a dated event entry under events/YYYY-MM-DD.md and update the sibling cue index. Automatically stamps Agent/Session provenance when available. Store references to GitHub artifacts instead of copying their content.",
+        "Append a dated event entry under events/YYYY-MM-DD.md and update the sibling cue index. Requires a title and 1-8 short cues for recall. Automatically stamps Agent/Session provenance when available. Store references to GitHub artifacts instead of copying their content.",
       inputSchema: {
         scope: z.enum(["global", "project"]).default("project"),
-        title: z.string().optional(),
-        cues: z.array(z.string()).optional(),
+        title: z.string().trim().min(1),
+        cues: z.array(z.string().trim().min(1)).min(1).max(8),
         content: z.string(),
         sync: z.boolean().optional(),
-        projectRoot: z.string().optional(),
+        projectRoot: projectRootSchema,
       },
     },
     async ({ scope, title, cues, content, sync, projectRoot }) => {
@@ -140,7 +147,7 @@ async function main() {
       inputSchema: {
         scope: z.enum(["global", "project"]),
         path: z.string().optional(),
-        projectRoot: z.string().optional(),
+        projectRoot: projectRootSchema,
       },
     },
     async ({ scope, path, projectRoot }) =>
@@ -160,7 +167,7 @@ async function main() {
         query: z.string(),
         scope: z.enum(["global", "project", "both"]).default("both"),
         maxResults: z.number().int().min(1).max(20).optional(),
-        projectRoot: z.string().optional(),
+        projectRoot: projectRootSchema,
       },
     },
     async ({ query, scope, maxResults, projectRoot }) =>
@@ -175,7 +182,7 @@ async function main() {
       inputSchema: {
         scope: z.enum(["global", "project"]),
         path: z.string().optional(),
-        projectRoot: z.string().optional(),
+        projectRoot: projectRootSchema,
         message: z.string().optional(),
       },
     },

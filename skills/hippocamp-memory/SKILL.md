@@ -27,7 +27,7 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
 3. Use `search_memory` as the normal path for task-specific recall after wake-up.
 4. If search returns no result, continue without memory. Do not read whole event logs as a fallback.
 5. During work, use `append_event` only for meaningful milestones.
-6. When appending events, include concise `Cues:` values or pass the `cues` argument so fuzzy recall can find the event later.
+6. When appending events, pass a `title` and 1-8 concise `cues` so fuzzy recall can find the event later. Never write under `events/` with `write_memory_file`.
 7. `write_memory_file` and `append_event` sync by default.
 8. If a sync is skipped or fails, call `sync_memory` explicitly.
 9. At the end of the task, if project state actually changed, use `write_memory_file` to update curated files such as:

@@ -158,7 +158,7 @@ Typical agent flow:
 1. Call `wake_up` at the start of a top-level task.
 2. Read the returned global and project memory.
 3. Use `search_memory` for task-specific recall after wake-up.
-4. Use `append_event` for meaningful milestones, with concise cues when possible.
+4. Use `append_event` for meaningful milestones, with a title and 1-8 concise cues.
 5. Update curated files like `current_state.md` and `open_threads.md` before finishing.
 
 Writes sync by default. If sync fails or is skipped, call `sync_memory`.
