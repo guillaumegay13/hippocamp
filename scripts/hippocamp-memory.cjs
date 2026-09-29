@@ -861,6 +861,38 @@ function scoreSearchValues(queryInfo, values) {
   return Math.max(phraseScore, exactScore, fuzzyScore);
 }
 
+// Split a paragraph over the excerpt limit into whole-sentence chunks so a
+// long matching paragraph is still searchable without cropping mid-sentence.
+function splitOversizedBlock(block) {
+  if (block.length <= SEARCH_EXCERPT_MAX_CHARS) {
+    return [block];
+  }
+
+  const chunks = [];
+  let current = "";
+
+  for (const sentence of block.split(/(?<=[.!?])\s+|\n+/)) {
+    const next = current ? `${current} ${sentence}` : sentence;
+
+    if (next.length <= SEARCH_EXCERPT_MAX_CHARS) {
+      current = next;
+      continue;
+    }
+
+    if (current) {
+      chunks.push(current);
+    }
+
+    current = sentence.length <= SEARCH_EXCERPT_MAX_CHARS ? sentence : "";
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}
+
 function createSearchExcerpt(content, queryInfo) {
   const trimmed = content.trim();
 
@@ -877,7 +909,7 @@ function createSearchExcerpt(content, queryInfo) {
     .map((block) => block.trim())
     .filter(Boolean)
     .filter((block) => !/^(?:Agent:|Session:|Cues:)\s*/i.test(block))
-    .filter((block) => block.length <= SEARCH_EXCERPT_MAX_CHARS);
+    .flatMap(splitOversizedBlock);
 
   if (!blocks.length) {
     return null;
