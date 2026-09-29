@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const memory = require("./hippocamp-memory.cjs");
 
+const MAX_TOP_K = 20;
 const DEFAULT_DATA = ".context/longmemeval/longmemeval_s_cleaned.json";
 const DATA_URL =
   "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json";
@@ -23,7 +24,7 @@ Usage:
 Options:
   --data PATH   LongMemEval-S JSON. Default: ${DEFAULT_DATA}
   --limit N     Evaluate N questions spread evenly across the set. Default: all answerable questions
-  --top-k K     Results retrieved per question. Default: 5
+  --top-k K     Results retrieved per question, at most ${MAX_TOP_K} (the search_memory cap). Default: 5
   --help        Show this help
 
 Download the data once:
@@ -57,6 +58,10 @@ function parseArgs(argv) {
       options.limit = parsePositiveInteger(argv[++index], "--limit");
     } else if (token === "--top-k") {
       options.topK = parsePositiveInteger(argv[++index], "--top-k");
+
+      if (options.topK > MAX_TOP_K) {
+        throw new Error(`--top-k must be at most ${MAX_TOP_K}, the search_memory result cap.`);
+      }
     } else {
       throw new Error(`Unknown argument: ${token}`);
     }
@@ -170,9 +175,8 @@ async function run(options) {
   const answerable = JSON.parse(await fs.readFile(options.data, "utf8")).filter(
     (item) => !String(item.question_id).endsWith("_abs"),
   );
-  const limit = options.limit || answerable.length;
-  const step = Math.max(1, Math.floor(answerable.length / limit));
-  const items = answerable.filter((_, index) => index % step === 0).slice(0, limit);
+  const limit = Math.min(options.limit || answerable.length, answerable.length);
+  const items = Array.from({ length: limit }, (_, index) => answerable[Math.floor((index * answerable.length) / limit)]);
   const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-eval-retrieval-"));
   const previousGlobalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
   const overall = {};
