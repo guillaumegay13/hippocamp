@@ -1,0 +1,23 @@
+test/package-paths.test.cjs
+  s_22c674571693c3::t_321c79d9d35dc1 1-23
+package-lock.json
+  s_22c674571693c3::t_394479c788a105 3,9
+package.json
+  s_22c674571693c3::t_c7171d834a86eb 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "184e294a5063f04c3660be1120a311ed51198d75",
+  "prompts": {},
+  "sessions": {
+    "s_22c674571693c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6c6a87f-4a5a-406d-aa94-af9d9bacce74",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
