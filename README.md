@@ -252,6 +252,7 @@ npm run mcp:help
 npm run mcp:smoke
 npm run dream
 npm run dream:railway
+npm run eval:lagoon
 npm run eval:retrieval
 npm run install:codex
 npm run install:claude
@@ -262,6 +263,8 @@ npm run upgrade:grok
 ```
 
 `npm run eval:retrieval` measures search on LongMemEval-S without any model: Recall@5, Hit@5, MRR, snippet evidence (the returned text comes from an answer turn), returned context size, and latency, next to an in-process BM25 reference. Run it with `--help` for the one-time data download.
+
+`npm run eval:lagoon` runs the same kind of check, read-only, against your real Lagoon. It reads cases from `<Lagoon root>/evals/retrieval-cases.json`: a project, a query, and the event ids that answer it. An empty list means no memory should be returned. Keep the cases in Lagoon, not in this repo, because they quote private work.
 
 ## Releases
 
