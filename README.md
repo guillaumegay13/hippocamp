@@ -111,7 +111,7 @@ npx hippocamp@latest install-grok
 
 Upgrade with the same command: `npx hippocamp@latest upgrade`. Installers default to `~/.lagoon` as the memory repo; pass `--global-root /absolute/path/to/lagoon` to use another clone.
 
-Installed through npx, the agent starts the server with `npx -y --prefer-offline hippocamp@<version> mcp`, so it keeps working if npm cleans its cache. From a source checkout, `npm install` then `npm run install:claude` (or `install:codex`, `install:grok`) registers the checkout directly.
+Installed through npx, the installer copies the package to `~/.hippocamp/<version>/` and registers that copy, so the server starts without npx or network and keeps working if npm cleans its cache. From a source checkout, `npm install` then `npm run install:claude` (or `install:codex`, `install:grok`) registers the checkout directly.
 
 The Codex installer refreshes `~/.codex/AGENTS.md`. The Claude installer refreshes `~/.claude/CLAUDE.md`. The Grok installer refreshes `~/.grok/rules/hippocamp.md` and registers the MCP server with `HIPPOCAMP_AGENT=grok`.
 Managed instruction blocks tell the agent to call `wake_up` at the start of new top-level coding tasks before repo exploration or edits.

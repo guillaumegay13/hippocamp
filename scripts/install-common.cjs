@@ -1,22 +1,27 @@
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
+const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 
 const execFileAsync = promisify(execFile);
 
-// How an agent starts the MCP server. Run through npx, the package lives in npm's cache,
-// which npm may clean; a pinned npx command downloads it again instead of breaking.
-function mcpServerCommand(repoRoot) {
+// How an agent starts the MCP server. Run through npx, the package sits in npm's cache, which
+// npm may clean. Copy it with its dependencies to ~/.hippocamp/<version> and start it from
+// there: no npx or network at start, so it also works offline.
+function mcpServerCommand(repoRoot, home = os.homedir()) {
   if (!repoRoot.split(path.sep).includes("_npx")) {
     return [process.execPath, path.join(repoRoot, "scripts", "hippocamp-mcp.cjs")];
   }
 
   const { version } = require(path.join(repoRoot, "package.json"));
-  const npx = path.join(path.dirname(process.execPath), process.platform === "win32" ? "npx.cmd" : "npx");
+  const target = path.join(home, ".hippocamp", version, "node_modules");
 
-  return [fsSync.existsSync(npx) ? npx : path.basename(npx), "-y", "--prefer-offline", `hippocamp@${version}`, "mcp"];
+  fsSync.rmSync(target, { recursive: true, force: true });
+  fsSync.cpSync(path.dirname(repoRoot), target, { recursive: true, dereference: true });
+
+  return [process.execPath, path.join(target, path.basename(repoRoot), "scripts", "hippocamp-mcp.cjs")];
 }
 
 async function git(args, cwd) {
