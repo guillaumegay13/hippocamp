@@ -27,13 +27,55 @@ Claude Code and Codex now ship their own memory. Use Hippocamp when you want:
 - **Files you own.** Markdown in your own private repo, readable without any UI, portable across machines through your normal Git credentials.
 - **Reviewed compaction.** Optional Dream mode summarizes memory offline and proposes the result as a pull request.
 
-## How Well It Finds Things
+## Results
 
-Measured with the scripts in this repo, so you can reproduce them:
+Every number below comes from a script in this repo, so you can rerun it. We report where Hippocamp falls short too.
 
-- LongMemEval-S, 470 questions: the right session is in the top 5 for 90.5% of questions (a BM25 reference gets 91.4%), with about 11 times less text than whole sessions.
-- Answer accuracy on 100 LongMemEval-S questions, reader Claude Sonnet 5, grader gpt-4o: 71% with 5 results, 77% with 10. Giving the reader the correct sessions directly reaches 90%, so the remaining gap is retrieval, not the reader.
-- Questions no memory is about return nothing instead of noise.
+### Finding the right memory
+
+LongMemEval-S, all 470 answerable questions, top 5 results, no model involved (`npm run eval:retrieval`).
+
+| Measure | Hippocamp | BM25 reference |
+| --- | ---: | ---: |
+| Right session in top 5 (Recall@5) | 90.5% | 91.4% |
+| At least one right session in top 5 (Hit@5) | 96.0% | 96.8% |
+| Returned text contains the answer turn | 87.9% | n/a |
+| Text returned per query | 5.9k chars | 65.5k chars |
+| Search latency, cold index | 42 ms | n/a |
+
+BM25 returns whole sessions; Hippocamp returns the matching paragraphs of each result.
+
+### Answering with it
+
+100 LongMemEval-S questions, reader Claude Sonnet 5, grader gpt-4o with the official LongMemEval grading prompts (`npm run eval:qa`).
+
+| What the reader gets | Text per question | Answer accuracy |
+| --- | ---: | ---: |
+| Hippocamp, top 5 | 6.7k chars | 71% |
+| Hippocamp, top 10 | 12.9k chars | 77% |
+| The correct sessions, given directly | 28.8k chars | 90% |
+
+The same reader reaches 90% with the correct sessions, so the remaining gap is retrieval, not the reader.
+
+### Real coding questions
+
+53 questions about real work in a personal Lagoon across 13 projects (`npm run eval:lagoon`). This is our own test set, kept in the private Lagoon.
+
+| Measure | Result |
+| --- | ---: |
+| Right event in top 5, 43 answerable questions | 42 / 43 |
+| No results for 10 questions no memory is about | 10 / 10 |
+
+### Why less text matters
+
+Memory results share the agent's context with code, diffs, and tool output, and agents search several times per task. About 6k characters per search is roughly 1.5k tokens; whole sessions would be about 16k. Fewer tokens make each turn cheaper and faster, and keep the relevant lines from being buried. Less text is only useful when the answer is still in it, which is why we report answer accuracy next to text size.
+
+### Limits
+
+- Recall@5 is just under the BM25 reference, by less than 1 point, with 11 times less text.
+- No embeddings or semantic search: a memory written in other words can be missed. On LongMemEval-S, 9 of 470 questions miss with no word in common with the answer.
+- Answer accuracy is measured on 100 questions, about plus or minus 4 points.
+- Self-reported scores from other memory systems use their own readers and graders, so they are not directly comparable with these.
 
 ## What It Stores
 
