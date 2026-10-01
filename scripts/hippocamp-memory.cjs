@@ -924,8 +924,22 @@ function createSearchExcerpt(content, queryInfo) {
 
   index.addAll(blocks.map((text, position) => ({ position, text })));
 
-  const [best] = index.search(queryInfo.normalized, { fuzzy: SEARCH_FUZZY_DISTANCE });
-  return best ? blocks[best.id] : null;
+  const picked = [];
+  let length = 0;
+
+  // Keep the best-matching paragraphs that fit the excerpt budget, in file order.
+  for (const hit of index.search(queryInfo.normalized, { fuzzy: SEARCH_FUZZY_DISTANCE })) {
+    const added = blocks[hit.id].length + (picked.length ? 2 : 0);
+
+    if (length + added > SEARCH_EXCERPT_MAX_CHARS) {
+      continue;
+    }
+
+    picked.push(hit.id);
+    length += added;
+  }
+
+  return picked.length ? picked.sort((left, right) => left - right).map((id) => blocks[id]).join("\n\n") : null;
 }
 
 async function readMemoryFile({ scope, path: relativePath, projectRoot }) {

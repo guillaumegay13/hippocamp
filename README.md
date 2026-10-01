@@ -261,7 +261,7 @@ npm run upgrade:claude
 npm run upgrade:grok
 ```
 
-`npm run eval:retrieval` measures search on LongMemEval-S without any model: Recall@5, Hit@5, MRR, returned context size, and latency, next to an in-process BM25 reference. Run it with `--help` for the one-time data download.
+`npm run eval:retrieval` measures search on LongMemEval-S without any model: Recall@5, Hit@5, MRR, snippet evidence (the returned text comes from an answer turn), returned context size, and latency, next to an in-process BM25 reference. Run it with `--help` for the one-time data download.
 
 ## Releases
 

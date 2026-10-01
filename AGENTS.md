@@ -72,7 +72,7 @@ When changing code, use the smallest verification that proves the change:
 - Run `npm run mcp:help` when changing MCP registration or commands.
 - Run `npm run mcp:smoke` when changing memory reads, root resolution, or wake-up behavior.
 - Run `npm run dream -- --help` when changing Dream CLI arguments.
-- Run `npm run eval:retrieval -- --limit 100` when changing search ranking or snippets; report Recall@5 against the BM25 row.
+- Run `npm run eval:retrieval -- --limit 100` when changing search ranking or snippets; report Recall@5 against the BM25 row and snippet evidence.
 
 ## Notes For Future Agents
 

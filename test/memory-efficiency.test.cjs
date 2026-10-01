@@ -221,3 +221,43 @@ test("search returns whole sentences from an oversized matching paragraph", asyn
   assert.ok(search.results[0].snippet.length <= 1200);
   assert.match(search.results[0].snippet, /^The weekly sync|^The kestrel/);
 });
+
+test("search returns every matching paragraph that fits the excerpt budget", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-multi-paragraph-"));
+  const projectRoot = path.join(tempRoot, "multi-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const filler = "The weekly sync covered routine updates.";
+  const paragraphs = [
+    "We discussed the kestrel database move in detail.",
+    ...Array(30).fill(filler),
+    "The kestrel move finished in eu-west-3 on Friday.",
+  ];
+  await memory.appendEvent({
+    content: paragraphs.join("\n\n"),
+    cues: ["infra"],
+    projectRoot,
+    scope: "project",
+    sync: false,
+    title: "Weekly sync",
+  });
+
+  const search = await memory.searchMemory({ projectRoot, query: "kestrel database move", scope: "project" });
+  const snippet = search.results[0].snippet;
+
+  assert.ok(snippet.indexOf("We discussed the kestrel") < snippet.indexOf("finished in eu-west-3"));
+  assert.match(snippet, /We discussed the kestrel database move/);
+  assert.match(snippet, /The kestrel move finished in eu-west-3/);
+  assert.ok(snippet.length <= 1200);
+});
