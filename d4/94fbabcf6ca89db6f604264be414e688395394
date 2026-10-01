@@ -1,0 +1,16 @@
+package-lock.json
+  h_4314c622e2d856 3,9
+package.json
+  h_4314c622e2d856 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d494fbabcf6ca89db6f604264be414e688395394",
+  "prompts": {},
+  "humans": {
+    "h_4314c622e2d856": {
+      "author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
