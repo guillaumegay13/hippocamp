@@ -382,3 +382,84 @@ test("search favors events from a month named in the query", async (t) => {
   assert.equal(byMonth.results[0].id, "2026-08-05T10:00:00.000Z");
   assert.equal(byDay.results[0].id, "2026-05-02T08:00:00.000Z");
 });
+
+test("search favors events from a relative date named in the query", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-relative-date-"));
+  const projectRoot = path.join(tempRoot, "relative-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  // Seven days ago is always in last calendar week; one day ago is yesterday.
+  const daysAgo = (days) => new Date(Date.now() - days * 86_400_000).toISOString();
+  const timestamps = { yesterday: daysAgo(1), lastWeek: daysAgo(7), older: daysAgo(30) };
+
+  for (const [key, timestamp] of Object.entries(timestamps)) {
+    await memory.appendEvent({
+      // The old event matches the words better, so only the date words can rank the others first.
+      content: key === "older" ? "Deploy key rotation: rotated the deploy key again." : "Rotated the key for staging.",
+      cues: ["deploy-key"],
+      date: timestamp.slice(0, 10),
+      projectRoot,
+      scope: "project",
+      sync: false,
+      timestamp,
+      title: "Deploy key rotation",
+    });
+  }
+
+  const ids = async (phrase) =>
+    (await memory.searchMemory({ projectRoot, query: `deploy key rotation ${phrase}`, scope: "project" })).results.map(
+      (result) => result.id,
+    );
+
+  assert.deepEqual(await ids("yesterday"), [timestamps.yesterday]);
+  // On a Monday, yesterday is also in last week.
+  const lastWeek = await ids("last week");
+  assert.ok(lastWeek.includes(timestamps.lastWeek));
+  assert.ok(!lastWeek.includes(timestamps.older));
+  assert.deepEqual(await ids("today"), []);
+});
+
+test("search returns a snippet for a long event matched only by its date", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-date-only-"));
+  const projectRoot = path.join(tempRoot, "date-only-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  await memory.appendEvent({
+    content: Array(30).fill("The weekly sync covered routine updates.").join("\n\n"),
+    cues: ["sync"],
+    date: "2026-08-05",
+    projectRoot,
+    scope: "project",
+    sync: false,
+    timestamp: "2026-08-05T10:00:00.000Z",
+    title: "Weekly sync",
+  });
+
+  const search = await memory.searchMemory({ projectRoot, query: "2026-08-05", scope: "project" });
+
+  assert.equal(search.results.length, 1);
+  assert.match(search.results[0].snippet, /^The weekly sync covered routine updates\./);
+  assert.ok(search.results[0].snippet.length <= 1200);
+});

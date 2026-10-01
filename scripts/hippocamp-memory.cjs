@@ -747,6 +747,7 @@ function createQueryInfo(query) {
     normalized: tokens.join(" "),
     cue: tokens.join("-"),
     tokens,
+    datePrefixes: queryDatePrefixes(original),
   };
 }
 
@@ -895,7 +896,7 @@ function splitOversizedBlock(block) {
   return chunks;
 }
 
-function createSearchExcerpt(content, queryInfo) {
+function createSearchExcerpt(content, queryInfo, leadWhenUnmatched = false) {
   const trimmed = content.trim();
 
   if (!trimmed) {
@@ -930,14 +931,17 @@ function createSearchExcerpt(content, queryInfo) {
   let length = 0;
 
   // Keep the best-matching paragraphs that fit the excerpt budget, in file order.
-  for (const hit of index.search(queryInfo.normalized, { fuzzy: SEARCH_FUZZY_DISTANCE })) {
-    const added = blocks[hit.id].length + (picked.length ? 2 : 0);
+  const hits = index.search(queryInfo.normalized, { fuzzy: SEARCH_FUZZY_DISTANCE }).map((hit) => hit.id);
+
+  // An event chosen by its date may share no words with the query; then lead with its first paragraphs.
+  for (const id of hits.length || !leadWhenUnmatched ? hits : blocks.map((_, position) => position)) {
+    const added = blocks[id].length + (picked.length ? 2 : 0);
 
     if (length + added > SEARCH_EXCERPT_MAX_CHARS) {
       continue;
     }
 
-    picked.push(hit.id);
+    picked.push(id);
     length += added;
   }
 
@@ -1214,14 +1218,42 @@ async function collectMarkdownDocuments({ scope, root, curatedFiles }) {
   };
 }
 
-// Month name and day of an event's timestamp id, so "in August" or "2026-08-05" can match it.
-function eventDateText(id) {
-  if (!/^\d{4}-\d{2}-\d{2}T/.test(id || "")) {
-    return "";
-  }
+const MONTH_NAMES = "january february march april may june july august september october november december".split(" ");
 
-  const month = new Date(id).toLocaleString("en-US", { month: "long", timeZone: "UTC" });
-  return `${month} ${id.slice(0, 10)}`;
+// Search word for a UTC day ("2026-08-05" -> "d20260805") or month ("2026-08" -> "august").
+// A day is one exact word, so it never matches a neighbor day by typo tolerance.
+function dateTerm(prefix) {
+  return prefix.length === 10 ? `d${prefix.replace(/-/g, "")}` : MONTH_NAMES[Number(prefix.slice(5, 7)) - 1];
+}
+
+// Month and day words of an event's timestamp id.
+function eventDateText(id) {
+  return /^\d{4}-\d{2}-\d{2}T/.test(id || "") ? `${dateTerm(id.slice(0, 7))} ${dateTerm(id.slice(0, 10))}` : "";
+}
+
+// Dates a query asks for: YYYY-MM-DD dates and relative phrases, as UTC day
+// ("2026-08-05") or month ("2026-08") prefixes of event ids. Weeks start on Monday.
+function queryDatePrefixes(query, now = new Date()) {
+  const text = query.toLowerCase();
+  const prefixes = [...text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)].map((match) => match[0]);
+  const utc = (months, days) =>
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + months, days)).toISOString();
+  const addDays = (from, to) => {
+    for (let offset = from; offset <= to; offset += 1) {
+      prefixes.push(utc(0, now.getUTCDate() + offset).slice(0, 10));
+    }
+  };
+  const addMonth = (offset) => prefixes.push(utc(offset, 1).slice(0, 7));
+  const monday = -((now.getUTCDay() + 6) % 7);
+
+  if (/\btoday\b/.test(text)) addDays(0, 0);
+  if (/\byesterday\b/.test(text)) addDays(-1, -1);
+  if (/\bthis week\b/.test(text)) addDays(monday, 0);
+  if (/\blast week\b/.test(text)) addDays(monday - 7, monday - 1);
+  if (/\bthis month\b/.test(text)) addMonth(0);
+  if (/\blast month\b/.test(text)) addMonth(-1);
+
+  return prefixes;
 }
 
 function buildSearchIndex(documents) {
@@ -1246,10 +1278,16 @@ function buildSearchIndex(documents) {
 }
 
 function rankSearchDocuments(queryInfo, { index, documents }) {
+  const { datePrefixes } = queryInfo;
+
+  // A date the query asks for filters events to those dates. Undated files always pass.
   return index
-    .search(queryInfo.normalized, {
+    .search([queryInfo.normalized, ...datePrefixes.map(dateTerm)].join(" "), {
       boost: SEARCH_FIELD_BOOST,
-      fuzzy: SEARCH_FUZZY_DISTANCE,
+      fuzzy: (term) => (/^d\d{8}$/.test(term) ? 0 : SEARCH_FUZZY_DISTANCE),
+      filter: datePrefixes.length
+        ? (hit) => !documents[hit.id].id || datePrefixes.some((prefix) => documents[hit.id].id.startsWith(prefix))
+        : undefined,
     })
     .slice(0, SEARCH_CANDIDATE_LIMIT)
     .map((hit) => ({
@@ -1259,7 +1297,7 @@ function rankSearchDocuments(queryInfo, { index, documents }) {
 }
 
 function toSearchResult(queryInfo, { document, score }) {
-  const snippet = createSearchExcerpt(document.body, queryInfo);
+  const snippet = createSearchExcerpt(document.body, queryInfo, queryInfo.datePrefixes.length > 0);
 
   if (!snippet) {
     return null;
