@@ -1,0 +1,33 @@
+README.md
+  s_df863ddf921c64::t_114e4a9464f420 13,19,23,27-30,34,36,38-41,43,45,47-51,53,55
+AGENTS.md
+  s_df863ddf921c64::t_5a2bb99491f0fe 41-42,67
+docs/development.md
+  s_df863ddf921c64::t_a83206ca8df7fb 1-34
+docs/dream.md
+  s_df863ddf921c64::t_5a149b7f1d96ff 1-46
+docs/how-it-works.md
+  s_df863ddf921c64::t_2f35bd471ea9e4 1-119
+docs/results.md
+  s_df863ddf921c64::t_ae6b006e9c0c4d 1-59
+docs/setup.md
+  s_df863ddf921c64::t_faae81a39945ae 1-65
+test/package-paths.test.cjs
+  s_df863ddf921c64::t_54332efcbb262d 31-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e5b1bb779cd43a7a22468eed47c5030cdb4cfd2d",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
