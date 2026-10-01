@@ -23,3 +23,4 @@ jobs:
       - run: node --check scripts/*.cjs
       - run: npm run mcp:help
       - run: npm run mcp:smoke
+      - run: npm test

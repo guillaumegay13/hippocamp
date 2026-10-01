@@ -132,6 +132,19 @@ function rankBm25(query, documents) {
     .map((item) => item.document);
 }
 
+// Words too common to show that a question and its evidence share wording.
+const STOPWORDS = new Set(
+  "about after also been before could does from have into just many much over some such than that their them then there these they this what when where which while with would your".split(" "),
+);
+
+function contentTokens(value) {
+  return new Set(tokenize(value).filter((token) => token.length > 3 && !STOPWORDS.has(token)));
+}
+
+function squashSpace(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
 function retrievalMetrics(retrievedIds, answerIds) {
   const expected = new Set(answerIds);
   const hits = retrievedIds.filter((id) => expected.has(id)).length;
@@ -145,10 +158,10 @@ function retrievalMetrics(retrievedIds, answerIds) {
 }
 
 function addMetrics(bucket, system, metrics) {
-  const total = (bucket[system] ||= { recall: 0, hit: 0, mrr: 0, contextChars: 0, latencyMs: 0, count: 0 });
+  const total = (bucket[system] ||= { recall: 0, hit: 0, mrr: 0, evidence: 0, contextChars: 0, latencyMs: 0, count: 0 });
 
-  for (const key of ["recall", "hit", "mrr", "contextChars", "latencyMs"]) {
-    total[key] += metrics[key];
+  for (const key of ["recall", "hit", "mrr", "evidence", "contextChars", "latencyMs"]) {
+    total[key] += metrics[key] ?? Number.NaN;
   }
 
   total.count += 1;
@@ -162,6 +175,7 @@ function formatRow(label, total) {
     `Recall@K ${(average("recall") * 100).toFixed(1)}%`,
     `Hit@K ${(average("hit") * 100).toFixed(1)}%`,
     `MRR ${average("mrr").toFixed(3)}`,
+    Number.isNaN(total.evidence) ? "evidence  n/a " : `evidence ${(average("evidence") * 100).toFixed(1)}%`,
     `context ${Math.round(average("contextChars"))} chars`,
     `latency ${average("latencyMs").toFixed(0)} ms`,
   ].join("  ");
@@ -181,6 +195,8 @@ async function run(options) {
   const previousGlobalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
   const overall = {};
   const byType = {};
+  const misses = [];
+  let withEvidenceTurns = 0;
 
   process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(sandboxRoot, "lagoon");
 
@@ -201,6 +217,12 @@ async function run(options) {
       }
 
       const answerIds = item.answer_session_ids.map(String);
+      const evidenceTurns = item.haystack_sessions
+        .filter((_, index) => answerIds.includes(String(item.haystack_session_ids[index])))
+        .flat()
+        .filter((turn) => turn.has_answer)
+        .map((turn) => squashSpace(turn.content));
+      withEvidenceTurns += evidenceTurns.length ? 1 : 0;
       let startedAt = performance.now();
       const search = await memory.searchMemory({
         query: item.question,
@@ -212,7 +234,23 @@ async function run(options) {
         ...retrievalMetrics(search.results.map((result) => pathToSessionId.get(result.path)), answerIds),
         latencyMs: performance.now() - startedAt,
         contextChars: search.results.reduce((sum, result) => sum + result.snippet.length, 0),
+        // The snippet itself comes from a turn marked has_answer, not only the right session.
+        evidence: search.results.some((result) =>
+          result.snippet
+            .split(/\n\s*\n/)
+            .map(squashSpace)
+            .some((part) => evidenceTurns.some((turn) => turn.includes(part) || part.includes(turn))),
+        )
+          ? 1
+          : 0,
       };
+
+      if (!hippocamp.hit && evidenceTurns.length) {
+        const shared = [...contentTokens(item.question)].filter((token) =>
+          evidenceTurns.some((turn) => contentTokens(turn).has(token)),
+        );
+        misses.push({ type: item.question_type, sharedWords: shared.length });
+      }
 
       startedAt = performance.now();
       const bm25Documents = rankBm25(item.question, documents).slice(0, options.topK);
@@ -220,6 +258,7 @@ async function run(options) {
         ...retrievalMetrics(bm25Documents.map((document) => document.sessionId), answerIds),
         latencyMs: performance.now() - startedAt,
         contextChars: bm25Documents.reduce((sum, document) => sum + document.content.length, 0),
+        evidence: null,
       };
 
       for (const bucket of [overall, (byType[item.question_type] ||= {})]) {
@@ -249,6 +288,14 @@ async function run(options) {
   for (const [system, total] of Object.entries(overall)) {
     console.log(formatRow(system, total));
   }
+
+  const noSharedWords = misses.filter((miss) => miss.sharedWords === 0).length;
+  console.log(
+    `\nevidence: a hippocamp snippet is text from a has_answer turn (${withEvidenceTurns} questions have such turns).`,
+  );
+  console.log(
+    `wording: ${misses.length} hippocamp misses (Hit@K 0); ${noSharedWords} share no content word with the answer turns.`,
+  );
 
   for (const [type, systems] of Object.entries(byType)) {
     console.log(`\n${type} (${systems.bm25.count})`);
