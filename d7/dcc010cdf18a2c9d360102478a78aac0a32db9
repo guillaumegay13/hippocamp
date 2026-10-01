@@ -1,0 +1,19 @@
+scripts/eval-lagoon.cjs
+  s_df863ddf921c64::t_8acde26094a1c0 72-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d7dcc010cdf18a2c9d360102478a78aac0a32db9",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
