@@ -1,6 +1,6 @@
 # Hippocamp
 
-[![CI](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml/badge.svg)](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/hippocamp)](https://www.npmjs.com/package/hippocamp) [![CI](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml/badge.svg)](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml)
 
 <p align="center">
   <img src="./assets/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
@@ -17,6 +17,10 @@ npx hippocamp@latest install
 ```
 
 This installs Hippocamp into every supported agent CLI it finds, creates `~/.lagoon` as a local Git repo if it does not exist, and tells you how to add a private remote. Restart your agent, and it calls `wake_up` at the start of each task.
+
+![Codex saves a team decision to Hippocamp on its own; a later Claude Code session finds it with search_memory; git log shows the commit](https://raw.githubusercontent.com/guillaumegay13/hippocamp/main/assets/brand/hippocamp-demo.gif)
+
+A replay of a real session: Codex is told a decision and saves it with `append_event`; a new Claude Code session is asked why and finds it with `search_memory`. Neither prompt mentions Hippocamp.
 
 ## Why Not Built-In Memory?
 
