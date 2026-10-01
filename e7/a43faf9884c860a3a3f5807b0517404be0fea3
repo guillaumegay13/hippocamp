@@ -1,0 +1,21 @@
+scripts/hippocamp-mcp.cjs
+  s_df863ddf921c64::t_e07708db124d07 165
+skills/hippocamp-memory/SKILL.md
+  s_df863ddf921c64::t_e55c408f8ca661 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e7a43faf9884c860a3a3f5807b0517404be0fea3",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
