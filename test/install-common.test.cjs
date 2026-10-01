@@ -36,13 +36,30 @@ async function tempDir(t, name) {
   return root;
 }
 
-test("mcpServerCommand pins npx installs and keeps source checkouts direct", async (t) => {
+test("mcpServerCommand copies npx installs to a stable folder and keeps source checkouts direct", async (t) => {
   const root = await tempDir(t, "npx");
-  const npxRoot = path.join(root, "_npx", "abc", "node_modules", "hippocamp");
-  await fs.mkdir(npxRoot, { recursive: true });
+  const modules = path.join(root, "_npx", "abc", "node_modules");
+  const npxRoot = path.join(modules, "hippocamp");
+  const home = path.join(root, "home");
+  await fs.mkdir(path.join(npxRoot, "scripts"), { recursive: true });
+  await fs.mkdir(path.join(modules, "minisearch"), { recursive: true });
   await fs.writeFile(path.join(npxRoot, "package.json"), '{ "version": "9.9.9" }');
+  await fs.writeFile(path.join(npxRoot, "scripts", "hippocamp-mcp.cjs"), "// server\n");
+  await fs.writeFile(path.join(modules, "minisearch", "index.js"), "// dependency\n");
 
-  assert.deepEqual(mcpServerCommand(npxRoot).slice(1), ["-y", "--prefer-offline", "hippocamp@9.9.9", "mcp"]);
+  const command = mcpServerCommand(npxRoot, home);
+  const stable = path.join(home, ".hippocamp", "9.9.9", "node_modules");
+
+  assert.deepEqual(command, [process.execPath, path.join(stable, "hippocamp", "scripts", "hippocamp-mcp.cjs")]);
+  await fs.stat(command[1]);
+  await fs.stat(path.join(stable, "minisearch", "index.js"));
+
+  // A reinstall of the same version replaces the copy: no stale files, no staging left behind.
+  await fs.writeFile(path.join(stable, "stale.js"), "// old\n");
+  mcpServerCommand(npxRoot, home);
+  await assert.rejects(fs.stat(path.join(stable, "stale.js")));
+  assert.deepEqual(await fs.readdir(path.join(home, ".hippocamp", "9.9.9")), ["node_modules"]);
+
   const source = path.join(root, "src", "hippocamp");
   assert.deepEqual(mcpServerCommand(source), [process.execPath, path.join(source, "scripts", "hippocamp-mcp.cjs")]);
 });

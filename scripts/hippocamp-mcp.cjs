@@ -64,7 +64,7 @@ async function main() {
 
   const server = new McpServer({
     name: "hippocamp",
-    version: "0.1.0",
+    version: require("../package.json").version,
   });
 
   server.registerTool(
