@@ -1,0 +1,25 @@
+README.md
+  s_df863ddf921c64::t_602aae71d0ae5b 114
+scripts/hippocamp-mcp.cjs
+  s_df863ddf921c64::t_451d7446cd4a5f 67
+scripts/install-common.cjs
+  s_df863ddf921c64::t_63a489a54e951a 3,10-13,19,21-24
+test/install-common.test.cjs
+  s_df863ddf921c64::t_613e45e42e578a 39,41-45,47-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1183069d806915e59f60fd0887cdf0cea7b1b6c",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
