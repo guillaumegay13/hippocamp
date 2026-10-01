@@ -467,7 +467,11 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
   const repoRelativePaths = paths.map((item) => {
     const relativePath =
       path
-        .relative(realpathExisting(repoRoot), realpathExisting(assertPathInScope(scopeRoot, item)))
+        .relative(
+          realpathExisting(repoRoot),
+          // Recheck after resolving: a symlink inside the Lagoon must not reach another scope.
+          assertPathInScope(realpathExisting(scopeRoot), realpathExisting(assertPathInScope(scopeRoot, item))),
+        )
         .split(path.sep)
         .join(path.posix.sep) || ".";
 

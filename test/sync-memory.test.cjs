@@ -53,4 +53,15 @@ test("sync commits when the Lagoon path goes through a symlink", async (t) => {
 
   assert.equal(result.sync.committed, true);
   assert.match(git(["log", "--format=%s", "-1"]), /append project event/);
+
+  // A symlink inside the Lagoon pointing at another project must not be synced as this one.
+  const otherProject = path.join(tempRoot, "other-project");
+  await fs.mkdir(otherProject);
+  await fs.mkdir(path.join(realLagoon, "projects", "other-project"), { recursive: true });
+  await fs.symlink(path.join(realLagoon, "projects", "linked-project", "events"), path.join(realLagoon, "projects", "other-project", "events"));
+
+  await assert.rejects(
+    memory.appendEvent({ content: "Cross write.", cues: ["x"], projectRoot: otherProject, scope: "project", title: "Escape" }),
+    /escapes the memory root/,
+  );
 });
