@@ -1012,11 +1012,18 @@ async function appendEvent({
       : body.trim();
   const attributionSection = formatAttributionSection(attribution);
   const eventBody = attributionSection ? `${attributionSection}\n\n${cuedBody}` : cuedBody;
-  const heading = title ? `## ${timestamp} — ${title.trim()}` : `## ${timestamp}`;
-  const eventBlock = `${heading}\n\n${eventBody}\n`;
   const relativePath = `events/${date}.md`;
   const target = resolveScopedPath(scope, relativePath, projectRoot);
   const existing = await readFileIfExists(target.absolutePath);
+  const takenIds = new Set(parseEventBlocks(existing || "").map((event) => event.id));
+
+  // The timestamp is the event id, and search matches index entries to blocks by id.
+  while (takenIds.has(timestamp) && !Number.isNaN(Date.parse(timestamp))) {
+    timestamp = new Date(Date.parse(timestamp) + 1).toISOString();
+  }
+
+  const heading = title ? `## ${timestamp} — ${title.trim()}` : `## ${timestamp}`;
+  const eventBlock = `${heading}\n\n${eventBody}\n`;
   const nextContent = existing?.trim()
     ? `${existing.trimEnd()}\n\n${eventBlock.trimEnd()}\n`
     : `# Events — ${date}\n\n${eventBlock.trimEnd()}\n`;
