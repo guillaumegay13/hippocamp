@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const crypto = require("node:crypto");
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -171,16 +172,31 @@ function oracleChunks(item) {
     }));
 }
 
+// Models that rejected temperature (Claude 5 does); the official runs use 0 wherever it is accepted.
+const NO_TEMPERATURE = new Set();
+
 async function chat(endpoint, model, content, maxTokens) {
   for (let attempt = 1; ; attempt += 1) {
     try {
+      const body = { model, messages: [{ role: "user", content }], max_tokens: maxTokens };
+
+      if (!NO_TEMPERATURE.has(model)) {
+        body.temperature = 0;
+      }
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { Authorization: `Bearer ${process.env.MANIFEST_API_KEY}`, "Content-Type": "application/json" },
-        // No temperature: Claude 5 models reject it. The official runs use 0.
-        body: JSON.stringify({ model, messages: [{ role: "user", content }], max_tokens: maxTokens }),
+        body: JSON.stringify(body),
       });
       const text = await response.text();
+
+      // Checks this request, not the set: parallel calls can all be refused before the first one marks the model.
+      if (response.status === 400 && /temperature/i.test(text) && "temperature" in body) {
+        NO_TEMPERATURE.add(model);
+        attempt -= 1;
+        continue;
+      }
 
       if (!response.ok) {
         throw Object.assign(new Error(`HTTP ${response.status}: ${text.slice(0, 300)}`), { status: response.status });
@@ -212,7 +228,9 @@ async function run(options) {
   const grader = process.env.QA_GRADER_MODEL || "openrouter/openai/gpt-4o";
   const baseUrl = String(process.env.MANIFEST_BASE_URL || "").replace(/\/+$/, "");
   const endpoint = `${baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`}/chat/completions`;
-  const key = (system, id) => `${system}|${reader}|${grader}|${id}`;
+  // The reader prompt's hash is in the key, so a change to the data or to retrieval never reuses a stale answer.
+  const promptHash = (prompt) => crypto.createHash("sha1").update(prompt).digest("hex").slice(0, 12);
+  const key = (system, id, hash) => `${system}|${reader}|${grader}|${id}|${hash}`;
 
   const answerable = JSON.parse(await fs.readFile(options.data, "utf8")).filter(
     (item) => !String(item.question_id).endsWith("_abs"),
@@ -224,12 +242,13 @@ async function run(options) {
   if (fsSync.existsSync(options.cache)) {
     for (const line of (await fs.readFile(options.cache, "utf8")).split("\n").filter(Boolean)) {
       const row = JSON.parse(line);
-      done.set(`${row.system}|${row.reader}|${row.grader}|${row.id}`, row);
+      done.set(`${row.system}|${row.reader}|${row.grader}|${row.id}|${row.promptHash}`, row);
     }
   }
 
   // Build every prompt first (retrieval is local and sequential), then call models concurrently.
   const jobs = [];
+  const current = new Map();
   const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-eval-qa-"));
   const previousGlobalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
 
@@ -240,13 +259,16 @@ async function run(options) {
       const projectRoot = path.join(sandboxRoot, "questions", String(position));
 
       for (const system of options.systems) {
-        if (done.has(key(system, item.question_id))) {
-          continue;
-        }
-
         const chunks =
           system === "oracle" ? oracleChunks(item) : await hippocampChunks(item, projectRoot, system === "hippocamp-k10" ? 10 : 5);
-        jobs.push({ system, item, prompt: fill(READER_PROMPT, historyString(chunks), item.question_date, item.question) });
+        const prompt = fill(READER_PROMPT, historyString(chunks), item.question_date, item.question);
+        const hash = promptHash(prompt);
+
+        current.set(`${system}|${item.question_id}`, key(system, item.question_id, hash));
+
+        if (!done.has(key(system, item.question_id, hash))) {
+          jobs.push({ system, item, prompt, hash });
+        }
       }
 
       await fs.rm(process.env.HIPPOCAMP_GLOBAL_ROOT, { recursive: true, force: true });
@@ -295,13 +317,15 @@ async function run(options) {
         grader,
         id: job.item.question_id,
         type: job.item.question_type,
+        // Same check as the official evaluate_qa.py: 'yes' in the lowercased verdict.
         correct: /yes/i.test(verdict),
+        promptHash: job.hash,
         contextChars: job.prompt.length,
         response,
       };
 
       await fs.appendFile(options.cache, `${JSON.stringify(row)}\n`);
-      done.set(key(row.system, row.id), row);
+      done.set(key(row.system, row.id, row.promptHash), row);
 
       if (++finished % 20 === 0) {
         console.error(`progress ${finished}/${jobs.length}`);
@@ -314,13 +338,13 @@ async function run(options) {
   console.log(`LongMemEval-S QA, ${items.length} answerable questions, reader ${reader}, grader ${grader}\n`);
 
   for (const system of options.systems) {
-    const rows = items.map((item) => done.get(key(system, item.question_id))).filter(Boolean);
+    const rows = items.map((item) => done.get(current.get(`${system}|${item.question_id}`))).filter(Boolean);
     const contextChars = Math.round(rows.reduce((sum, row) => sum + row.contextChars, 0) / Math.max(rows.length, 1));
     console.log(`${system.padEnd(14)} QA ${percent(rows)}  (${rows.length} graded, prompt ${contextChars} chars)`);
   }
 
   for (const system of options.systems) {
-    const rows = items.map((item) => done.get(key(system, item.question_id))).filter(Boolean);
+    const rows = items.map((item) => done.get(current.get(`${system}|${item.question_id}`))).filter(Boolean);
     console.log(`\n${system}`);
 
     for (const type of [...new Set(rows.map((row) => row.type))].sort()) {
