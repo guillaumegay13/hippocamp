@@ -6,11 +6,11 @@
   <img src="./assets/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
 </p>
 
-Agent memory you can read.
+Agent memory, made simple.
 
-Hippocamp gives all your coding agents, like Claude Code and Codex, one shared memory: plain Markdown in a private Git repo you own. Every session starts by waking up from it, and every decision an agent records is a commit you can read, diff, and revert.
+Plain Markdown in your own Git repo, shared by all your coding agents, like Claude Code and Codex. One command to install. No API key, no database, no server to run.
 
-Open source (MIT). No account, no API key, no Hippocamp server. No database, no vector store, nothing to pay for.
+Every session starts by waking up from it, and every decision an agent records is a commit you can read, diff, and revert. Open source (MIT).
 
 ```bash
 npx hippocamp@latest install
