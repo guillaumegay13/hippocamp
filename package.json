@@ -1,6 +1,6 @@
 {
   "name": "hippocamp",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": false,
   "description": "Local Git-backed memory for AI agents.",
   "license": "MIT",
