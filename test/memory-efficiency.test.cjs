@@ -463,3 +463,34 @@ test("search returns a snippet for a long event matched only by its date", async
   assert.match(search.results[0].snippet, /^The weekly sync covered routine updates\./);
   assert.ok(search.results[0].snippet.length <= 1200);
 });
+
+test("search returns nothing when no memory is about the question", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-unrelated-"));
+  const projectRoot = path.join(tempRoot, "unrelated-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  for (const [title, content] of [
+    ["Backend deploy", "The backend deploys to Cloud Run after the build passes."],
+    ["Deploy rollback", "A failed backend deploy rolls back to the previous revision."],
+    ["Billing note", "Invoices are generated monthly."],
+  ]) {
+    await memory.appendEvent({ content, cues: ["ops"], projectRoot, scope: "project", sync: false, title });
+  }
+
+  const unrelated = await memory.searchMemory({ projectRoot, query: "which kubernetes namespace does the backend deploy to", scope: "project" });
+  const related = await memory.searchMemory({ projectRoot, query: "where does the backend deploy", scope: "project" });
+
+  assert.deepEqual(unrelated.results, []);
+  assert.equal(related.results[0].heading, "Backend deploy");
+});

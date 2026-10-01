@@ -162,7 +162,7 @@ async function main() {
     "search_memory",
     {
       description:
-        "Search task-specific memory. Event search uses cue indexes and returns only bounded coherent evidence; it does not scan unindexed event logs as a fallback. Event results carry their ISO timestamp as id; use it for when-questions. A month name in the query favors events from that month. A YYYY-MM-DD date, today, yesterday, this/last week, or this/last month keeps only events from those dates (UTC); undated files still match. Default 5 results suits a single fact; ask for 10-20 when the question combines several past sessions (counts, totals, comparisons, timelines), and search again if results look incomplete.",
+        "Search task-specific memory. Returns no results when the question's distinctive words appear in no memory. Event search uses cue indexes and returns only bounded coherent evidence; it does not scan unindexed event logs as a fallback. Event results carry their ISO timestamp as id; use it for when-questions. A month name in the query favors events from that month. A YYYY-MM-DD date, today, yesterday, this/last week, or this/last month keeps only events from those dates (UTC); undated files still match. Default 5 results suits a single fact; ask for 10-20 when the question combines several past sessions (counts, totals, comparisons, timelines), and search again if results look incomplete.",
       inputSchema: {
         query: z.string(),
         scope: z.enum(["global", "project", "both"]).default("both"),

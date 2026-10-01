@@ -28,6 +28,11 @@ const SEARCH_FIELD_BOOST = { cues: 3, heading: 2 };
 const SEARCH_FUZZY_DISTANCE = 0.2;
 const SEARCH_INDEX_CACHE_LIMIT = 8;
 const SEARCH_EXCERPT_MAX_CHARS = 1200;
+// Below this share of a question's rare-word weight, the best match is about something else.
+const SEARCH_MIN_RARE_WORD_COVERAGE = 0.3;
+const QUESTION_STOPWORDS = new Set(
+  "the and for with does did our are was were what which when where why how who can this that from have has had should would could there their them they you your use used about into after before over then than any all".split(" "),
+);
 const EVENT_LOCK_RETRY_MS = 10;
 const EVENT_LOCK_STALE_MS = 10_000;
 const searchIndexCache = new Map();
@@ -1293,7 +1298,25 @@ function rankSearchDocuments(queryInfo, { index, documents }) {
     .map((hit) => ({
       document: documents[hit.id],
       score: Math.round(hit.score * 100) / 100,
+      queryTerms: hit.queryTerms,
     }));
+}
+
+// Share of the question's rare-word weight (IDF) that the best match contains. A question
+// whose rare words ("kubernetes", "namespace") appear in no memory gets a low share even when
+// common words ("backend", "deploy") match, so search can return nothing instead of noise.
+function rareWordCoverage(queryInfo, best, { index, documents }) {
+  const words = [...new Set(queryInfo.tokens.filter((token) => token.length > 2 && !QUESTION_STOPWORDS.has(token)))];
+
+  if (!words.length) {
+    return 1;
+  }
+
+  const weight = (word) => Math.log(1 + documents.length / (index.search(word, { fuzzy: 0 }).length + 0.5));
+  const matched = new Set(best?.queryTerms || []);
+  const total = words.reduce((sum, word) => sum + weight(word), 0);
+
+  return words.filter((word) => matched.has(word)).reduce((sum, word) => sum + weight(word), 0) / total;
 }
 
 function toSearchResult(queryInfo, { document, score }) {
@@ -1392,8 +1415,14 @@ async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5
   const search = await loadSearchIndex(scopes, projectRoot);
   const results = [];
 
-  if (queryInfo.tokens.length && search.documents.length) {
-    for (const candidate of rankSearchDocuments(queryInfo, search)) {
+  const candidates = queryInfo.tokens.length && search.documents.length ? rankSearchDocuments(queryInfo, search) : [];
+  // Dated questions skip the check: their date words describe time, not the topic.
+  const related =
+    queryInfo.datePrefixes.length > 0 ||
+    rareWordCoverage(queryInfo, candidates[0], search) >= SEARCH_MIN_RARE_WORD_COVERAGE;
+
+  if (related) {
+    for (const candidate of candidates) {
       const result = toSearchResult(queryInfo, candidate);
 
       if (result) {
