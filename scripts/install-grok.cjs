@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { mcpServerCommand, prepareLagoon, printHints } = require("./install-common.cjs");
 
 const execFileAsync = promisify(execFile);
 const GROK_MANAGED_START = "<!-- hippocamp:managed:start -->";
@@ -190,7 +191,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
     }
   }
 
-  const scriptPath = path.join(repoRoot, "scripts", "hippocamp-mcp.cjs");
+  const command = mcpServerCommand(repoRoot);
   const added = await runGrok([
     "mcp",
     "add",
@@ -200,8 +201,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
     "-e",
     "HIPPOCAMP_AGENT=grok",
     "--",
-    process.execPath,
-    scriptPath,
+    ...command,
   ]);
 
   if (!added.ok) {
@@ -210,8 +210,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
 
   return {
     name: serverName,
-    command: process.execPath,
-    scriptPath,
+    command: command.join(" "),
     globalRoot,
     agent: "grok",
     summary: added.stdout || added.stderr,
@@ -232,6 +231,7 @@ async function main() {
     grokHome: options.grokHome,
   });
 
+  const lagoon = await prepareLagoon(options.globalRoot);
   const server = await ensureServerInstalled({
     repoRoot,
     globalRoot: options.globalRoot,
@@ -246,12 +246,14 @@ async function main() {
         skillPath,
         grokInstructionsPath,
         server,
+        lagoon,
         note: "Restart Grok Build (or start a new session) to load the installed skill, MCP server, and home rules.",
       },
       null,
       2,
     ),
   );
+  printHints(lagoon);
 }
 
 main().catch((error) => {

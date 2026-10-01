@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { mcpServerCommand, prepareLagoon, printHints } = require("./install-common.cjs");
 
 const execFileAsync = promisify(execFile);
 const CODEX_MANAGED_START = "<!-- hippocamp:managed:start -->";
@@ -174,7 +175,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
     }
   }
 
-  const scriptPath = path.join(repoRoot, "scripts", "hippocamp-mcp.cjs");
+  const command = mcpServerCommand(repoRoot);
   const added = await runCodex([
     "mcp",
     "add",
@@ -184,8 +185,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
     "--env",
     "HIPPOCAMP_AGENT=codex",
     "--",
-    process.execPath,
-    scriptPath,
+    ...command,
   ]);
 
   if (!added.ok) {
@@ -194,8 +194,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
 
   return {
     name: serverName,
-    command: process.execPath,
-    scriptPath,
+    command: command.join(" "),
     globalRoot,
     summary: added.stdout || added.stderr,
   };
@@ -215,6 +214,7 @@ async function main() {
     codexHome: options.codexHome,
   });
 
+  const lagoon = await prepareLagoon(options.globalRoot);
   const server = await ensureServerInstalled({
     repoRoot,
     globalRoot: options.globalRoot,
@@ -229,12 +229,14 @@ async function main() {
         skillPath,
         codexInstructionsPath,
         server,
+        lagoon,
         note: "Restart Codex to load the installed skill, MCP server, and refreshed AGENTS.md instructions.",
       },
       null,
       2,
     ),
   );
+  printHints(lagoon);
 }
 
 main().catch((error) => {

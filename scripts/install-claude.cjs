@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { mcpServerCommand, prepareLagoon, printHints } = require("./install-common.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -204,7 +205,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
     }
   }
 
-  const scriptPath = path.join(repoRoot, "scripts", "hippocamp-mcp.cjs");
+  const command = mcpServerCommand(repoRoot);
   const added = await runClaude([
     "mcp",
     "add",
@@ -218,8 +219,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
     "--env",
     "HIPPOCAMP_AGENT=claude",
     "--",
-    process.execPath,
-    scriptPath,
+    ...command,
   ]);
 
   if (!added.ok) {
@@ -228,8 +228,7 @@ async function ensureServerInstalled({ repoRoot, globalRoot, serverName }) {
 
   return {
     name: serverName,
-    command: process.execPath,
-    scriptPath,
+    command: command.join(" "),
     globalRoot,
     summary: added.stdout || added.stderr,
   };
@@ -249,6 +248,7 @@ async function main() {
     repoRoot,
   });
 
+  const lagoon = await prepareLagoon(options.globalRoot);
   const server = await ensureServerInstalled({
     repoRoot,
     globalRoot: options.globalRoot,
@@ -263,12 +263,14 @@ async function main() {
         claudeMdPath,
         claudeSkillPath,
         server,
+        lagoon,
         note: "Restart Claude Code to load the installed MCP server, Hippocamp skill, and refreshed CLAUDE.md instructions.",
       },
       null,
       2,
     ),
   );
+  printHints(lagoon);
 }
 
 main().catch((error) => {
