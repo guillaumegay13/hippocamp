@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const fs = require("node:fs");
 const { spawn, spawnSync } = require("node:child_process");
 const path = require("node:path");
 
@@ -50,21 +51,32 @@ Commands:
 `);
 }
 
+// Platform-neutral PATH lookup, so `install` also finds agents on Windows.
+function onPath(cli) {
+  const extensions = process.platform === "win32" ? (process.env.PATHEXT || ".EXE;.CMD").split(";") : [""];
+
+  return String(process.env.PATH || "")
+    .split(path.delimiter)
+    .some((dir) => extensions.some((extension) => fs.existsSync(path.join(dir, cli + extension.toLowerCase())) || fs.existsSync(path.join(dir, cli + extension))));
+}
+
 function installAll(args) {
-  const found = AGENTS.filter(([cli]) => spawnSync("sh", ["-c", `command -v ${cli}`]).status === 0);
+  const found = AGENTS.filter(([cli]) => onPath(cli));
 
   if (!found.length) {
     console.error("No supported agent CLI found on PATH: claude, codex, or grok. Install one, then rerun.");
     process.exit(1);
   }
 
-  for (const [cli, script] of found) {
+  // Install every agent found, even when one fails, then report the failures.
+  const failed = found.filter(([cli, script]) => {
     console.error(`Installing Hippocamp into ${cli}...`);
-    const result = spawnSync(process.execPath, [path.join(__dirname, script), ...args], { stdio: "inherit" });
+    return spawnSync(process.execPath, [path.join(__dirname, script), ...args], { stdio: "inherit" }).status !== 0;
+  });
 
-    if (result.status !== 0) {
-      process.exit(result.status || 1);
-    }
+  if (failed.length) {
+    console.error(`Install failed for: ${failed.map(([cli]) => cli).join(", ")}`);
+    process.exit(1);
   }
 }
 

@@ -14,9 +14,9 @@ function mcpServerCommand(repoRoot) {
   }
 
   const { version } = require(path.join(repoRoot, "package.json"));
-  const npx = path.join(path.dirname(process.execPath), "npx");
+  const npx = path.join(path.dirname(process.execPath), process.platform === "win32" ? "npx.cmd" : "npx");
 
-  return [fsSync.existsSync(npx) ? npx : "npx", "-y", "--prefer-offline", `hippocamp@${version}`, "mcp"];
+  return [fsSync.existsSync(npx) ? npx : path.basename(npx), "-y", "--prefer-offline", `hippocamp@${version}`, "mcp"];
 }
 
 async function git(args, cwd) {
@@ -42,18 +42,27 @@ async function prepareLagoon(globalRoot) {
 
   await fs.mkdir(globalRoot, { recursive: true });
 
-  if (!(await git(["rev-parse", "--is-inside-work-tree"], globalRoot)).ok) {
+  // The Lagoon must be its own repo: a folder inside another repo would commit memory there.
+  const topLevel = await git(["rev-parse", "--show-toplevel"], globalRoot);
+  const ownRepo = topLevel.ok && fsSync.realpathSync(topLevel.stdout) === fsSync.realpathSync(globalRoot);
+
+  if (!ownRepo) {
     if (!empty) {
-      hints.push(`${globalRoot} exists but is not a Git repo. Point --global-root at your Lagoon clone, or run: git -C "${globalRoot}" init`);
+      hints.push(`${globalRoot} is not its own Git repo. Point --global-root at your Lagoon clone, or run: git -C "${globalRoot}" init`);
       return { root: globalRoot, created: false, remote: null, push: "not_git", hints };
     }
 
-    await git(["init", "-b", "main"], globalRoot);
+    if (!(await git(["init", "-b", "main"], globalRoot)).ok) {
+      throw new Error(`git init failed in ${globalRoot}. Check that Git is installed and the folder is writable.`);
+    }
+
     await git(["commit", "--allow-empty", "-m", "hippocamp: create lagoon"], globalRoot);
     created = true;
   }
 
-  if (!(await git(["config", "user.email"], globalRoot)).stdout) {
+  const identity = await Promise.all(["user.name", "user.email"].map((key) => git(["config", key], globalRoot)));
+
+  if (identity.some((value) => !value.stdout)) {
     hints.push('Set a Git identity so memory can be committed: git config --global user.name "Your Name" && git config --global user.email you@example.com');
   }
 

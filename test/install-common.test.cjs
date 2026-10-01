@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
+const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -66,4 +67,30 @@ test("prepareLagoon checks push to an existing remote", async (t) => {
   assert.equal(result.created, false);
   assert.equal(result.remote, remote);
   assert.equal(result.push, "ok");
+});
+
+test("prepareLagoon refuses a folder inside another repo", async (t) => {
+  Object.assign(process.env, gitEnv);
+  const parent = await tempDir(t, "parent");
+  execFileSync("git", ["init", "-b", "main", parent]);
+  const nested = path.join(parent, "notes");
+  await fs.mkdir(nested);
+  await fs.writeFile(path.join(nested, "a.md"), "x\n");
+
+  const result = await prepareLagoon(nested);
+
+  assert.equal(result.push, "not_git");
+  await assert.rejects(fs.stat(path.join(nested, ".git")));
+});
+
+test("prepareLagoon gives an empty folder inside another repo its own repo", async (t) => {
+  Object.assign(process.env, gitEnv);
+  const parent = await tempDir(t, "parent-empty");
+  execFileSync("git", ["init", "-b", "main", parent]);
+  const nested = path.join(parent, "lagoon");
+
+  const result = await prepareLagoon(nested);
+
+  assert.equal(result.created, true);
+  assert.equal(fsSync.realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: nested }).toString().trim()), fsSync.realpathSync(nested));
 });
