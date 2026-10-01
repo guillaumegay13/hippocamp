@@ -1306,7 +1306,12 @@ function rankSearchDocuments(queryInfo, { index, documents }) {
 // whose rare words ("kubernetes", "namespace") appear in no memory gets a low share even when
 // common words ("backend", "deploy") match, so search can return nothing instead of noise.
 function rareWordCoverage(queryInfo, best, { index, documents }) {
-  const words = [...new Set(queryInfo.tokens.filter((token) => token.length > 2 && !QUESTION_STOPWORDS.has(token)))];
+  // Month names only rank (see eventDateText); they say when, not what.
+  const words = [
+    ...new Set(
+      queryInfo.tokens.filter((token) => token.length > 2 && !QUESTION_STOPWORDS.has(token) && !MONTH_NAMES.includes(token)),
+    ),
+  ];
 
   if (!words.length) {
     return 1;

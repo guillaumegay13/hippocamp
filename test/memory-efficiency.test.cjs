@@ -491,6 +491,10 @@ test("search returns nothing when no memory is about the question", async (t) =>
   const unrelated = await memory.searchMemory({ projectRoot, query: "which kubernetes namespace does the backend deploy to", scope: "project" });
   const related = await memory.searchMemory({ projectRoot, query: "where does the backend deploy", scope: "project" });
 
+  const monthOnly = await memory.searchMemory({ projectRoot, query: "deploy in august", scope: "project" });
+
   assert.deepEqual(unrelated.results, []);
   assert.equal(related.results[0].heading, "Backend deploy");
+  // No event is from August; the month name must not count as a missing topic word.
+  assert.ok(monthOnly.results.length > 0);
 });
