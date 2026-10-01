@@ -69,6 +69,10 @@ async function run(options) {
 
   try {
     for (const item of cases) {
+      if (!/^[a-z0-9][a-z0-9._-]*$/.test(String(item.project))) {
+        throw new Error(`Invalid project slug: ${item.project}`);
+      }
+
       const projectRoot = path.join(sandboxRoot, item.project);
       await fs.mkdir(projectRoot, { recursive: true });
 
