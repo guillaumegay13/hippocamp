@@ -24,7 +24,7 @@ A replay of a real session. Neither prompt mentions Hippocamp.
 
 ## Why Hippocamp?
 
-- **Written by the agent itself.** The agent doing the work decides what is worth keeping, in its own words. Unlike memory services that run a second model to extract facts, nothing rewrites it, so what you read is exactly what was saved.
+- **Written by the agent itself.** The agent doing the work decides what is worth keeping, in its own words. Unlike memory services that run a second model to extract facts, nothing rewrites it behind your back: events are saved as written, and optional Dream compaction of the two summary files arrives as a pull request you review.
 - **One memory for every agent.** Claude Code, Codex, and your other agents share the same repo. Built-in memory, like Claude Code's or Codex's, stays inside one tool.
 - **History you can audit.** Every memory is a Git commit. Roll back a bad memory like bad code.
 - **Files you own.** Plain Markdown, readable without any UI, synced across machines with your normal Git credentials.
