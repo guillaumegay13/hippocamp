@@ -439,6 +439,17 @@ async function getGitRepoRoot(startPath) {
   return result.stdout;
 }
 
+// Resolve symlinks in a path whose last parts may not exist yet, so it compares with
+// Git's top level, which Git always reports resolved (macOS /tmp is /private/tmp).
+function realpathExisting(targetPath) {
+  try {
+    return fsSync.realpathSync(targetPath);
+  } catch {
+    const parent = path.dirname(targetPath);
+    return parent === targetPath ? targetPath : path.join(realpathExisting(parent), path.basename(targetPath));
+  }
+}
+
 async function syncMemory({ scope, projectRoot, paths, message }) {
   const repoCandidate = getGlobalRepoRoot();
   const repoRoot = await getGitRepoRoot(repoCandidate);
@@ -455,7 +466,14 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
 
   const repoRelativePaths = paths.map((item) => {
     const relativePath =
-      path.relative(repoRoot, assertPathInScope(scopeRoot, item)).split(path.sep).join(path.posix.sep) || ".";
+      path
+        .relative(
+          realpathExisting(repoRoot),
+          // Recheck after resolving: a symlink inside the Lagoon must not reach another scope.
+          assertPathInScope(realpathExisting(scopeRoot), realpathExisting(assertPathInScope(scopeRoot, item))),
+        )
+        .split(path.sep)
+        .join(path.posix.sep) || ".";
 
     if (relativePath === ".") {
       throw new Error("path must point to a memory file or directory inside the Lagoon root.");
