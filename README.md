@@ -8,9 +8,9 @@
 
 Agent memory you can `git log`.
 
-Hippocamp gives Claude Code, Codex, and Grok Build one shared memory: plain Markdown in a private Git repo you own. Every session starts by waking up from it, and every decision an agent records is a commit you can read, diff, and revert.
+Hippocamp gives all your coding agents, like Claude Code and Codex, one shared memory: plain Markdown in a private Git repo you own. Every session starts by waking up from it, and every decision an agent records is a commit you can read, diff, and revert.
 
-Open source (MIT). No account, no API key, no cloud service: it runs on your machine and works the moment it is installed. Your memory never leaves your computer except to a Git remote you choose. No database, no vector store, nothing to pay for.
+Open source (MIT). No account, no API key, no Hippocamp server: it runs on your machine and works the moment it is installed. Your memory lives in a private Git repo. No database, no vector store, nothing to pay for.
 
 ```bash
 npx hippocamp@latest install
@@ -22,10 +22,10 @@ This installs Hippocamp into every supported agent CLI it finds, creates `~/.lag
 
 Claude Code and Codex now ship their own memory. Use Hippocamp when you want:
 
-- **One memory for every agent.** Claude Code, Codex, and Grok read and write the same repo. Built-in memory stays inside one tool.
+- **One memory for every agent.** Claude Code, Codex, and your other agents read and write the same repo. Built-in memory stays inside one tool.
 - **History you can audit.** Every memory change is a Git commit with an author, a diff, and a timestamp. Roll back a bad memory like bad code.
 - **Files you own.** Markdown in your own private repo, readable without any UI, portable across machines through your normal Git credentials.
-- **Nothing to sign up for.** Open source, local, free. No account, no API key, no vendor that can change terms or shut down.
+- **Nothing to sign up for.** Open source and free, running on your machine. No account, no API key, no vendor that can change terms or shut down.
 - **Reviewed compaction.** Optional Dream mode summarizes memory offline and proposes the result as a pull request.
 
 ## Results
