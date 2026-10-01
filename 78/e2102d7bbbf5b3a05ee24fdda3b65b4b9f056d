@@ -1,0 +1,21 @@
+.npmignore
+  s_df863ddf921c64::t_ab0726eb8ef9e2 1-21
+README.md
+  s_df863ddf921c64::t_241c9e302a1627 3,21-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "78e2102d7bbbf5b3a05ee24fdda3b65b4b9f056d",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
