@@ -18,8 +18,12 @@ function mcpServerCommand(repoRoot, home = os.homedir()) {
   const { version } = require(path.join(repoRoot, "package.json"));
   const target = path.join(home, ".hippocamp", version, "node_modules");
 
+  // Copy into a staging folder first, so a failed copy never removes a working install.
+  const staging = `${target}.staging-${process.pid}`;
+  fsSync.rmSync(staging, { recursive: true, force: true });
+  fsSync.cpSync(path.dirname(repoRoot), staging, { recursive: true, dereference: true });
   fsSync.rmSync(target, { recursive: true, force: true });
-  fsSync.cpSync(path.dirname(repoRoot), target, { recursive: true, dereference: true });
+  fsSync.renameSync(staging, target);
 
   return [process.execPath, path.join(target, path.basename(repoRoot), "scripts", "hippocamp-mcp.cjs")];
 }

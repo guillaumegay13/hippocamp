@@ -54,6 +54,12 @@ test("mcpServerCommand copies npx installs to a stable folder and keeps source c
   await fs.stat(command[1]);
   await fs.stat(path.join(stable, "minisearch", "index.js"));
 
+  // A reinstall of the same version replaces the copy: no stale files, no staging left behind.
+  await fs.writeFile(path.join(stable, "stale.js"), "// old\n");
+  mcpServerCommand(npxRoot, home);
+  await assert.rejects(fs.stat(path.join(stable, "stale.js")));
+  assert.deepEqual(await fs.readdir(path.join(home, ".hippocamp", "9.9.9")), ["node_modules"]);
+
   const source = path.join(root, "src", "hippocamp");
   assert.deepEqual(mcpServerCommand(source), [process.execPath, path.join(source, "scripts", "hippocamp-mcp.cjs")]);
 });
