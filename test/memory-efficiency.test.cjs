@@ -262,3 +262,87 @@ test("search returns every matching paragraph that fits the excerpt budget", asy
   assert.match(snippet, /The kestrel database move finished in eu-west-3/);
   assert.ok(snippet.length <= 1200);
 });
+
+test("events appended in the same millisecond keep distinct ids and bodies", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-same-ms-"));
+  const projectRoot = path.join(tempRoot, "same-ms-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const timestamp = "2026-10-01T09:00:00.000Z";
+  const first = await memory.appendEvent({
+    content: "The zanzibar migration needs a rollback plan.",
+    cues: ["deploy"],
+    projectRoot,
+    scope: "project",
+    sync: false,
+    timestamp,
+    title: "Deploy note",
+  });
+  const second = await memory.appendEvent({
+    content: "Invoices are generated monthly.",
+    cues: ["billing"],
+    projectRoot,
+    scope: "project",
+    sync: false,
+    timestamp,
+    title: "Billing note",
+  });
+
+  assert.equal(first.timestamp, timestamp);
+  assert.equal(second.timestamp, "2026-10-01T09:00:00.001Z");
+
+  const search = await memory.searchMemory({ projectRoot, query: "invoices monthly", scope: "project" });
+
+  assert.equal(search.results.length, 1);
+  assert.equal(search.results[0].heading, "Billing note");
+  assert.match(search.results[0].snippet, /Invoices are generated monthly\./);
+});
+
+test("parallel appends keep every event", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-parallel-append-"));
+  const projectRoot = path.join(tempRoot, "parallel-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const results = await Promise.all(
+    Array.from({ length: 20 }, (_, index) =>
+      memory.appendEvent({
+        content: `Parallel event ${index}.`,
+        cues: ["parallel"],
+        date: "2026-10-01",
+        projectRoot,
+        scope: "project",
+        sync: false,
+        timestamp: "2026-10-01T09:00:00.000Z",
+        title: `Event ${index}`,
+      }),
+    ),
+  );
+  const content = await fs.readFile(results[0].root + "/events/2026-10-01.md", "utf8");
+  const ids = [...content.matchAll(/^## (\S+)/gm)].map((match) => match[1]);
+
+  assert.equal(ids.length, 20);
+  assert.equal(new Set(ids).size, 20);
+  assert.equal(new Set(results.map((result) => result.timestamp)).size, 20);
+});
