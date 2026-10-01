@@ -1,0 +1,34 @@
+scripts/hippocamp-mcp.cjs
+  s_df863ddf921c64::t_080c5a5951cef2 165
+test/memory-efficiency.test.cjs
+  s_df863ddf921c64::t_080c5a5951cef2 224-263
+.github/workflows/ci.yml
+  s_df863ddf921c64::t_080c5a5951cef2 26
+README.md
+  s_df863ddf921c64::t_e40fc408dd1abc 264
+scripts/eval-retrieval.cjs
+  s_df863ddf921c64::t_871176fc35d8a3 135-147,161,163-164,178,198-199,220-225,237,244-245,248-254,261,292-298
+  s_df863ddf921c64::t_b6329c3b257993 238-243
+  s_df863ddf921c64::t_41db1d1ae24791 299
+AGENTS.md
+  s_df863ddf921c64::t_e40fc408dd1abc 75
+scripts/hippocamp-memory.cjs
+  s_df863ddf921c64::t_080c5a5951cef2 932-934,939
+  s_df863ddf921c64::t_d0ee7fdfa1b1ac 927-931,935-938,940-942
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "80e0a08f74706d852223c2473645b93b21e1cc37",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
