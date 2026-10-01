@@ -25,6 +25,7 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
 1. At the start of every top-level coding task, call `wake_up` before inspecting files, planning, or editing.
 2. Read the wake-up output before searching.
 3. Use `search_memory` as the normal path for task-specific recall after wake-up.
+   Keep the default 5 results for a single fact. Pass `maxResults` 10-20 when the question combines several past sessions (counts, totals, comparisons, timelines), and search again if the results look incomplete.
 4. If search returns no result, continue without memory. Do not read whole event logs as a fallback.
 5. During work, use `append_event` only for meaningful milestones.
 6. When appending events, pass a `title` and 1-8 concise `cues` so fuzzy recall can find the event later. Never write under `events/` with `write_memory_file`.
