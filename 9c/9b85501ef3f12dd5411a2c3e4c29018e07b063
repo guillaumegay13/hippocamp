@@ -1,0 +1,21 @@
+package-lock.json
+  s_df863ddf921c64::t_0db26b9e941bd9 3,9
+package.json
+  s_df863ddf921c64::t_cf60bfa051c41c 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9c9b85501ef3f12dd5411a2c3e4c29018e07b063",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
