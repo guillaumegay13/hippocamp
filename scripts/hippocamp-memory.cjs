@@ -1214,9 +1214,19 @@ async function collectMarkdownDocuments({ scope, root, curatedFiles }) {
   };
 }
 
+// Month name and day of an event's timestamp id, so "in August" or "2026-08-05" can match it.
+function eventDateText(id) {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(id || "")) {
+    return "";
+  }
+
+  const month = new Date(id).toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+  return `${month} ${id.slice(0, 10)}`;
+}
+
 function buildSearchIndex(documents) {
   const index = new MiniSearch({
-    fields: ["cues", "heading", "body"],
+    fields: ["cues", "heading", "body", "date"],
     idField: "position",
     tokenize: tokenizeSearchText,
     processTerm: (term) => term,
@@ -1228,6 +1238,7 @@ function buildSearchIndex(documents) {
       cues: (document.cues || []).join(" "),
       heading: document.heading || document.path,
       body: document.body,
+      date: eventDateText(document.id),
     })),
   );
 

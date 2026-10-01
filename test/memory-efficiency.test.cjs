@@ -346,3 +346,39 @@ test("parallel appends keep every event", async (t) => {
   assert.equal(new Set(ids).size, 20);
   assert.equal(new Set(results.map((result) => result.timestamp)).size, 20);
 });
+
+test("search favors events from a month named in the query", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-month-search-"));
+  const projectRoot = path.join(tempRoot, "month-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  for (const timestamp of ["2026-05-02T08:00:00.000Z", "2026-08-05T10:00:00.000Z", "2026-09-01T09:00:00.000Z"]) {
+    await memory.appendEvent({
+      content: "Published the Android build to Google Play production.",
+      cues: ["android-release"],
+      date: timestamp.slice(0, 10),
+      projectRoot,
+      scope: "project",
+      sync: false,
+      timestamp,
+      title: "Android release",
+    });
+  }
+
+  const byMonth = await memory.searchMemory({ projectRoot, query: "android build in august", scope: "project" });
+  const byDay = await memory.searchMemory({ projectRoot, query: "android build 2026-05-02", scope: "project" });
+
+  assert.equal(byMonth.results[0].id, "2026-08-05T10:00:00.000Z");
+  assert.equal(byDay.results[0].id, "2026-05-02T08:00:00.000Z");
+});

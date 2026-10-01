@@ -162,7 +162,7 @@ async function main() {
     "search_memory",
     {
       description:
-        "Search task-specific memory. Event search uses cue indexes and returns only bounded coherent evidence; it does not scan unindexed event logs as a fallback. Event results carry their ISO timestamp as id; use it for when-questions.",
+        "Search task-specific memory. Event search uses cue indexes and returns only bounded coherent evidence; it does not scan unindexed event logs as a fallback. Event results carry their ISO timestamp as id; use it for when-questions. A month name or YYYY-MM-DD date in the query favors events from that date.",
       inputSchema: {
         query: z.string(),
         scope: z.enum(["global", "project", "both"]).default("both"),
