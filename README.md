@@ -10,7 +10,7 @@ Agent memory you can `git log`.
 
 Hippocamp gives all your coding agents, like Claude Code and Codex, one shared memory: plain Markdown in a private Git repo you own. Every session starts by waking up from it, and every decision an agent records is a commit you can read, diff, and revert.
 
-Open source (MIT). No account, no API key, no Hippocamp server: it runs on your machine and works the moment it is installed. Your memory lives in a Git repo you control, on your machine and on the remote you pick, such as a private GitHub repo. No database, no vector store, nothing to pay for.
+Open source (MIT). No account, no API key, no Hippocamp server: it runs on your machine and works the moment it is installed. Your memory lives in a private Git repo. No database, no vector store, nothing to pay for.
 
 ```bash
 npx hippocamp@latest install
