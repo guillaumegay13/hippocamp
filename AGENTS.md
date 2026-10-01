@@ -38,6 +38,8 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - `assets/railway/run-dream.sh`: short-lived hosted Dream runner that clones Lagoon and opens one Dream PR per project.
 - `Dockerfile.railway` and `railway.json`: optional Railway cron deployment for overnight Dream runs.
 - `assets/brand/hippocamp-mascot.png`: README mascot asset.
+- `assets/brand/hippocamp-demo.gif`: README demo, loaded from GitHub and kept out of the npm package by `.npmignore` (keep `.npmignore` in sync with `.gitignore`).
+- `docs/`: user docs (setup, how it works, Dream, results, development). The README stays a short overview that links to them.
 
 ## Project Invariants
 
@@ -62,7 +64,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 
 - Follow the existing style and keep changes surgical.
 - Do not add abstractions, config knobs, or new subsystems unless the task explicitly requires them.
-- If behavior changes, update `README.md` and this file only when operational guidance actually changes.
+- If behavior changes, update the matching page in `docs/`, `README.md` only when the overview changes, and this file only when operational guidance actually changes.
 - Prefer extending `scripts/hippocamp-memory.cjs` over duplicating path, sync, or search logic.
 - Keep the product narrow. Simpler is better in this repo.
 

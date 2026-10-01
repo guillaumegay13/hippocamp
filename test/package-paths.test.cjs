@@ -28,3 +28,15 @@ test("published files contain no local home directory paths", () => {
 
   assert.deepEqual(matches, []);
 });
+
+test("the README demo GIF stays out of the npm package", () => {
+  // The README loads it from GitHub; .npmignore keeps the 600 kB file out of every install.
+  const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+    cwd: path.join(__dirname, ".."),
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  const [pack] = JSON.parse(output);
+
+  assert.ok(!pack.files.some((file) => file.path.endsWith(".gif")));
+});
