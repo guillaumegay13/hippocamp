@@ -308,3 +308,41 @@ test("events appended in the same millisecond keep distinct ids and bodies", asy
   assert.equal(search.results[0].heading, "Billing note");
   assert.match(search.results[0].snippet, /Invoices are generated monthly\./);
 });
+
+test("parallel appends keep every event", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-parallel-append-"));
+  const projectRoot = path.join(tempRoot, "parallel-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const results = await Promise.all(
+    Array.from({ length: 20 }, (_, index) =>
+      memory.appendEvent({
+        content: `Parallel event ${index}.`,
+        cues: ["parallel"],
+        date: "2026-10-01",
+        projectRoot,
+        scope: "project",
+        sync: false,
+        timestamp: "2026-10-01T09:00:00.000Z",
+        title: `Event ${index}`,
+      }),
+    ),
+  );
+  const content = await fs.readFile(results[0].root + "/events/2026-10-01.md", "utf8");
+  const ids = [...content.matchAll(/^## (\S+)/gm)].map((match) => match[1]);
+
+  assert.equal(ids.length, 20);
+  assert.equal(new Set(ids).size, 20);
+  assert.equal(new Set(results.map((result) => result.timestamp)).size, 20);
+});

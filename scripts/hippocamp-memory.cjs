@@ -28,6 +28,8 @@ const SEARCH_FIELD_BOOST = { cues: 3, heading: 2 };
 const SEARCH_FUZZY_DISTANCE = 0.2;
 const SEARCH_INDEX_CACHE_LIMIT = 8;
 const SEARCH_EXCERPT_MAX_CHARS = 1200;
+const EVENT_LOCK_RETRY_MS = 10;
+const EVENT_LOCK_STALE_MS = 10_000;
 const searchIndexCache = new Map();
 const PROCESS_SESSION_ID = `mcp-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
@@ -990,6 +992,39 @@ async function writeMemoryFile({ scope, path: relativePath, content, projectRoot
   };
 }
 
+// Serialize read-modify-write of one event file across processes. The lock lives
+// in the temp directory so a crashed writer never leaves it in the Lagoon repo.
+async function withEventFileLock(filePath, action) {
+  const lockName = crypto.createHash("sha1").update(filePath).digest("hex");
+  const lockPath = path.join(os.tmpdir(), `hippocamp-event-${lockName}.lock`);
+
+  for (;;) {
+    try {
+      await (await fs.open(lockPath, "wx")).close();
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") {
+        throw error;
+      }
+
+      const stats = await statIfExists(lockPath);
+
+      if (stats && Date.now() - stats.mtimeMs > EVENT_LOCK_STALE_MS) {
+        await fs.rm(lockPath, { force: true });
+        continue;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, EVENT_LOCK_RETRY_MS));
+    }
+  }
+
+  try {
+    return await action();
+  } finally {
+    await fs.rm(lockPath, { force: true });
+  }
+}
+
 async function appendEvent({
   scope = "project",
   content,
@@ -1014,23 +1049,28 @@ async function appendEvent({
   const eventBody = attributionSection ? `${attributionSection}\n\n${cuedBody}` : cuedBody;
   const relativePath = `events/${date}.md`;
   const target = resolveScopedPath(scope, relativePath, projectRoot);
-  const existing = await readFileIfExists(target.absolutePath);
-  const takenIds = new Set(parseEventBlocks(existing || "").map((event) => event.id));
-
-  // The timestamp is the event id, and search matches index entries to blocks by id.
-  while (takenIds.has(timestamp) && !Number.isNaN(Date.parse(timestamp))) {
-    timestamp = new Date(Date.parse(timestamp) + 1).toISOString();
-  }
-
-  const heading = title ? `## ${timestamp} — ${title.trim()}` : `## ${timestamp}`;
-  const eventBlock = `${heading}\n\n${eventBody}\n`;
-  const nextContent = existing?.trim()
-    ? `${existing.trimEnd()}\n\n${eventBlock.trimEnd()}\n`
-    : `# Events — ${date}\n\n${eventBlock.trimEnd()}\n`;
 
   await ensureParentDirectory(target.absolutePath);
-  await fs.writeFile(target.absolutePath, nextContent, "utf8");
-  const indexPath = await writeEventIndex(target.absolutePath, target.path);
+
+  const { eventBlock, indexPath } = await withEventFileLock(target.absolutePath, async () => {
+    const existing = await readFileIfExists(target.absolutePath);
+    const takenIds = new Set(parseEventBlocks(existing || "").map((event) => event.id));
+
+    // The timestamp is the event id, and search matches index entries to blocks by id.
+    while (takenIds.has(timestamp) && !Number.isNaN(Date.parse(timestamp))) {
+      timestamp = new Date(Date.parse(timestamp) + 1).toISOString();
+    }
+
+    const heading = title ? `## ${timestamp} — ${title.trim()}` : `## ${timestamp}`;
+    const block = `${heading}\n\n${eventBody}\n`;
+    const nextContent = existing?.trim()
+      ? `${existing.trimEnd()}\n\n${block.trimEnd()}\n`
+      : `# Events — ${date}\n\n${block.trimEnd()}\n`;
+
+    await fs.writeFile(target.absolutePath, nextContent, "utf8");
+
+    return { eventBlock: block, indexPath: await writeEventIndex(target.absolutePath, target.path) };
+  });
 
   const syncResult = sync
     ? await syncMemory({
