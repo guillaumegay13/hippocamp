@@ -27,6 +27,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - `scripts/hippocamp-memory.cjs`: local filesystem-backed Hippocamp memory helpers for MCP use.
 - `scripts/hippocamp-mcp.cjs`: local stdio MCP server for Hippocamp memory tools.
 - `scripts/eval-lagoon.cjs`: read-only retrieval check against real Lagoon cases in `<Lagoon root>/evals/retrieval-cases.json`.
+- `scripts/eval-qa.cjs`: LongMemEval-S answer-accuracy check (reader and grader models) for Hippocamp snippets against the labeled answer sessions.
 - `scripts/eval-retrieval.cjs`: retrieval-only LongMemEval-S check for `searchMemory` against a BM25 reference.
 - `scripts/install-claude.cjs`: one-step installer for Claude Code MCP setup and user-level `CLAUDE.md` guidance.
 - `scripts/install-codex.cjs`: one-step installer for the Hippocamp skill and MCP server in Codex.
@@ -74,6 +75,7 @@ When changing code, use the smallest verification that proves the change:
 - Run `npm run mcp:smoke` when changing memory reads, root resolution, or wake-up behavior.
 - Run `npm run dream -- --help` when changing Dream CLI arguments.
 - Run `npm run eval:retrieval -- --limit 100` when changing search ranking or snippets; report Recall@5 against the BM25 row and snippet evidence. Also run `npm run eval:lagoon` when a Lagoon is available.
+- Run `npm run eval:qa -- --limit 3 --dry-run` when changing `scripts/eval-qa.cjs`; a full run calls paid models, so run it only when asked.
 
 ## Notes For Future Agents
 
