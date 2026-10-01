@@ -1,0 +1,19 @@
+scripts/eval-qa.cjs
+  s_df863ddf921c64::t_41a6f691d35d37 3,175-177,181-186,190,194-200,231-233,245,251,264-271,320,322,328,341,347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3336f5cf19dff2561ca97236ffcb96216e9651d",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
