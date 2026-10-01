@@ -240,9 +240,9 @@ test("search returns every matching paragraph that fits the excerpt budget", asy
 
   const filler = "The weekly sync covered routine updates.";
   const paragraphs = [
-    "We discussed the kestrel database move in detail.",
+    "The kestrel move started on Monday.",
     ...Array(30).fill(filler),
-    "The kestrel move finished in eu-west-3 on Friday.",
+    "The kestrel database move finished in eu-west-3 on Friday.",
   ];
   await memory.appendEvent({
     content: paragraphs.join("\n\n"),
@@ -256,8 +256,9 @@ test("search returns every matching paragraph that fits the excerpt budget", asy
   const search = await memory.searchMemory({ projectRoot, query: "kestrel database move", scope: "project" });
   const snippet = search.results[0].snippet;
 
-  assert.ok(snippet.indexOf("We discussed the kestrel") < snippet.indexOf("finished in eu-west-3"));
-  assert.match(snippet, /We discussed the kestrel database move/);
-  assert.match(snippet, /The kestrel move finished in eu-west-3/);
+  // The last paragraph matches more query words, so only the file-order sort puts it second.
+  assert.ok(snippet.indexOf("started on Monday") < snippet.indexOf("finished in eu-west-3"));
+  assert.match(snippet, /The kestrel move started on Monday\./);
+  assert.match(snippet, /The kestrel database move finished in eu-west-3/);
   assert.ok(snippet.length <= 1200);
 });
