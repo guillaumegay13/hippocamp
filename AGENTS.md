@@ -22,13 +22,14 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 
 ## Repository Map
 
-- `scripts/hippocamp.cjs`: small CLI wrapper for `dream`, `mcp`, `install-codex`, `install-claude`, and `install-grok`.
+- `scripts/hippocamp.cjs`: small CLI wrapper for `install` (every agent CLI found), `dream`, `mcp`, `install-codex`, `install-claude`, and `install-grok`.
 - `scripts/hippocamp-dream.cjs`: offline Dream CLI for scheduled compaction of curated project wake-up files.
 - `scripts/hippocamp-memory.cjs`: local filesystem-backed Hippocamp memory helpers for MCP use.
 - `scripts/hippocamp-mcp.cjs`: local stdio MCP server for Hippocamp memory tools.
 - `scripts/eval-lagoon.cjs`: read-only retrieval check against real Lagoon cases in `<Lagoon root>/evals/retrieval-cases.json`.
 - `scripts/eval-qa.cjs`: LongMemEval-S answer-accuracy check (reader and grader models) for Hippocamp snippets against the labeled answer sessions.
 - `scripts/eval-retrieval.cjs`: retrieval-only LongMemEval-S check for `searchMemory` against a BM25 reference.
+- `scripts/install-common.cjs`: shared installer helpers: the MCP launch command and Lagoon repo preparation.
 - `scripts/install-claude.cjs`: one-step installer for Claude Code MCP setup and user-level `CLAUDE.md` guidance.
 - `scripts/install-codex.cjs`: one-step installer for the Hippocamp skill and MCP server in Codex.
 - `scripts/install-grok.cjs`: one-step installer for the Hippocamp skill, Grok home rules, and MCP server in Grok Build.
@@ -82,4 +83,4 @@ When changing code, use the smallest verification that proves the change:
 - The cloud/API version is intentionally deferred.
 - Do not reintroduce Next.js, GitHub API token auth, or GitHub App auth for the local MVP.
 - Keep Dream minimal: scheduled coherent compaction, current/open curated files plus bounded thread evidence, one PR per project.
-- The local install story should stay: install MCP, point at Lagoon, rely on normal Git auth.
+- The local install story should stay: `npx hippocamp@latest install`, a local Lagoon repo created if missing, normal Git auth. Installers never create remotes or push.

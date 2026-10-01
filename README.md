@@ -6,13 +6,34 @@
   <img src="./assets/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
 </p>
 
-Hippocamp is local Git-backed memory for AI coding agents.
+Agent memory you can `git log`.
 
-Agents can edit large codebases, run tests, and push commits, but every new session still starts with amnesia. Project decisions, user preferences, open threads, and "why we did this" context get scattered across chat history, scratch notes, and PR comments. The result is repeated explanations, stale assumptions, and agents rediscovering the same facts instead of continuing the work.
+Hippocamp gives Claude Code, Codex, and Grok Build one shared memory: plain Markdown in a private Git repo you own. Every session starts by waking up from it, and every decision an agent records is a commit you can read, diff, and revert.
 
-Hippocamp gives Codex, Claude Code, and other MCP clients a small shared memory surface they can wake up from, update, and sync. The memory is plain Markdown in a private Git repo you own.
+No database. No vector store. No hosted service. No API key.
 
-No database. No hosted memory service. No vector store. No separate token broker.
+```bash
+npx hippocamp@latest install
+```
+
+This installs Hippocamp into every supported agent CLI it finds, creates `~/.lagoon` as a local Git repo if it does not exist, and tells you how to add a private remote. Restart your agent, and it calls `wake_up` at the start of each task.
+
+## Why Not Built-In Memory?
+
+Claude Code and Codex now ship their own memory. Use Hippocamp when you want:
+
+- **One memory for every agent.** Claude Code, Codex, and Grok read and write the same repo. Built-in memory stays inside one tool.
+- **History you can audit.** Every memory change is a Git commit with an author, a diff, and a timestamp. Roll back a bad memory like bad code.
+- **Files you own.** Markdown in your own private repo, readable without any UI, portable across machines through your normal Git credentials.
+- **Reviewed compaction.** Optional Dream mode summarizes memory offline and proposes the result as a pull request.
+
+## How Well It Finds Things
+
+Measured with the scripts in this repo, so you can reproduce them:
+
+- LongMemEval-S, 470 questions: the right session is in the top 5 for 90.5% of questions (a BM25 reference gets 91.4%), with about 11 times less text than whole sessions.
+- Answer accuracy on 100 LongMemEval-S questions, reader Claude Sonnet 5, grader gpt-4o: 71% with 5 results, 77% with 10. Giving the reader the correct sessions directly reaches 90%, so the remaining gap is retrieval, not the reader.
+- Questions no memory is about return nothing instead of noise.
 
 ## What It Stores
 
@@ -33,71 +54,40 @@ Git is a practical default for agent memory:
 
 ## Install
 
-Clone this repo, install dependencies, then install the MCP server for your agent:
-
 ```bash
-npm install
-npm run install:codex
+npx hippocamp@latest install
 ```
 
-For Claude Code:
+To install into one agent only:
 
 ```bash
-npm install
-npm run install:claude
+npx hippocamp@latest install-claude
+npx hippocamp@latest install-codex
+npx hippocamp@latest install-grok
 ```
 
-For Grok Build:
+Upgrade with the same command: `npx hippocamp@latest upgrade`. Installers default to `~/.lagoon` as the memory repo; pass `--global-root /absolute/path/to/lagoon` to use another clone.
 
-```bash
-npm install
-npm run install:grok
-```
-
-After publishing, the intended one-line install shape is:
-
-```bash
-npx hippocamp install-codex
-```
-
-Upgrade uses the same install path, so agents can refresh themselves without a separate state model:
-
-```bash
-npx hippocamp@latest upgrade-codex
-npx hippocamp@latest upgrade-claude
-npx hippocamp@latest upgrade-grok
-```
-
-From a source checkout:
-
-```bash
-git pull --ff-only
-npm install
-npm run upgrade:codex
-npm run upgrade:claude
-npm run upgrade:grok
-```
-
-Installers default to `~/.lagoon` as the memory repo. You can override it:
-
-```bash
-npm run install:codex -- --global-root /absolute/path/to/lagoon
-npm run install:claude -- --global-root /absolute/path/to/lagoon
-npm run install:grok -- --global-root /absolute/path/to/lagoon
-```
+Installed through npx, the agent starts the server with `npx -y --prefer-offline hippocamp@<version> mcp`, so it keeps working if npm cleans its cache. From a source checkout, `npm install` then `npm run install:claude` (or `install:codex`, `install:grok`) registers the checkout directly.
 
 The Codex installer refreshes `~/.codex/AGENTS.md`. The Claude installer refreshes `~/.claude/CLAUDE.md`. The Grok installer refreshes `~/.grok/rules/hippocamp.md` and registers the MCP server with `HIPPOCAMP_AGENT=grok`.
 Managed instruction blocks tell the agent to call `wake_up` at the start of new top-level coding tasks before repo exploration or edits.
 
 ## Lagoon Repo
 
-Hippocamp expects a local Git repo for memory:
+Hippocamp keeps memory in a local Git repo. The installer creates `~/.lagoon` if it is missing. To use memory you already have on another machine, clone it first:
 
 ```bash
 git clone git@github.com:YOUR_USER/lagoon.git ~/.lagoon
 ```
 
 The repo should usually be private. Pushing memory to a private remote keeps it available across machines and agent environments while still using normal Git access controls. Hippocamp does not need a GitHub token for local MCP mode; it uses your normal local Git credentials.
+
+Memory works locally without a remote. To back it up privately and share it across machines, create a private remote:
+
+```bash
+gh repo create lagoon --private --source ~/.lagoon --remote origin --push
+```
 
 If push auth is not configured yet, use your preferred GitHub setup. With GitHub CLI:
 

@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const path = require("node:path");
+
+// One installer per agent CLI; `install` runs the ones whose CLI is on PATH.
+const AGENTS = [
+  ["claude", "install-claude.cjs"],
+  ["codex", "install-codex.cjs"],
+  ["grok", "install-grok.cjs"],
+];
 
 const COMMANDS = {
   dream: "hippocamp-dream.cjs",
@@ -18,6 +25,8 @@ function printHelp() {
   console.log(`Hippocamp
 
 Usage:
+  hippocamp install
+  hippocamp upgrade
   hippocamp dream
   hippocamp mcp
   hippocamp install-codex
@@ -28,6 +37,8 @@ Usage:
   hippocamp upgrade-grok
 
 Commands:
+  install         Install into every agent found: Claude Code, Codex, Grok Build
+  upgrade         Same as install; run with npx hippocamp@latest
   dream           Run offline Dream memory compaction
   mcp             Run the local MCP server
   install-codex   Install the Hippocamp skill and MCP server into Codex
@@ -39,11 +50,34 @@ Commands:
 `);
 }
 
+function installAll(args) {
+  const found = AGENTS.filter(([cli]) => spawnSync("sh", ["-c", `command -v ${cli}`]).status === 0);
+
+  if (!found.length) {
+    console.error("No supported agent CLI found on PATH: claude, codex, or grok. Install one, then rerun.");
+    process.exit(1);
+  }
+
+  for (const [cli, script] of found) {
+    console.error(`Installing Hippocamp into ${cli}...`);
+    const result = spawnSync(process.execPath, [path.join(__dirname, script), ...args], { stdio: "inherit" });
+
+    if (result.status !== 0) {
+      process.exit(result.status || 1);
+    }
+  }
+}
+
 function main() {
   const [command, ...args] = process.argv.slice(2);
 
   if (!command || command === "--help" || command === "-h") {
     printHelp();
+    return;
+  }
+
+  if (command === "install" || command === "upgrade") {
+    installAll(args);
     return;
   }
 
