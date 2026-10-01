@@ -1,0 +1,21 @@
+scripts/hippocamp-memory.cjs
+  s_df863ddf921c64::t_ccf7a8584e78b8 1018-1026
+test/memory-efficiency.test.cjs
+  s_df863ddf921c64::t_4bec64f8a5c841 265-310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "84cb41e63fae66a1ac32a4fd3c32469b27dcf2b2",
+  "prompts": {},
+  "sessions": {
+    "s_df863ddf921c64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf0dfec2-3869-4cc4-9b41-822a9d45baa3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
