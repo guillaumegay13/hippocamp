@@ -15,6 +15,21 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "test@example.com",
 };
 
+// Scoped to each test that needs a Git identity, then restored.
+function useGitIdentity(t) {
+  const saved = Object.fromEntries(Object.keys(gitEnv).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, gitEnv);
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+}
+
 async function tempDir(t, name) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `hippocamp-${name}-`));
   t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 5 }));
@@ -28,11 +43,12 @@ test("mcpServerCommand pins npx installs and keeps source checkouts direct", asy
   await fs.writeFile(path.join(npxRoot, "package.json"), '{ "version": "9.9.9" }');
 
   assert.deepEqual(mcpServerCommand(npxRoot).slice(1), ["-y", "--prefer-offline", "hippocamp@9.9.9", "mcp"]);
-  assert.deepEqual(mcpServerCommand("/src/hippocamp"), [process.execPath, "/src/hippocamp/scripts/hippocamp-mcp.cjs"]);
+  const source = path.join(root, "src", "hippocamp");
+  assert.deepEqual(mcpServerCommand(source), [process.execPath, path.join(source, "scripts", "hippocamp-mcp.cjs")]);
 });
 
 test("prepareLagoon creates a missing Lagoon repo and says it is local only", async (t) => {
-  Object.assign(process.env, gitEnv);
+  useGitIdentity(t);
   const lagoon = path.join(await tempDir(t, "lagoon"), "lagoon");
   const result = await prepareLagoon(lagoon);
 
@@ -52,7 +68,7 @@ test("prepareLagoon leaves a non-empty folder that is not a repo alone", async (
 });
 
 test("prepareLagoon checks push to an existing remote", async (t) => {
-  Object.assign(process.env, gitEnv);
+  useGitIdentity(t);
   const root = await tempDir(t, "remote");
   const remote = path.join(root, "remote.git");
   const lagoon = path.join(root, "lagoon");
@@ -70,7 +86,7 @@ test("prepareLagoon checks push to an existing remote", async (t) => {
 });
 
 test("prepareLagoon refuses a folder inside another repo", async (t) => {
-  Object.assign(process.env, gitEnv);
+  useGitIdentity(t);
   const parent = await tempDir(t, "parent");
   execFileSync("git", ["init", "-b", "main", parent]);
   const nested = path.join(parent, "notes");
@@ -84,7 +100,7 @@ test("prepareLagoon refuses a folder inside another repo", async (t) => {
 });
 
 test("prepareLagoon gives an empty folder inside another repo its own repo", async (t) => {
-  Object.assign(process.env, gitEnv);
+  useGitIdentity(t);
   const parent = await tempDir(t, "parent-empty");
   execFileSync("git", ["init", "-b", "main", parent]);
   const nested = path.join(parent, "lagoon");
