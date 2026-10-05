@@ -1331,16 +1331,12 @@ function rankSearchDocuments(queryInfo, { index, documents }) {
     }));
 }
 
-// Same word in another form: a plural or longer form ("deploy", "deployments") or a shared stem
-// ("creating", "creation"). A typo-tolerant hit on a different word ("instinct", "instance") is not.
+// Same word in another form: a plural or longer form ("deploy", "deployments") or the same stem
+// ("creating", "creation"). A typo-tolerant hit on a different word ("instinct", "instance",
+// "content", "context") is not.
 function sameWord(left, right) {
-  let prefix = 0;
-
-  while (prefix < Math.min(left.length, right.length) && left[prefix] === right[prefix]) {
-    prefix += 1;
-  }
-
-  return tokenSimilarity(left, right) >= 0.9 || prefix >= Math.max(4, Math.min(left.length, right.length) - 2);
+  const stem = (word) => word.replace(/(?:ments?|ings?|ions?|ers?|ed|es|s)$/, "");
+  return tokenSimilarity(left, right) >= 0.9 || (stem(left).length >= 4 && stem(left) === stem(right));
 }
 
 // Share of the question's rare-word weight (IDF) that the best of the returned matches contains.
@@ -1461,7 +1457,11 @@ async function loadSearchIndex(scopes, projectRoot) {
 async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5 }) {
   const queryInfo = createQueryInfo(query);
   const clampedMaxResults = Math.max(1, Math.min(Number(maxResults) || 5, 20));
-  const scopes = scope !== "both" ? [scope] : getProjectSlug(projectRoot) ? ["global", "project"] : ["global"];
+  const hasProject = getProjectSlug(projectRoot) !== null;
+  // Without a project, project scope is global memory; search it once, as global.
+  const scopes = [
+    ...new Set((scope === "both" ? ["global", "project"] : [scope]).map((name) => (name === "project" && !hasProject ? "global" : name))),
+  ];
   const search = await loadSearchIndex(scopes, projectRoot);
   const results = [];
 

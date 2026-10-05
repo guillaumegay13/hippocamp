@@ -591,7 +591,7 @@ test("search returns nothing when a rare word only resembles memory words", asyn
   });
 
   await memory.appendEvent({
-    content: "Each worker instance reads the instruct prompt before a sync.",
+    content: "Each worker instance reads the instruct prompt and its content before a sync.",
     keywords: ["health-sync"],
     projectRoot,
     scope: "project",
@@ -601,9 +601,11 @@ test("search returns nothing when a rare word only resembles memory words", asyn
 
   // "instinct" is one typo away from "instance" and "instruct" but means something else.
   const lookalike = await memory.searchMemory({ projectRoot, query: "Instinct", scope: "project" });
+  const shared = await memory.searchMemory({ projectRoot, query: "context", scope: "project" });
   const plural = await memory.searchMemory({ projectRoot, query: "worker instances", scope: "project" });
 
   assert.deepEqual(lookalike.results, []);
+  assert.deepEqual(shared.results, []);
   assert.equal(plural.results[0]?.heading, "Apple Health sync banner hardening");
 });
 
@@ -637,14 +639,24 @@ test("an empty folder has no project and uses global memory", async (t) => {
     sync: false,
     title: "Job application skill created",
   });
+  await memory.appendEvent({
+    content: "Created the applying-to-jobs tracker in Notion.",
+    keywords: ["applying-to-jobs-tracker"],
+    projectRoot: codeRoot,
+    scope: "project",
+    sync: false,
+    title: "Job tracker created",
+  });
   const fromEmpty = await memory.searchMemory({ projectRoot: emptyRoot, query: "applying to jobs skill" });
+  const projectScope = await memory.searchMemory({ projectRoot: emptyRoot, query: "applying to jobs", scope: "project" });
   const fromProject = await memory.searchMemory({ projectRoot: codeRoot, query: "applying to jobs skill" });
 
   assert.equal(wake.projectSlug, null);
   assert.equal(wake.projectMemoryRoot, lagoonRoot);
   assert.equal(path.dirname(path.dirname(event.indexPath)), lagoonRoot);
-  // Global memory is searched once, not twice.
-  assert.equal(fromEmpty.results.length, 1);
+  // Global memory is searched once, and other projects stay out of it.
+  assert.deepEqual(fromEmpty.results.map((result) => result.heading), ["Job application skill created"]);
+  assert.deepEqual(projectScope.results.map((result) => result.heading), ["Job application skill created"]);
   assert.equal(fromProject.results[0]?.heading, "Job application skill created");
   assert.equal(memory.getProjectSlug(codeRoot), "job-search");
   // A folder that does not exist keeps its name, as Dream's synthetic roots do.
