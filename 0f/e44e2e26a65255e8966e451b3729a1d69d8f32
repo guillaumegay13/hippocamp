@@ -1,0 +1,50 @@
+scripts/install-claude.cjs
+  s_f5516491b7d0c1::t_954e7ace7b745d 116
+assets/railway/run-dream.sh
+  s_f5516491b7d0c1::t_954e7ace7b745d 156-157
+assets/github-actions/hippocamp-dream.yml
+  s_f5516491b7d0c1::t_954e7ace7b745d 147-148
+scripts/install-codex.cjs
+  s_f5516491b7d0c1::t_954e7ace7b745d 124
+test/memory-efficiency.test.cjs
+  s_f5516491b7d0c1::t_aa87dad11ae31c 191-227
+  s_f5516491b7d0c1::t_954e7ace7b745d 91,112,148,177,181,247,286,322,331,369,406,447,488,525
+scripts/hippocamp-mcp.cjs
+  s_f5516491b7d0c1::t_954e7ace7b745d 117,121,127,133,165
+docs/dream.md
+  s_f5516491b7d0c1::t_954e7ace7b745d 12
+AGENTS.md
+  s_f5516491b7d0c1::t_954e7ace7b745d 51,53,58
+test/mcp-params.test.cjs
+  s_f5516491b7d0c1::t_954e7ace7b745d 44,46,48,50,53-54,59,63,76,79
+test/sync-memory.test.cjs
+  s_f5516491b7d0c1::t_954e7ace7b745d 48,64
+scripts/hippocamp-memory.cjs
+  s_f5516491b7d0c1::t_954e7ace7b745d 27,262,266-268,271,278,282-283,285,289,316,400,657,668,676,683,694,722,738,771,850,991,1058,1070-1073,1076,1125,1284,1293,1362,1370,1372
+  s_f5516491b7d0c1::t_b0ae9e4e6ade1e 279,670,937,1206
+docs/how-it-works.md
+  s_f5516491b7d0c1::t_954e7ace7b745d 70,75,95
+  s_f5516491b7d0c1::t_b98f6c98355694 81
+scripts/install-grok.cjs
+  s_f5516491b7d0c1::t_954e7ace7b745d 125
+skills/hippocamp-memory/SKILL.md
+  s_f5516491b7d0c1::t_954e7ace7b745d 31,47
+scripts/hippocamp-dream.cjs
+  s_f5516491b7d0c1::t_954e7ace7b745d 275,351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0fe44e2e26a65255e8966e451b3729a1d69d8f32",
+  "prompts": {},
+  "sessions": {
+    "s_f5516491b7d0c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "19fd057a-9daa-456d-b694-c9c6b4c98436",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
