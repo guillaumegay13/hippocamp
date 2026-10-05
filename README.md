@@ -30,6 +30,20 @@ A replay of a real session. Neither prompt mentions Hippocamp.
 - **Files you own.** Plain Markdown, readable without any UI, synced across machines with your normal Git credentials.
 - **Nothing to sign up for.** No vendor that can change terms or shut down.
 
+## Compared with other memory tools
+
+| | Agent agnostic (MCP server) | Plain files you own | Auditable history | No extra account, API key, or model | Syncs through your own Git | Always free | Open source |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Hippocamp** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [Mem0](https://docs.mem0.ai) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
+| [Zep](https://www.getzep.com) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| [Graphiti](https://github.com/getzep/graphiti) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| [Letta Code](https://github.com/letta-ai/letta-code) | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [Basic Memory](https://github.com/basicmachines-co/basic-memory) | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| Claude Code / Codex built-in | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
+
+From each project's own docs, October 2026. Mem0's MCP server is hosted and needs a platform key; Mem0 and Graphiti call a model to extract facts from each memory. Mem0 keeps a change history (full audit logs on Enterprise); Zep and Graphiti record when each fact was valid, not a log of changes. Letta Code's memory serves Letta's own agent; we found no documented way to share it with other agents. Basic Memory is free locally; sync is its paid cloud plan or a Git setup you build yourself.
+
 ## Results
 
 Reproducible with the scripts in this repo.
