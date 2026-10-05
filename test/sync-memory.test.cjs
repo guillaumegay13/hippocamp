@@ -45,7 +45,7 @@ test("sync commits when the Lagoon path goes through a symlink", async (t) => {
 
   const result = await memory.appendEvent({
     content: "Use advisory locks.",
-    cues: ["locks"],
+    keywords: ["locks"],
     projectRoot,
     scope: "project",
     title: "Queue decision",
@@ -61,7 +61,7 @@ test("sync commits when the Lagoon path goes through a symlink", async (t) => {
   await fs.symlink(path.join(realLagoon, "projects", "linked-project", "events"), path.join(realLagoon, "projects", "other-project", "events"));
 
   await assert.rejects(
-    memory.appendEvent({ content: "Cross write.", cues: ["x"], projectRoot: otherProject, scope: "project", title: "Escape" }),
+    memory.appendEvent({ content: "Cross write.", keywords: ["x"], projectRoot: otherProject, scope: "project", title: "Escape" }),
     /escapes the memory root/,
   );
 });

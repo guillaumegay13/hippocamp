@@ -24,7 +24,7 @@ const DEFAULT_PROJECT_FILES = [
 
 const EVENT_INDEX_VERSION = 1;
 const SEARCH_CANDIDATE_LIMIT = 60;
-const SEARCH_FIELD_BOOST = { cues: 3, heading: 2 };
+const SEARCH_FIELD_BOOST = { keywords: 3, heading: 2 };
 const SEARCH_FUZZY_DISTANCE = 0.2;
 const SEARCH_INDEX_CACHE_LIMIT = 8;
 const SEARCH_EXCERPT_MAX_CHARS = 1200;
@@ -259,34 +259,34 @@ function tokenizeSearchText(value) {
   return normalized ? normalized.split(/\s+/).filter(Boolean) : [];
 }
 
-function normalizeCue(value) {
+function normalizeKeyword(value) {
   return tokenizeSearchText(value).join("-");
 }
 
-function normalizeCueList(cues) {
-  const values = Array.isArray(cues) ? cues : [];
-  return [...new Set(values.map(normalizeCue).filter(Boolean))];
+function normalizeKeywordList(keywords) {
+  const values = Array.isArray(keywords) ? keywords : [];
+  return [...new Set(values.map(normalizeKeyword).filter(Boolean))];
 }
 
-function splitInlineCueValues(value) {
+function splitInlineKeywordValues(value) {
   return String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
-function hasCuesSection(content) {
-  return content.split(/\r?\n/).some((line) => /^Cues:\s*/i.test(line.trim()));
+function hasKeywordsSection(content) {
+  return content.split(/\r?\n/).some((line) => /^(?:Keywords|Cues):\s*/i.test(line.trim()));
 }
 
-function formatCuesSection(cues) {
-  const normalizedCues = normalizeCueList(cues);
+function formatKeywordsSection(keywords) {
+  const normalizedKeywords = normalizeKeywordList(keywords);
 
-  if (!normalizedCues.length) {
+  if (!normalizedKeywords.length) {
     return "";
   }
 
-  return ["Cues:", ...normalizedCues.map((cue) => `- ${cue}`)].join("\n");
+  return ["Keywords:", ...normalizedKeywords.map((keyword) => `- ${keyword}`)].join("\n");
 }
 
 function normalizeAgentName(value) {
@@ -313,7 +313,7 @@ function normalizeAgentName(value) {
     return AGENT_NAME_ALIASES[firstToken];
   }
 
-  const slug = normalizeCue(compact);
+  const slug = normalizeKeyword(compact);
 
   return slug || null;
 }
@@ -397,7 +397,7 @@ function extractAttributionFromEventLines(lines) {
       continue;
     }
 
-    // Provenance lines sit at the top of the body; stop at cues or free text.
+    // Provenance lines sit at the top of the body; stop at keywords or free text.
     break;
   }
 
@@ -654,7 +654,7 @@ function parseEventHeading(line) {
 
   if (!match) {
     return {
-      id: normalizeCue(heading) || heading,
+      id: normalizeKeyword(heading) || heading,
       heading,
     };
   }
@@ -665,22 +665,22 @@ function parseEventHeading(line) {
   };
 }
 
-function extractCuesFromEventLines(lines) {
+function extractKeywordsFromEventLines(lines) {
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].trim().match(/^Cues:\s*(.*)$/i);
+    const match = lines[index].trim().match(/^(?:Keywords|Cues):\s*(.*)$/i);
 
     if (!match) {
       continue;
     }
 
-    const cues = splitInlineCueValues(match[1]);
+    const keywords = splitInlineKeywordValues(match[1]);
 
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
       const line = lines[cursor];
       const bullet = line.match(/^\s*-\s+(.+?)\s*$/);
 
       if (bullet) {
-        cues.push(bullet[1]);
+        keywords.push(bullet[1]);
         continue;
       }
 
@@ -691,7 +691,7 @@ function extractCuesFromEventLines(lines) {
       break;
     }
 
-    return normalizeCueList(cues);
+    return normalizeKeywordList(keywords);
   }
 
   return [];
@@ -719,7 +719,7 @@ function parseEventBlocks(content) {
       heading: heading.heading,
       agent: attribution.agent,
       session: attribution.session,
-      cues: extractCuesFromEventLines(bodyLines),
+      keywords: extractKeywordsFromEventLines(bodyLines),
       content: blockLines.join("\n").trim(),
       body: bodyLines.join("\n").trim(),
       startLine: startIndex + 1,
@@ -735,7 +735,7 @@ function buildEventIndex(markdownContent, markdownPath) {
       const entry = {
         id: event.id,
         heading: event.heading,
-        cues: event.cues,
+        keywords: event.keywords,
       };
 
       if (event.agent) {
@@ -768,7 +768,7 @@ function createQueryInfo(query) {
   return {
     original,
     normalized: tokens.join(" "),
-    cue: tokens.join("-"),
+    keyword: tokens.join("-"),
     tokens,
     datePrefixes: queryDatePrefixes(original),
   };
@@ -847,7 +847,7 @@ function scoreSearchValues(queryInfo, values) {
   }
 
   const phraseScore = normalizedValues.reduce((bestScore, value) => {
-    if (value === queryInfo.normalized || value.replace(/\s+/g, "-") === queryInfo.cue) {
+    if (value === queryInfo.normalized || value.replace(/\s+/g, "-") === queryInfo.keyword) {
       return Math.max(bestScore, 1);
     }
 
@@ -934,7 +934,7 @@ function createSearchExcerpt(content, queryInfo, leadWhenUnmatched = false) {
     .split(/\n\s*\n+/)
     .map((block) => block.trim())
     .filter(Boolean)
-    .filter((block) => !/^(?:Agent:|Session:|Cues:)\s*/i.test(block))
+    .filter((block) => !/^(?:Agent:|Session:|Keywords:|Cues:)\s*/i.test(block))
     .flatMap(splitOversizedBlock);
 
   if (!blocks.length) {
@@ -988,7 +988,7 @@ async function writeMemoryFile({ scope, path: relativePath, content, projectRoot
   const target = resolveScopedPath(scope, relativePath, projectRoot);
 
   if (target.path === "events" || target.path.startsWith("events/")) {
-    throw new Error("events/ is append-only. Use append_event with a title and cues instead.");
+    throw new Error("events/ is append-only. Use append_event with a title and keywords instead.");
   }
 
   const nextContent = ensureTrailingNewline(requireNonEmptyString(content, "content"));
@@ -1055,7 +1055,7 @@ async function withEventFileLock(filePath, action) {
 async function appendEvent({
   scope = "project",
   content,
-  cues,
+  keywords,
   projectRoot,
   sync = true,
   title,
@@ -1067,13 +1067,13 @@ async function appendEvent({
 }) {
   const body = requireNonEmptyString(content, "content");
   const attribution = resolveWriteAttribution({ agent, session, clientName });
-  const normalizedCues = normalizeCueList(cues);
-  const cuedBody =
-    normalizedCues.length && !hasCuesSection(body)
-      ? `${formatCuesSection(normalizedCues)}\n\n${body.trim()}`
+  const normalizedKeywords = normalizeKeywordList(keywords);
+  const bodyWithKeywords =
+    normalizedKeywords.length && !hasKeywordsSection(body)
+      ? `${formatKeywordsSection(normalizedKeywords)}\n\n${body.trim()}`
       : body.trim();
   const attributionSection = formatAttributionSection(attribution);
-  const eventBody = attributionSection ? `${attributionSection}\n\n${cuedBody}` : cuedBody;
+  const eventBody = attributionSection ? `${attributionSection}\n\n${bodyWithKeywords}` : bodyWithKeywords;
   const relativePath = `events/${date}.md`;
   const target = resolveScopedPath(scope, relativePath, projectRoot);
 
@@ -1122,7 +1122,7 @@ async function appendEvent({
     title: title?.trim() || null,
     agent: parsed?.agent || attribution.agent,
     session: parsed?.session || attribution.session,
-    cues: parsed?.cues || [],
+    keywords: parsed?.keywords || [],
     indexPath,
     sync: syncResult,
   };
@@ -1203,7 +1203,7 @@ async function collectEventDocuments({ scope, eventFiles }) {
         path: `events/${markdownName}`,
         id: event.id,
         heading: event.heading,
-        cues: normalizeCueList(event.cues),
+        keywords: normalizeKeywordList(event.keywords || event.cues),
         body: block.body,
       });
     }
@@ -1281,7 +1281,7 @@ function queryDatePrefixes(query, now = new Date()) {
 
 function buildSearchIndex(documents) {
   const index = new MiniSearch({
-    fields: ["cues", "heading", "body", "date"],
+    fields: ["keywords", "heading", "body", "date"],
     idField: "position",
     tokenize: tokenizeSearchText,
     processTerm: (term) => term,
@@ -1290,7 +1290,7 @@ function buildSearchIndex(documents) {
   index.addAll(
     documents.map((document, position) => ({
       position,
-      cues: (document.cues || []).join(" "),
+      keywords: (document.keywords || []).join(" "),
       heading: document.heading || document.path,
       body: document.body,
       date: eventDateText(document.id),
@@ -1359,7 +1359,7 @@ function toSearchResult(queryInfo, { document, score }) {
     };
   }
 
-  const cueScore = scoreSearchValues(queryInfo, document.cues);
+  const keywordScore = scoreSearchValues(queryInfo, document.keywords);
   const headingScore = scoreSearchValues(queryInfo, [document.heading || "", document.id]);
 
   return {
@@ -1367,9 +1367,9 @@ function toSearchResult(queryInfo, { document, score }) {
     path: document.path,
     id: document.id,
     heading: document.heading,
-    cues: document.cues,
+    keywords: document.keywords,
     score,
-    match: cueScore > 0 && cueScore >= headingScore ? "cues" : headingScore > 0 ? "heading" : "body",
+    match: keywordScore > 0 && keywordScore >= headingScore ? "keywords" : headingScore > 0 ? "heading" : "body",
     snippet,
   };
 }

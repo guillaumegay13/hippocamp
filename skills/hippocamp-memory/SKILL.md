@@ -28,7 +28,7 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
    Keep the default 5 results for a single fact. Pass `maxResults` 10-20 when the question combines several past sessions (counts, totals, comparisons, timelines), and search again if the results look incomplete.
 4. If search returns no result, continue without memory. Do not read whole event logs as a fallback.
 5. During work, use `append_event` only for meaningful milestones.
-6. When appending events, pass a `title` and 1-8 concise `cues` so fuzzy recall can find the event later. Never write under `events/` with `write_memory_file`.
+6. When appending events, pass a `title` and 1-8 concise `keywords` so fuzzy recall can find the event later. Never write under `events/` with `write_memory_file`.
 7. `write_memory_file` and `append_event` sync by default.
 8. If a sync is skipped or fails, call `sync_memory` explicitly.
 9. At the end of the task, if project state actually changed, use `write_memory_file` to update curated files such as:
@@ -44,7 +44,7 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
 - Prefer curated summaries over raw event history.
 - Do not re-read `current_state.md` or `open_threads.md` after `wake_up`; they are already loaded.
 - For small tasks, `append_event` is enough; skip curated file rewrites.
-- Use event cues as short recall handles; `search_memory` ranks indexed events by cues, title, and body with typo tolerance, and cues weigh the most.
+- Use event keywords as short recall handles; `search_memory` ranks indexed events by keywords, title, and body with typo tolerance, and keywords weigh the most.
 - Search returns bounded coherent evidence and does not scan unindexed event logs as a fallback.
 - Keep curated files short and legible.
 - Rewrite `current_state.md` as a short snapshot of what is true now. Do not prepend dated entries to it; milestone detail belongs in `append_event` only.

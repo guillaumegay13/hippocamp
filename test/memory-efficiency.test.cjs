@@ -88,7 +88,7 @@ test("search uses indexed events and returns coherent evidence", async (t) => {
 
   await memory.appendEvent({
     content: "Decision:\nUse indexed search only.",
-    cues: ["strict-index"],
+    keywords: ["strict-index"],
     date: "2026-09-21",
     projectRoot,
     scope: "project",
@@ -109,7 +109,7 @@ test("search uses indexed events and returns coherent evidence", async (t) => {
 
   await memory.appendEvent({
     content: `Decision:\n${"x".repeat(1300)}`,
-    cues: ["oversized-metadata"],
+    keywords: ["oversized-metadata"],
     date: "2026-09-21",
     projectRoot,
     scope: "project",
@@ -145,7 +145,7 @@ test("search uses indexed events and returns coherent evidence", async (t) => {
   const eventsRoot = path.join(projectMemoryRoot, "events");
   await fs.writeFile(
     path.join(eventsRoot, "2026-09-20.md"),
-    "# Events: 2026-09-20\n\n## 09:00 — Hidden fallback\n\nCues:\n- quasar-velvet\n\nShould not be scanned.\n",
+    "# Events: 2026-09-20\n\n## 09:00 — Hidden fallback\n\nKeywords:\n- quasar-velvet\n\nShould not be scanned.\n",
     "utf8",
   );
 
@@ -174,11 +174,11 @@ test("search ranks indexed event bodies with typo tolerance", async (t) => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  for (const [title, cues, content] of [
+  for (const [title, keywords, content] of [
     ["Deploy note", ["deploy"], "The zanzibar migration needs a rollback plan."],
     ["Unrelated note", ["billing"], "Invoices are generated monthly."],
   ]) {
-    await memory.appendEvent({ content, cues, projectRoot, scope: "project", sync: false, title });
+    await memory.appendEvent({ content, keywords, projectRoot, scope: "project", sync: false, title });
   }
 
   const search = await memory.searchMemory({ projectRoot, query: "zanzibr rollback", scope: "project" });
@@ -186,6 +186,43 @@ test("search ranks indexed event bodies with typo tolerance", async (t) => {
   assert.equal(search.results.length, 1);
   assert.equal(search.results[0].heading, "Deploy note");
   assert.equal(search.results[0].match, "body");
+});
+
+test("search still matches events written with legacy Cues sections and indexes", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-legacy-cues-"));
+  const projectRoot = path.join(tempRoot, "legacy-project");
+  const eventsRoot = path.join(tempRoot, "lagoon", "projects", "legacy-project", "events");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.mkdir(eventsRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const id = "2026-09-01T09:00:00.000Z";
+  await fs.writeFile(
+    path.join(eventsRoot, "2026-09-01.md"),
+    `# Events — 2026-09-01\n\n## ${id} — Old note\n\nCues:\n- quasar-velvet\n\nOld body.\n`,
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(eventsRoot, "2026-09-01.index.json"),
+    JSON.stringify({ version: 1, path: "2026-09-01.md", events: [{ id, heading: "Old note", cues: ["quasar-velvet"] }] }),
+    "utf8",
+  );
+
+  const search = await memory.searchMemory({ projectRoot, query: "quasar velvet", scope: "project" });
+
+  assert.equal(search.results.length, 1);
+  assert.deepEqual(search.results[0].keywords, ["quasar-velvet"]);
+  assert.equal(search.results[0].match, "keywords");
 });
 
 test("search returns whole sentences from an oversized matching paragraph", async (t) => {
@@ -207,7 +244,7 @@ test("search returns whole sentences from an oversized matching paragraph", asyn
   const filler = "The weekly sync covered routine updates. ".repeat(40);
   await memory.appendEvent({
     content: `${filler}The kestrel database moved to eu-west-3. ${filler}`,
-    cues: ["infra"],
+    keywords: ["infra"],
     projectRoot,
     scope: "project",
     sync: false,
@@ -246,7 +283,7 @@ test("search returns every matching paragraph that fits the excerpt budget", asy
   ];
   await memory.appendEvent({
     content: paragraphs.join("\n\n"),
-    cues: ["infra"],
+    keywords: ["infra"],
     projectRoot,
     scope: "project",
     sync: false,
@@ -282,7 +319,7 @@ test("events appended in the same millisecond keep distinct ids and bodies", asy
   const timestamp = "2026-10-01T09:00:00.000Z";
   const first = await memory.appendEvent({
     content: "The zanzibar migration needs a rollback plan.",
-    cues: ["deploy"],
+    keywords: ["deploy"],
     projectRoot,
     scope: "project",
     sync: false,
@@ -291,7 +328,7 @@ test("events appended in the same millisecond keep distinct ids and bodies", asy
   });
   const second = await memory.appendEvent({
     content: "Invoices are generated monthly.",
-    cues: ["billing"],
+    keywords: ["billing"],
     projectRoot,
     scope: "project",
     sync: false,
@@ -329,7 +366,7 @@ test("parallel appends keep every event", async (t) => {
     Array.from({ length: 20 }, (_, index) =>
       memory.appendEvent({
         content: `Parallel event ${index}.`,
-        cues: ["parallel"],
+        keywords: ["parallel"],
         date: "2026-10-01",
         projectRoot,
         scope: "project",
@@ -366,7 +403,7 @@ test("search favors events from a month named in the query", async (t) => {
   for (const timestamp of ["2026-05-02T08:00:00.000Z", "2026-08-05T10:00:00.000Z", "2026-09-01T09:00:00.000Z"]) {
     await memory.appendEvent({
       content: "Published the Android build to Google Play production.",
-      cues: ["android-release"],
+      keywords: ["android-release"],
       date: timestamp.slice(0, 10),
       projectRoot,
       scope: "project",
@@ -407,7 +444,7 @@ test("search favors events from a relative date named in the query", async (t) =
     await memory.appendEvent({
       // The old event matches the words better, so only the date words can rank the others first.
       content: key === "older" ? "Deploy key rotation: rotated the deploy key again." : "Rotated the key for staging.",
-      cues: ["deploy-key"],
+      keywords: ["deploy-key"],
       date: timestamp.slice(0, 10),
       projectRoot,
       scope: "project",
@@ -448,7 +485,7 @@ test("search returns a snippet for a long event matched only by its date", async
 
   await memory.appendEvent({
     content: Array(30).fill("The weekly sync covered routine updates.").join("\n\n"),
-    cues: ["sync"],
+    keywords: ["sync"],
     date: "2026-08-05",
     projectRoot,
     scope: "project",
@@ -485,7 +522,7 @@ test("search returns nothing when no memory is about the question", async (t) =>
     ["Deploy rollback", "A failed backend deploy rolls back to the previous revision."],
     ["Billing note", "Invoices are generated monthly."],
   ]) {
-    await memory.appendEvent({ content, cues: ["ops"], projectRoot, scope: "project", sync: false, title });
+    await memory.appendEvent({ content, keywords: ["ops"], projectRoot, scope: "project", sync: false, title });
   }
 
   const unrelated = await memory.searchMemory({ projectRoot, query: "which kubernetes namespace does the backend deploy to", scope: "project" });

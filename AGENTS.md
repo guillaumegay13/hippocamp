@@ -48,14 +48,14 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - Global memory lives under `HIPPOCAMP_GLOBAL_ROOT/`.
 - Project memory lives under `HIPPOCAMP_GLOBAL_ROOT/projects/<slug>/`.
 - The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory.
-- Event logs are append-only daily Markdown files under `events/YYYY-MM-DD.md`, with sibling `events/YYYY-MM-DD.index.json` cue indexes.
+- Event logs are append-only daily Markdown files under `events/YYYY-MM-DD.md`, with sibling `events/YYYY-MM-DD.index.json` keyword indexes.
 - Curated files such as `current_state.md` and `open_threads.md` use explicit file writes.
-- MCP `append_event` requires a title and 1-8 cues; MCP `write_memory_file` rejects paths under `events/`; an explicit `projectRoot` must be a directory inside a Git repository.
+- MCP `append_event` requires a title and 1-8 keywords; MCP `write_memory_file` rejects paths under `events/`; an explicit `projectRoot` must be a directory inside a Git repository.
 - `append_event` auto-stamps `Agent:` / `Session:` provenance when resolvable (installer env, MCP client name, or process session id). No manual user config.
 - Default sync is automatic through the local Lagoon repo.
 - Local MCP mode must not require `GITHUB_TOKEN`, GitHub App auth, or a cloud service.
 - Memory must not duplicate facts already tracked by GitHub commits, PRs, issues, reviews, or CI. Store references plus the missing rationale, preference, assumption, or follow-up context instead.
-- Dream compaction sends `current_state.md`, `open_threads.md`, and bounded cue-indexed event evidence for open-thread decisions. It must not dump full event logs, cue indexes, or raw GitHub-owned facts into the model prompt.
+- Dream compaction sends `current_state.md`, `open_threads.md`, and bounded keyword-indexed event evidence for open-thread decisions. It must not dump full event logs, keyword indexes, or raw GitHub-owned facts into the model prompt.
 - Dream must compact coherent Markdown snapshots and fail without writing when the snapshot cannot fit. It must not crop wake-up files.
 - The Dream GitHub Actions workflow is a Lagoon repo template. It should remain schedule-only and create PRs rather than pushing directly to `main`. Auto-merge is allowed only for repositories named `lagoon` after exact changed-file validation.
 - The Railway Dream deployment is optional infrastructure. It must exit after each run, keep credentials in environment variables, and preserve the same PR policy.
