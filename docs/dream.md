@@ -9,7 +9,7 @@ projects/<project-slug>/current_state.md
 projects/<project-slug>/open_threads.md
 ```
 
-It does not dump event logs into the model prompt, does not rewrite append-only events, and does not run during normal MCP wake-up. When a project is over the threshold, Dream builds a capped thread evidence pack by searching cue-indexed project events for `open_threads.md` bullets. The evidence budget follows `--target-chars`, so the same size target controls both the desired output and the supporting context.
+It does not dump event logs into the model prompt, does not rewrite append-only events, and does not run during normal MCP wake-up. When a project is over the threshold, Dream builds a capped thread evidence pack by searching keyword-indexed project events for `open_threads.md` bullets. The evidence budget follows `--target-chars`, so the same size target controls both the desired output and the supporting context.
 
 Dream uses an Eve-style compaction loop. It rewrites the complete curated snapshot, measures the result, and compacts that coherent result again when it is still over the target. It never crops a wake-up file. After three passes, it fails without writing either file if the snapshot still does not fit.
 

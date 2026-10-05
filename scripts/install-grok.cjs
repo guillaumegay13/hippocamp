@@ -122,7 +122,7 @@ function buildGrokManagedBlock() {
     "- When project state changes, use `append_event` for milestones and update curated files such as `current_state.md` and `open_threads.md` before finishing the task.",
     "- Do not re-read `current_state.md` or `open_threads.md` after `wake_up`; they are already loaded.",
     "- Update curated files only when project state actually changed. For small tasks, `append_event` is enough.",
-    "- When appending events, pass a `title` and 1-8 concise `cues` so fuzzy recall can find the event later. Never write under `events/` with `write_memory_file`.",
+    "- When appending events, pass a `title` and 1-8 concise `keywords` so fuzzy recall can find the event later. Never write under `events/` with `write_memory_file`.",
     "- Do not duplicate commits, PRs, issues, reviews, or CI results in memory; store references plus the missing rationale, preference, assumption, or follow-up context.",
     "- If a project-memory write does not sync automatically, call `sync_memory` before finishing the task.",
     "- If the user asks to upgrade Hippocamp for Grok Build, run `npx hippocamp@latest upgrade-grok`; from a source checkout, run `git pull --ff-only`, `npm install`, then `npm run upgrade:grok`.",

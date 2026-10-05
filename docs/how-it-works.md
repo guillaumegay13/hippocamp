@@ -67,18 +67,18 @@ Typical agent flow:
 1. Call `wake_up` at the start of a top-level task.
 2. Read the returned global and project memory.
 3. Use `search_memory` for task-specific recall after wake-up.
-4. Use `append_event` for meaningful milestones, with a title and 1-8 concise cues.
+4. Use `append_event` for meaningful milestones, with a title and 1-8 concise keywords.
 5. Update curated files like `current_state.md` and `open_threads.md` before finishing.
 
 Writes sync by default. If sync fails or is skipped, call `sync_memory`.
 
-Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar is rebuildable. Search ranks indexed events and curated files with BM25 and typo tolerance ([MiniSearch](https://github.com/lucaong/minisearch)), weighting cues above titles and titles above bodies. It returns small coherent evidence blocks from indexed events. If no indexed result is strong enough, it returns no event result instead of scanning whole event logs.
+Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar is rebuildable. Search ranks indexed events and curated files with BM25 and typo tolerance ([MiniSearch](https://github.com/lucaong/minisearch)), weighting keywords above titles and titles above bodies. It returns small coherent evidence blocks from indexed events. If no indexed result is strong enough, it returns no event result instead of scanning whole event logs.
 
 ## Memory Rules
 
 - Keep memory concise.
 - Prefer curated summaries over raw event history.
-- Give events a short `Cues:` section; cues weigh the most in search ranking.
+- Give events a short `Keywords:` section; keywords weigh the most in search ranking. Older events with a `Cues:` section still search the same way.
 - Do not duplicate GitHub-owned facts such as commits, PRs, issues, reviews, or CI results.
 - Store artifact references plus the missing rationale, preference, assumption, or follow-up context.
 - Use project scope for project-specific state.
@@ -92,7 +92,7 @@ Example event content:
 Agent: claude
 Session: mcp-a1b2c3d4
 
-Cues:
+Keywords:
 - local-first
 - token-free
 - install-story

@@ -153,8 +153,8 @@ const lines = [
   "",
   "Policy:",
   "- touched only `current_state.md` and `open_threads.md`",
-  "- used bounded cue-indexed event evidence for thread decisions",
-  "- did not modify append-only events or cue indexes",
+  "- used bounded keyword-indexed event evidence for thread decisions",
+  "- did not modify append-only events or keyword indexes",
   "- moved historical detail out of wake-up context",
 ];
 console.log(lines.join("\n"));

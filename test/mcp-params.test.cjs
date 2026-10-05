@@ -41,26 +41,26 @@ test("MCP server rejects calls that would succeed but misbehave", async (t) => {
   assert.equal(eventWrite.isError, true);
   assert.match(resultText(eventWrite), /append-only/);
 
-  const noCues = await client.callTool({
+  const noKeywords = await client.callTool({
     name: "append_event",
-    arguments: { title: "Missing cues", content: "Unsearchable.", sync: false },
+    arguments: { title: "Missing keywords", content: "Unsearchable.", sync: false },
   });
-  assert.equal(noCues.isError, true);
+  assert.equal(noKeywords.isError, true);
 
-  const tooManyCues = await client.callTool({
+  const tooManyKeywords = await client.callTool({
     name: "append_event",
     arguments: {
-      title: "Too many cues",
-      cues: Array.from({ length: 9 }, (_, index) => `cue-${index}`),
+      title: "Too many keywords",
+      keywords: Array.from({ length: 9 }, (_, index) => `keyword-${index}`),
       content: "Too broad.",
       sync: false,
     },
   });
-  assert.equal(tooManyCues.isError, true);
+  assert.equal(tooManyKeywords.isError, true);
 
   const noTitle = await client.callTool({
     name: "append_event",
-    arguments: { title: " ", cues: ["untitled"], content: "No heading.", sync: false },
+    arguments: { title: " ", keywords: ["untitled"], content: "No heading.", sync: false },
   });
   assert.equal(noTitle.isError, true);
 
@@ -73,8 +73,8 @@ test("MCP server rejects calls that would succeed but misbehave", async (t) => {
 
   const valid = await client.callTool({
     name: "append_event",
-    arguments: { title: "Valid event", cues: ["valid-cue"], content: "Indexed.", projectRoot, sync: false },
+    arguments: { title: "Valid event", keywords: ["valid-keyword"], content: "Indexed.", projectRoot, sync: false },
   });
   assert.notEqual(valid.isError, true);
-  assert.deepEqual(JSON.parse(resultText(valid)).cues, ["valid-cue"]);
+  assert.deepEqual(JSON.parse(resultText(valid)).keywords, ["valid-keyword"]);
 });

@@ -272,7 +272,7 @@ async function buildThreadEvidence(report, { budgetChars }) {
     const item = {
       path: match.path,
       heading: match.heading,
-      cues: match.cues || [],
+      keywords: match.keywords || [],
       score: match.score,
       snippet: match.snippet,
     };
@@ -348,7 +348,7 @@ function createPrompt({ report, targetChars, threadEvidence }) {
         report.files["open_threads.md"].content.trim() || "# Open Threads",
         "",
         "## Thread Evidence",
-        "Evidence is retrieved from cue-indexed project events. It is intentionally small and may be incomplete.",
+        "Evidence is retrieved from keyword-indexed project events. It is intentionally small and may be incomplete.",
         `Evidence budget: ${threadEvidence.evidenceChars}/${threadEvidence.evidenceBudgetChars} chars`,
         JSON.stringify(threadEvidence.items, null, 2),
       ].join("\n"),
