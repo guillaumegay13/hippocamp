@@ -148,10 +148,20 @@ function slugifyProjectName(value) {
   return slug || "project";
 }
 
+// An existing folder with nothing but .git (a fresh session or scratch folder) is not a project.
+function isEmptyFolder(folder) {
+  try {
+    return fsSync.readdirSync(folder).every((name) => name === ".git");
+  } catch {
+    return false;
+  }
+}
+
+// Null when the folder is empty: project memory then falls back to global memory.
 function getProjectSlug(projectRoot) {
   const resolvedProjectRoot = getProjectRoot(projectRoot);
-  const repositoryRoot = findRepositoryRootSync(resolvedProjectRoot);
-  return slugifyProjectName(path.basename(repositoryRoot || resolvedProjectRoot));
+  const folder = findRepositoryRootSync(resolvedProjectRoot) || resolvedProjectRoot;
+  return isEmptyFolder(folder) ? null : slugifyProjectName(path.basename(folder));
 }
 
 function getScopeRoot(scope, projectRoot) {
@@ -160,7 +170,8 @@ function getScopeRoot(scope, projectRoot) {
   }
 
   if (scope === "project") {
-    return path.join(getGlobalRoot(), "projects", getProjectSlug(projectRoot));
+    const slug = getProjectSlug(projectRoot);
+    return slug ? path.join(getGlobalRoot(), "projects", slug) : getGlobalRoot();
   }
 
   throw new Error(`Unsupported scope: ${scope}`);
@@ -919,7 +930,7 @@ function splitOversizedBlock(block) {
   return chunks;
 }
 
-function createSearchExcerpt(content, queryInfo, leadWhenUnmatched = false) {
+function createSearchExcerpt(content, queryInfo) {
   const trimmed = content.trim();
 
   if (!trimmed) {
@@ -956,8 +967,8 @@ function createSearchExcerpt(content, queryInfo, leadWhenUnmatched = false) {
   // Keep the best-matching paragraphs that fit the excerpt budget, in file order.
   const hits = index.search(queryInfo.normalized, { fuzzy: SEARCH_FUZZY_DISTANCE }).map((hit) => hit.id);
 
-  // An event chosen by its date may share no words with the query; then lead with its first paragraphs.
-  for (const id of hits.length || !leadWhenUnmatched ? hits : blocks.map((_, position) => position)) {
+  // An event chosen by its date, keywords, or title may share no words with its paragraphs; then lead with the first ones.
+  for (const id of hits.length ? hits : blocks.map((_, position) => position)) {
     const added = blocks[id].length + (picked.length ? 2 : 0);
 
     if (length + added > SEARCH_EXCERPT_MAX_CHARS) {
@@ -1316,14 +1327,22 @@ function rankSearchDocuments(queryInfo, { index, documents }) {
     .map((hit) => ({
       document: documents[hit.id],
       score: Math.round(hit.score * 100) / 100,
-      queryTerms: hit.queryTerms,
+      terms: hit.terms,
     }));
 }
 
-// Share of the question's rare-word weight (IDF) that the best match contains. A question
-// whose rare words ("kubernetes", "namespace") appear in no memory gets a low share even when
-// common words ("backend", "deploy") match, so search can return nothing instead of noise.
-function rareWordCoverage(queryInfo, best, { index, documents }) {
+// Same word in another form: a plural or longer form ("deploy", "deployments") or the same stem
+// ("creating", "creation"). A typo-tolerant hit on a different word ("instinct", "instance",
+// "content", "context") is not.
+function sameWord(left, right) {
+  const stem = (word) => word.replace(/(?:ments?|ings?|ions?|ers?|ed|es|s)$/, "");
+  return tokenSimilarity(left, right) >= 0.9 || (stem(left).length >= 4 && stem(left) === stem(right));
+}
+
+// Share of the question's rare-word weight (IDF) that the best of the returned matches contains.
+// A question whose rare words ("kubernetes", "namespace") appear in no memory gets a low share even
+// when common words ("backend", "deploy") match, so search can return nothing instead of noise.
+function rareWordCoverage(queryInfo, candidates, { index, documents }) {
   // Month names only rank (see eventDateText); they say when, not what.
   const words = [
     ...new Set(
@@ -1335,15 +1354,19 @@ function rareWordCoverage(queryInfo, best, { index, documents }) {
     return 1;
   }
 
-  const weight = (word) => Math.log(1 + documents.length / (index.search(word, { fuzzy: 0 }).length + 0.5));
-  const matched = new Set(best?.queryTerms || []);
-  const total = words.reduce((sum, word) => sum + weight(word), 0);
+  const weights = new Map(
+    words.map((word) => [word, Math.log(1 + documents.length / (index.search(word, { fuzzy: 0 }).length + 0.5))]),
+  );
+  const total = words.reduce((sum, word) => sum + weights.get(word), 0);
+  const coverage = ({ terms }) =>
+    words.filter((word) => terms.some((term) => sameWord(word, term))).reduce((sum, word) => sum + weights.get(word), 0) /
+    total;
 
-  return words.filter((word) => matched.has(word)).reduce((sum, word) => sum + weight(word), 0) / total;
+  return Math.max(0, ...candidates.map(coverage));
 }
 
 function toSearchResult(queryInfo, { document, score }) {
-  const snippet = createSearchExcerpt(document.body, queryInfo, queryInfo.datePrefixes.length > 0);
+  const snippet = createSearchExcerpt(document.body, queryInfo);
 
   if (!snippet) {
     return null;
@@ -1434,7 +1457,11 @@ async function loadSearchIndex(scopes, projectRoot) {
 async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5 }) {
   const queryInfo = createQueryInfo(query);
   const clampedMaxResults = Math.max(1, Math.min(Number(maxResults) || 5, 20));
-  const scopes = scope === "both" ? ["global", "project"] : [scope];
+  const hasProject = getProjectSlug(projectRoot) !== null;
+  // Without a project, project scope is global memory; search it once, as global.
+  const scopes = [
+    ...new Set((scope === "both" ? ["global", "project"] : [scope]).map((name) => (name === "project" && !hasProject ? "global" : name))),
+  ];
   const search = await loadSearchIndex(scopes, projectRoot);
   const results = [];
 
@@ -1442,7 +1469,7 @@ async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5
   // Dated questions skip the check: their date words describe time, not the topic.
   const related =
     queryInfo.datePrefixes.length > 0 ||
-    rareWordCoverage(queryInfo, candidates[0], search) >= SEARCH_MIN_RARE_WORD_COVERAGE;
+    rareWordCoverage(queryInfo, candidates.slice(0, clampedMaxResults), search) >= SEARCH_MIN_RARE_WORD_COVERAGE;
 
   if (related) {
     for (const candidate of candidates) {
@@ -1488,7 +1515,7 @@ async function wakeUp({ projectRoot } = {}) {
     });
   }
 
-  for (const relativePath of DEFAULT_PROJECT_FILES) {
+  for (const relativePath of projectSlug ? DEFAULT_PROJECT_FILES : []) {
     const file = await readMemoryFile({ scope: "project", path: relativePath, projectRoot });
 
     if (!file.found) {
@@ -1507,7 +1534,7 @@ async function wakeUp({ projectRoot } = {}) {
     "",
     `Global root: ${globalRoot}`,
     `Project root: ${resolvedProjectRoot}`,
-    `Project slug: ${projectSlug}`,
+    `Project slug: ${projectSlug || "none (empty folder; project memory is global memory)"}`,
     `Project memory root: ${projectMemoryRoot}`,
   ];
 

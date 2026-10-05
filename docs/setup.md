@@ -57,6 +57,7 @@ Environment variables are optional for local use:
 - `HIPPOCAMP_GLOBAL_ROOT`: local Lagoon clone path. Default: `~/.lagoon`
 - `HIPPOCAMP_PROJECT_ROOT`: project root used to infer the current project slug. Default: current working directory
 - Git worktrees, including Conductor workspaces, resolve to the main repository name so every workspace shares the same project memory.
+- An empty folder (nothing but `.git`, like a fresh agent session folder) has no project: project memory falls back to global memory, so these sessions start clean and stay searchable from everywhere.
 - `MANIFEST_BASE_URL`: OpenAI-compatible base URL used by `hippocamp dream --write`
 - `MANIFEST_API_KEY`: API key used by `hippocamp dream --write`
 - `HIPPOCAMP_DREAM_MODEL`: model used by Dream. Default: `auto`

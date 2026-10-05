@@ -17,7 +17,7 @@ Upgrade uses the same path: run `npm run upgrade:codex`, `npm run upgrade:claude
 
 - Global memory lives at the root of the local Lagoon clone pointed to by `HIPPOCAMP_GLOBAL_ROOT`.
 - Project memory lives under `projects/<slug>/` inside that same Lagoon clone.
-- The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory.
+- The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory. An empty folder (nothing but `.git`) has no project and uses global memory.
 - The Hippocamp MCP server exposes the tools that read and write those locations.
 
 ## Default Workflow

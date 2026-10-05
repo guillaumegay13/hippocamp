@@ -72,7 +72,7 @@ Typical agent flow:
 
 Writes sync by default. If sync fails or is skipped, call `sync_memory`.
 
-Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar is rebuildable. Search ranks indexed events and curated files with BM25 and typo tolerance ([MiniSearch](https://github.com/lucaong/minisearch)), weighting keywords above titles and titles above bodies. It returns small coherent evidence blocks from indexed events. If no indexed result is strong enough, it returns no event result instead of scanning whole event logs.
+Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar is rebuildable. Search ranks indexed events and curated files with BM25 and typo tolerance ([MiniSearch](https://github.com/lucaong/minisearch)), weighting keywords above titles and titles above bodies. It returns small coherent evidence blocks from indexed events; an event found only by its keywords or title returns its first paragraphs. If no indexed result is strong enough, it returns no event result instead of scanning whole event logs.
 
 ## Memory Rules
 
