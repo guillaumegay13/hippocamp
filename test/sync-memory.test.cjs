@@ -29,7 +29,6 @@ test("sync commits when the Lagoon path goes through a symlink", async (t) => {
   });
 
   await fs.mkdir(realLagoon);
-  await fs.mkdir(projectRoot);
   await fs.symlink(realLagoon, linkedLagoon);
   git(["init", "-q", "-b", "main"]);
   git(["commit", "-q", "--allow-empty", "-m", "init"]);
@@ -56,7 +55,6 @@ test("sync commits when the Lagoon path goes through a symlink", async (t) => {
 
   // A symlink inside the Lagoon pointing at another project must not be synced as this one.
   const otherProject = path.join(tempRoot, "other-project");
-  await fs.mkdir(otherProject);
   await fs.mkdir(path.join(realLagoon, "projects", "other-project"), { recursive: true });
   await fs.symlink(path.join(realLagoon, "projects", "linked-project", "events"), path.join(realLagoon, "projects", "other-project", "events"));
 

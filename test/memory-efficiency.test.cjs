@@ -76,7 +76,6 @@ test("search uses indexed events and returns coherent evidence", async (t) => {
   const projectRoot = path.join(tempRoot, "search-project");
 
   process.env.HIPPOCAMP_GLOBAL_ROOT = lagoonRoot;
-  await fs.mkdir(projectRoot, { recursive: true });
   t.after(async () => {
     if (originalRoot === undefined) {
       delete process.env.HIPPOCAMP_GLOBAL_ROOT;
@@ -124,7 +123,9 @@ test("search uses indexed events and returns coherent evidence", async (t) => {
     scope: "project",
   });
 
-  assert.deepEqual(oversized.results, []);
+  // A keyword-only match still returns whole paragraphs; the oversized run is left out, never cropped.
+  assert.equal(oversized.results[0]?.heading, "Large metadata-only match");
+  assert.equal(oversized.results[0].snippet, "Decision:");
 
   const projectMemoryRoot = path.join(lagoonRoot, "projects", "search-project");
   await fs.writeFile(
@@ -195,7 +196,6 @@ test("search still matches events written with legacy Cues sections and indexes"
   const eventsRoot = path.join(tempRoot, "lagoon", "projects", "legacy-project", "events");
 
   process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
-  await fs.mkdir(projectRoot, { recursive: true });
   await fs.mkdir(eventsRoot, { recursive: true });
   t.after(async () => {
     if (originalRoot === undefined) {
@@ -534,4 +534,119 @@ test("search returns nothing when no memory is about the question", async (t) =>
   assert.equal(related.results[0].heading, "Backend deploy");
   // No event is from August; the month name must not count as a missing topic word.
   assert.ok(monthOnly.results.length > 0);
+});
+
+test("search keeps an event matched only by a keyword its long body never repeats", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-keyword-only-"));
+  const projectRoot = path.join(tempRoot, "keyword-only-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const content = [
+    "Opened three hardening PRs after the security audit.",
+    "The backend PR rotates the cron secret and checks request signatures on every scheduled job. ".repeat(8),
+    "The website PR updates the content studio dependencies and removes an unused preview route. ".repeat(8),
+  ].join("\n\n");
+
+  assert.ok(content.length > 1200);
+  await memory.appendEvent({
+    content,
+    keywords: ["security-audit", "strava-oauth"],
+    projectRoot,
+    scope: "project",
+    sync: false,
+    title: "Security audit opened hardening PRs",
+  });
+
+  const search = await memory.searchMemory({ projectRoot, query: "Strava bug", scope: "project" });
+
+  assert.equal(search.results[0]?.heading, "Security audit opened hardening PRs");
+  assert.match(search.results[0].snippet, /^Opened three hardening PRs/);
+});
+
+test("search returns nothing when a rare word only resembles memory words", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-lookalike-"));
+  const projectRoot = path.join(tempRoot, "lookalike-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  await memory.appendEvent({
+    content: "Each worker instance reads the instruct prompt before a sync.",
+    keywords: ["health-sync"],
+    projectRoot,
+    scope: "project",
+    sync: false,
+    title: "Apple Health sync banner hardening",
+  });
+
+  // "instinct" is one typo away from "instance" and "instruct" but means something else.
+  const lookalike = await memory.searchMemory({ projectRoot, query: "Instinct", scope: "project" });
+  const plural = await memory.searchMemory({ projectRoot, query: "worker instances", scope: "project" });
+
+  assert.deepEqual(lookalike.results, []);
+  assert.equal(plural.results[0]?.heading, "Apple Health sync banner hardening");
+});
+
+test("an empty folder has no project and uses global memory", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-empty-folder-"));
+  const lagoonRoot = path.join(tempRoot, "lagoon");
+  const emptyRoot = path.join(tempRoot, "billowy-glove");
+  const codeRoot = path.join(tempRoot, "job-search");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = lagoonRoot;
+  // Only .git, like a fresh session folder some agents create.
+  await fs.mkdir(path.join(emptyRoot, ".git"), { recursive: true });
+  await fs.mkdir(codeRoot, { recursive: true });
+  await fs.writeFile(path.join(codeRoot, "notes.md"), "Job search notes.\n", "utf8");
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const wake = await memory.wakeUp({ projectRoot: emptyRoot });
+  const event = await memory.appendEvent({
+    content: "Created the applying-to-jobs skill.",
+    keywords: ["applying-to-jobs"],
+    projectRoot: emptyRoot,
+    scope: "project",
+    sync: false,
+    title: "Job application skill created",
+  });
+  const fromEmpty = await memory.searchMemory({ projectRoot: emptyRoot, query: "applying to jobs skill" });
+  const fromProject = await memory.searchMemory({ projectRoot: codeRoot, query: "applying to jobs skill" });
+
+  assert.equal(wake.projectSlug, null);
+  assert.equal(wake.projectMemoryRoot, lagoonRoot);
+  assert.equal(path.dirname(path.dirname(event.indexPath)), lagoonRoot);
+  // Global memory is searched once, not twice.
+  assert.equal(fromEmpty.results.length, 1);
+  assert.equal(fromProject.results[0]?.heading, "Job application skill created");
+  assert.equal(memory.getProjectSlug(codeRoot), "job-search");
+  // A folder that does not exist keeps its name, as Dream's synthetic roots do.
+  assert.equal(memory.getProjectSlug(path.join(tempRoot, "missing")), "missing");
 });

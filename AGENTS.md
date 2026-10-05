@@ -47,7 +47,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - Sync paths must stay under the selected Lagoon memory root.
 - Global memory lives under `HIPPOCAMP_GLOBAL_ROOT/`.
 - Project memory lives under `HIPPOCAMP_GLOBAL_ROOT/projects/<slug>/`.
-- The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory.
+- The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory. An existing folder with nothing but `.git` has no project; project scope then resolves to the global root.
 - Event logs are append-only daily Markdown files under `events/YYYY-MM-DD.md`, with sibling `events/YYYY-MM-DD.index.json` keyword indexes.
 - Curated files such as `current_state.md` and `open_threads.md` use explicit file writes.
 - MCP `append_event` requires a title and 1-8 keywords; MCP `write_memory_file` rejects paths under `events/`; an explicit `projectRoot` must be a directory inside a Git repository.

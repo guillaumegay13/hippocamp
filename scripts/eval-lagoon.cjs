@@ -61,8 +61,9 @@ async function run(options) {
   }
 
   const { cases } = JSON.parse(await fs.readFile(options.cases, "utf8"));
-  // searchMemory derives the project slug from the folder name, so a bare temp
-  // folder per slug reads that project's memory without touching any real repo.
+  // searchMemory derives the project slug from the folder name, so a temp path per
+  // slug reads that project's memory without touching any real repo. The folder is
+  // not created: an existing empty folder has no project and reads global memory.
   const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-eval-lagoon-"));
   const answerable = { count: 0, hit: 0, mrr: 0, chars: 0, topScores: [] };
   const empty = { count: 0, correct: 0, topScores: [] };
@@ -74,7 +75,6 @@ async function run(options) {
       }
 
       const projectRoot = path.join(sandboxRoot, item.project);
-      await fs.mkdir(projectRoot, { recursive: true });
 
       const search = await memory.searchMemory({
         query: item.query,
