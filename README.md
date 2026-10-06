@@ -1,6 +1,6 @@
 # Hippocamp
 
-[![npm](https://img.shields.io/npm/v/hippocamp)](https://www.npmjs.com/package/hippocamp) [![CI](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml/badge.svg)](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/hippocamp)](https://www.npmjs.com/package/hippocamp) [![npm downloads](https://img.shields.io/npm/dm/hippocamp)](https://www.npmjs.com/package/hippocamp) [![CI](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml/badge.svg)](https://github.com/guillaumegay13/hippocamp/actions/workflows/ci.yml)
 
 <p align="center">
   <img src="./assets/brand/hippocamp-mascot.png" alt="Hippocamp mascot" width="220" />
@@ -32,17 +32,15 @@ A replay of a real session. Neither prompt mentions Hippocamp.
 
 ## Compared with other memory tools
 
-| | Agent agnostic (MCP server) | Plain files you own | Auditable history | No extra account, API key, or model | Syncs through your own Git | Always free | Open source |
+| | **Hippocamp** | [Mem0](https://docs.mem0.ai) | [Zep](https://www.getzep.com) | [Graphiti](https://github.com/getzep/graphiti) | [Letta Code](https://github.com/letta-ai/letta-code) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) | Claude Code / Codex built-in |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Hippocamp** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [Mem0](https://docs.mem0.ai) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
-| [Zep](https://www.getzep.com) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| [Graphiti](https://github.com/getzep/graphiti) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| [Letta Code](https://github.com/letta-ai/letta-code) | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [Basic Memory](https://github.com/basicmachines-co/basic-memory) | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
-| Claude Code / Codex built-in | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
-
-From each project's own docs, October 2026. Mem0's MCP server is hosted and needs a platform key; Mem0 and Graphiti call a model to extract facts from each memory. Mem0 keeps a change history (full audit logs on Enterprise); Zep and Graphiti record when each fact was valid, not a log of changes. Letta Code's memory serves Letta's own agent; we found no documented way to share it with other agents. Basic Memory is free locally; sync is its paid cloud plan or a Git setup you build yourself.
+| Agent agnostic (MCP server) | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Plain files you own | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Auditable history | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| No extra account, API key, or model | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Syncs through your own Git | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Always free | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Open source | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ |
 
 ## Results
 
