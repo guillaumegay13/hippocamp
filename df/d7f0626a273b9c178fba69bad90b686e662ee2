@@ -1,0 +1,33 @@
+scripts/hippocamp-dream.cjs
+  s_1c4f4c9ef45655::t_c2fa2ddf87a5d7 424,632
+  s_1c4f4c9ef45655::t_736bddc12a1870 631
+  s_1c4f4c9ef45655::t_2eb476b4a3b575 349,410-413,428
+  s_1c4f4c9ef45655::t_c2c2b5b991d20f 348
+  s_1c4f4c9ef45655::t_83fd9bf5208056 367
+test/dream.test.cjs
+  s_1c4f4c9ef45655::t_736bddc12a1870 146-147
+  s_1c4f4c9ef45655::t_2eb476b4a3b575 134-145,148-158
+docs/dream.md
+  s_1c4f4c9ef45655::t_736bddc12a1870 20
+  s_1c4f4c9ef45655::t_2eb476b4a3b575 21
+package-lock.json
+  s_1c4f4c9ef45655::t_5d16653608ea8d 3,9
+package.json
+  s_1c4f4c9ef45655::t_ed2c99fecc1877 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dfd7f0626a273b9c178fba69bad90b686e662ee2",
+  "prompts": {},
+  "sessions": {
+    "s_1c4f4c9ef45655": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12f66-953c-78e0-9634-d328c349d4bf",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
