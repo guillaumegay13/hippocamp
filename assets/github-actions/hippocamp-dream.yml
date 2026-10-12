@@ -106,14 +106,14 @@ jobs:
               --target-chars "$HIPPOCAMP_DREAM_TARGET_CHARS" \
               > "/tmp/hippocamp-dream-${project}.json"
 
-            if git diff --quiet -- "projects/${project}/current_state.md" "projects/${project}/open_threads.md"; then
+            git add -- "projects/${project}/current_state.md" "projects/${project}/open_threads.md"
+            if git diff --cached --quiet; then
               echo "No Dream diff for ${project}"
               git checkout main
               git reset --hard origin/main
               continue
             fi
 
-            git add "projects/${project}/current_state.md" "projects/${project}/open_threads.md"
             git commit -m "Dream update ${project} memory"
             git push --force-with-lease origin "$branch"
 
