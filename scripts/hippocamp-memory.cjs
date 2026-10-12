@@ -1226,6 +1226,49 @@ async function collectEventDocuments({ scope, eventFiles }) {
   };
 }
 
+// Dream reads a bounded chronological batch from indexes, then opens only the
+// referenced days. Unindexed logs are never used as a fallback.
+async function readRecentEvents({ projectRoot, after, before = new Date().toISOString(), maxResults = 20 }) {
+  const root = getScopeRoot("project", projectRoot);
+  const eventFiles = await listEventFiles(root);
+  const candidates = [];
+
+  for (const name of eventFiles.indexes) {
+    if (!/^\d{4}-\d{2}-\d{2}\.index\.json$/.test(name) || name.slice(0, 10) < after.slice(0, 10)) {
+      continue;
+    }
+    let index;
+    try {
+      index = await readJsonFileIfExists(path.join(eventFiles.eventsDir, name));
+    } catch {
+      continue;
+    }
+    for (const event of Array.isArray(index?.events) ? index.events : []) {
+      if (typeof event?.id === "string" && Number.isFinite(Date.parse(event.id)) && event.id > after && event.id <= before) {
+        candidates.push({ id: event.id, path: `events/${name.replace(/\.index\.json$/, ".md")}` });
+      }
+    }
+  }
+
+  candidates.sort((left, right) => left.id.localeCompare(right.id));
+  const days = new Map();
+  const results = [];
+  for (const candidate of candidates) {
+    if (results.length >= maxResults) break;
+    if (!days.has(candidate.path)) {
+      const target = resolveScopedPath("project", candidate.path, projectRoot);
+      const content = await readFileIfExists(target.absolutePath);
+      days.set(candidate.path, new Map(parseEventBlocks(content || "").map((block) => [block.id, block])));
+    }
+    const block = days.get(candidate.path).get(candidate.id);
+    if (!block) continue;
+    const snippet = createSearchExcerpt(block.body, createQueryInfo(block.heading || candidate.id));
+    if (!snippet) continue;
+    results.push({ ...candidate, heading: block.heading, snippet });
+  }
+  return results;
+}
+
 async function listCuratedMarkdownFiles(scope, root) {
   const markdownFiles = await walkMarkdownFiles(root);
 
@@ -1582,6 +1625,7 @@ module.exports = {
   appendEvent,
   listDirectoryEntries,
   searchMemory,
+  readRecentEvents,
   syncMemory,
   getDefaultSyncPaths,
   wakeUp,

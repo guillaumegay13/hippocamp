@@ -3,7 +3,6 @@ name: Hippocamp Dream
 on:
   schedule:
     - cron: "17 3 * * *"
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -42,7 +41,7 @@ jobs:
           git config user.name "hippocamp-dream[bot]"
           git config user.email "hippocamp-dream[bot]@users.noreply.github.com"
 
-      - name: Find projects over threshold
+      - name: Find projects needing Dream
         run: |
           npx -y hippocamp@latest dream \
             --all \
@@ -115,7 +114,7 @@ jobs:
             fi
 
             git add "projects/${project}/current_state.md" "projects/${project}/open_threads.md"
-            git commit -m "Dream compact ${project} memory"
+            git commit -m "Dream update ${project} memory"
             git push --force-with-lease origin "$branch"
 
             node - "$project" "/tmp/hippocamp-dream-${project}.json" > "/tmp/hippocamp-dream-${project}.md" <<'NODE'
@@ -124,7 +123,7 @@ jobs:
           const payload = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
           const result = payload.results[0];
           const lines = [
-            `Dream compacted \`${project}\` curated memory.`,
+            `Dream updated \`${project}\` curated memory.`,
             "",
             "Before:",
             `- wake_up: ${result.wakeUpChars} chars`,
@@ -132,6 +131,7 @@ jobs:
             `- open_threads.md: ${result.files["open_threads.md"]} bytes`,
             "",
             "Context:",
+            `- new event excerpts: ${result.context.recentEvents}`,
             `- open threads found: ${result.context.openThreads}`,
             `- threads with event evidence: ${result.context.threadsWithEvidence}`,
             `- event evidence snippets: ${result.context.evidenceItems}`,
@@ -144,15 +144,15 @@ jobs:
             "",
             "Policy:",
             "- touched only `current_state.md` and `open_threads.md`",
-            "- used bounded keyword-indexed event evidence for thread decisions",
+            "- used bounded recent and thread evidence to update project memory",
             "- did not modify append-only events or keyword indexes",
-            "- moved historical detail out of wake-up context",
+            "- preserved supported lessons and remaining actions within the size budget",
           ];
           console.log(lines.join("\n"));
           NODE
 
             existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
-            title="Dream compact ${project} memory"
+            title="Dream update ${project} memory"
 
             if [ -n "$existing" ]; then
               gh pr edit "$existing" --title "$title" --body-file "/tmp/hippocamp-dream-${project}.md"
