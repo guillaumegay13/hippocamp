@@ -17,6 +17,8 @@ Recent events use at most half of the evidence budget. The remaining budget supp
 
 Dream promotes clear decisions, explicit corrections, and reusable project lessons into `current_state.md`, with source references. It keeps remaining actions in `open_threads.md`, preserves unresolved blockers, and removes completed actions only when evidence supports it. A merged PR does not prove its deployment or follow-up work is done. Uncertain lessons remain in events for normal search.
 
+Projects with indexed events can start without curated summaries. Dream creates the two files, and the scheduled runners include these new files in the project's PR.
+
 Corrections apply across both files: a shipped feature should not remain an implementation task, while unverified deployment stays open. Extra compaction passes must keep source paths and timestamps for retained knowledge and aim below the size limit to leave room for length estimates. Dream writes the review comment itself; the model does not set review progress.
 
 The snapshot may grow within `--target-chars` when new evidence adds useful knowledge. If it exceeds the target, Dream compacts the complete result again. It never crops a wake-up file. After three passes, it fails without writing either file or advancing the event comment if the snapshot still does not fit. A project below the threshold with no new indexed evidence is skipped without a model call.

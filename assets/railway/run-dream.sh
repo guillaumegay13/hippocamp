@@ -113,12 +113,12 @@ while IFS= read -r project; do
     continue
   fi
 
-  if git diff --quiet -- "projects/${project}/current_state.md" "projects/${project}/open_threads.md"; then
+  git add -- "projects/${project}/current_state.md" "projects/${project}/open_threads.md"
+  if git diff --cached --quiet; then
     echo "No Dream diff for ${project}"
     continue
   fi
 
-  git add "projects/${project}/current_state.md" "projects/${project}/open_threads.md"
   git commit -m "Dream update ${project} memory"
 
   if git ls-remote --exit-code --heads origin "refs/heads/${branch}" >/dev/null 2>&1; then
