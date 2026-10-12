@@ -1,0 +1,24 @@
+docs/dream.md
+  s_1c4f4c9ef45655::t_fdea42521b1352 14
+scripts/hippocamp-dream.cjs
+  s_1c4f4c9ef45655::t_fdea42521b1352 659-687
+test/dream.test.cjs
+  s_1c4f4c9ef45655::t_fdea42521b1352 135-150,152
+  s_1c4f4c9ef45655::t_7d7af81044381c 111-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "18a58d9c361f19cf82ded8c210c92fa900d596cc",
+  "prompts": {},
+  "sessions": {
+    "s_1c4f4c9ef45655": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12f66-953c-78e0-9634-d328c349d4bf",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
