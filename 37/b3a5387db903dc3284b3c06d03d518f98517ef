@@ -1,0 +1,41 @@
+assets/github-actions/hippocamp-dream.yml
+  s_1c4f4c9ef45655::t_69373b0f56fb8c 45,118,127,135,148,150,156
+assets/railway/run-dream.sh
+  s_1c4f4c9ef45655::t_69373b0f56fb8c 122,136,144,157,159,165
+AGENTS.md
+  s_1c4f4c9ef45655::t_251d22df6d0468 58,87
+README.md
+  s_1c4f4c9ef45655::t_251d22df6d0468 27,62
+skills/hippocamp-memory/SKILL.md
+  s_1c4f4c9ef45655::t_251d22df6d0468 50
+scripts/hippocamp-dream.cjs
+  s_1c4f4c9ef45655::t_02c03d4c6549bc 756
+  s_1c4f4c9ef45655::t_0def0f42b8c749 263-264,281,743-744
+  s_1c4f4c9ef45655::t_51192d85bc72e5 660-661
+  s_1c4f4c9ef45655::t_14acbb231cf0e4 16-17,36,43-45,256-262,265-280,282-283,304,336,343,345-348,353,380,385-388,616,624,628-631,643-647,673-676,693,701,708,712-713,722,734,749,821-822
+  s_1c4f4c9ef45655::t_a1f47abc37e094 648
+docs/dream.md
+  s_1c4f4c9ef45655::t_251d22df6d0468 5,12,14-20,35
+scripts/hippocamp-memory.cjs
+  s_1c4f4c9ef45655::t_4d8286b08fc321 1229-1246,1248-1271,1628
+  s_1c4f4c9ef45655::t_02c03d4c6549bc 1247
+test/dream.test.cjs
+  s_1c4f4c9ef45655::t_51192d85bc72e5 124-138
+  s_1c4f4c9ef45655::t_9aa705aff85baa 1-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "37b3a5387db903dc3284b3c06d03d518f98517ef",
+  "prompts": {},
+  "sessions": {
+    "s_1c4f4c9ef45655": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12f66-953c-78e0-9634-d328c349d4bf",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
