@@ -11,7 +11,7 @@ projects/<project-slug>/open_threads.md
 
 Dream runs when a project has new indexed events or its wake-up context exceeds `--threshold-chars`. It does not run during normal MCP wake-up or modify append-only events.
 
-Each run reads a chronological batch of up to 20 new indexed event excerpts, independent of existing open threads. The first run starts with the last seven days. After a successful write, a small `<!-- hippocamp-dream-through: ... -->` comment in `current_state.md` records the last event included. Preserve this comment when editing the file. Later runs resume there, including after downtime; events that do not fit wait for the next run. If the comment is removed, Dream starts again with the last seven days.
+Each run reads a chronological batch of up to 20 new indexed event excerpts, independent of existing open threads. The first run starts with the last seven days. After a successful write, a small `<!-- hippocamp-dream-through: ... -->` comment in `current_state.md` records the last event included. Preserve this comment when editing the file. Later runs resume there, including after downtime; events after the last included event wait for the next run. If the first excerpt alone exceeds the recent-event budget, Dream fails without writing and asks for a larger `--target-chars`. If the comment is removed, Dream starts again with the last seven days.
 
 Recent events use at most half of the evidence budget. The remaining budget supports searches for existing `open_threads.md` bullets. The total evidence budget follows `--target-chars`. The model receives bounded coherent excerpts with source paths and timestamps, never whole event logs or raw indexes.
 

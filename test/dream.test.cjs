@@ -108,6 +108,16 @@ test("an oversized model result fails without changing files or the event cursor
   assert.deepEqual(await Promise.all(paths.map((name) => fs.readFile(name, "utf8"))), before);
 });
 
+test("an oversized first excerpt fails before a model call without skipping evidence", async (t) => {
+  const f = await fixture(t);
+  await f.event("Durable correction", "Keep production reads fail-closed.");
+  const paths = ["current_state.md", "open_threads.md"].map((name) => path.join(f.project, name));
+  const before = await Promise.all(paths.map((name) => fs.readFile(name, "utf8")));
+  global.fetch = async () => assert.fail("Model must not be called");
+  await assert.rejects(dream.dreamProject(f.slug, { ...f.options, targetChars: 100 }), /Recent event evidence does not fit/);
+  assert.deepEqual(await Promise.all(paths.map((name) => fs.readFile(name, "utf8"))), before);
+});
+
 test("recent reads ignore an index path that points outside its canonical event day", async (t) => {
   const f = await fixture(t);
   const id = await f.event("Safe event", "Canonical event evidence.");
@@ -122,17 +132,21 @@ test("recent reads ignore an index path that points outside its canonical event 
   assert.doesNotMatch(events[0].snippet, /Outside scope/);
 });
 
-test("a failed open-thread write leaves the review marker unchanged", async (t) => {
-  const f = await fixture(t);
-  await f.event("Durable correction", "Keep production reads fail-closed.");
-  const currentPath = path.join(f.project, "current_state.md");
-  const before = await fs.readFile(currentPath, "utf8");
-  global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep production reads fail-closed.", open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
-  const writeFile = fs.writeFile;
-  t.mock.method(fs, "writeFile", async (file, ...args) => {
-    if (file === path.join(f.project, "open_threads.md")) throw new Error("Fixture write failure");
-    return writeFile(file, ...args);
+for (const failure of ["current_state.md", "open_threads.md", "commit"]) {
+  test(`a failed ${failure} save leaves both files and the review marker unchanged`, async (t) => {
+    const f = await fixture(t);
+    await f.event("Durable correction", "Keep production reads fail-closed.");
+    const paths = ["current_state.md", "open_threads.md"].map((name) => path.join(f.project, name));
+    const before = await Promise.all(paths.map((name) => fs.readFile(name, "utf8")));
+    global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep production reads fail-closed.", open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+    const method = failure === "commit" ? "rename" : "writeFile";
+    const original = fs[method];
+    t.mock.method(fs, method, async (file, ...args) => {
+      if (failure === "commit" ? args[0] === paths[0] : path.basename(file) === failure) throw new Error("Fixture write failure");
+      return original(file, ...args);
+    });
+    await assert.rejects(dream.dreamProject(f.slug, f.options), /Fixture write failure/);
+    assert.deepEqual(await Promise.all(paths.map((name) => fs.readFile(name, "utf8"))), before);
+    assert.equal((await fs.readdir(f.project)).some((name) => name.startsWith(".dream-")), false);
   });
-  await assert.rejects(dream.dreamProject(f.slug, f.options), /Fixture write failure/);
-  assert.equal(await fs.readFile(currentPath, "utf8"), before);
-});
+}

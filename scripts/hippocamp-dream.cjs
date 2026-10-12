@@ -656,9 +656,35 @@ async function compactDreamOutput({ apiKey, baseUrl, beforeBytes, model, report,
 }
 
 async function writeDreamOutput(report, output) {
-  await fs.writeFile(report.files["open_threads.md"].absolutePath, `${output.openThreads}\n`, "utf8");
-  // Advance the event marker only after the remaining actions are saved.
-  await fs.writeFile(report.files["current_state.md"].absolutePath, `${output.currentState}\n`, "utf8");
+  const staging = await fs.mkdtemp(path.join(report.projectMemoryRoot, ".dream-"));
+  const currentPath = report.files["current_state.md"].absolutePath;
+  const threadsPath = report.files["open_threads.md"].absolutePath;
+  const backup = path.join(staging, "previous-threads.md");
+  let cleanup = true;
+  try {
+    await fs.writeFile(path.join(staging, "current_state.md"), `${output.currentState}\n`, "utf8");
+    await fs.writeFile(path.join(staging, "open_threads.md"), `${output.openThreads}\n`, "utf8");
+    const hadThreads = await fs.copyFile(threadsPath, backup).then(() => true).catch((error) => {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    });
+    await fs.rename(path.join(staging, "open_threads.md"), threadsPath);
+    try {
+      // Advance the event marker only after the remaining actions are saved.
+      await fs.rename(path.join(staging, "current_state.md"), currentPath);
+    } catch (error) {
+      try {
+        if (hadThreads) await fs.rename(backup, threadsPath);
+        else await fs.unlink(threadsPath);
+      } catch (rollbackError) {
+        cleanup = false;
+        throw new AggregateError([error, rollbackError], `Dream write and rollback failed; recovery files remain in ${staging}`);
+      }
+      throw error;
+    }
+  } finally {
+    if (cleanup) await fs.rm(staging, { recursive: true, force: true });
+  }
 }
 
 function toPublicReport(result) {
