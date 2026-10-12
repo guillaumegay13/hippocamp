@@ -84,6 +84,19 @@ test("bootstrap ignores old, future, and unindexed events; a recorded cursor sur
   assert.deepEqual(resumed.recentEvidence.items.map((e) => e.id), [old]);
 });
 
+test("Dream preserves existing curated-file permissions when replacing the snapshot", async (t) => {
+  const f = await fixture(t);
+  await f.event("Durable correction", "Keep production reads fail-closed.");
+  const currentPath = path.join(f.project, "current_state.md");
+  const threadsPath = path.join(f.project, "open_threads.md");
+  await fs.chmod(currentPath, 0o600);
+  await fs.chmod(threadsPath, 0o640);
+  global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep production reads fail-closed.", open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+  await dream.dreamProject(f.slug, f.options);
+  assert.equal((await fs.stat(currentPath)).mode & 0o777, 0o600);
+  assert.equal((await fs.stat(threadsPath)).mode & 0o777, 0o640);
+});
+
 test("bounded batches defer remaining events without advancing past unseen evidence", async (t) => {
   const f = await fixture(t);
   const ids = [];

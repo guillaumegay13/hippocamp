@@ -662,8 +662,15 @@ async function writeDreamOutput(report, output) {
   const backup = path.join(staging, "previous-threads.md");
   let cleanup = true;
   try {
-    await fs.writeFile(path.join(staging, "current_state.md"), `${output.currentState}\n`, "utf8");
-    await fs.writeFile(path.join(staging, "open_threads.md"), `${output.openThreads}\n`, "utf8");
+    for (const [name, content] of [["current_state.md", output.currentState], ["open_threads.md", output.openThreads]]) {
+      const mode = await fs.stat(report.files[name].absolutePath).then((stat) => stat.mode & 0o777).catch((error) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      const stagedPath = path.join(staging, name);
+      await fs.writeFile(stagedPath, `${content}\n`, "utf8");
+      if (mode !== undefined) await fs.chmod(stagedPath, mode);
+    }
     const hadThreads = await fs.copyFile(threadsPath, backup).then(() => true).catch((error) => {
       if (error.code === "ENOENT") return false;
       throw error;
