@@ -131,6 +131,31 @@ test("an oversized first excerpt fails before a model call without skipping evid
   assert.deepEqual(await Promise.all(paths.map((name) => fs.readFile(name, "utf8"))), before);
 });
 
+test("compaction retries retain source evidence while the caller owns the review marker", async (t) => {
+  const f = await fixture(t);
+  const id = await f.event("Durable correction", "Keep production reads fail-closed.");
+  const source = `events/${id.slice(0, 10)}.md, ${id}`;
+  let calls = 0;
+  global.fetch = async (_url, request) => {
+    const input = JSON.parse(request.body).input;
+    calls++;
+    if (calls === 1) return respond({ current_state_md: `# Current State\n\n- Keep production reads fail-closed. Source: ${source}.\n\n- ${"Historical detail. ".repeat(200)}`, open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+    assert.ok(input.includes(source));
+    assert.match(input, /Preserve the event path and timestamp attached to each retained/);
+    assert.doesNotMatch(input, /<!-- hippocamp-dream-through:/);
+    const retryTarget = Number(input.match(/Target combined size[^:]*: (\d+) chars/)[1]);
+    assert.ok(retryTarget > 0 && retryTarget < f.options.targetChars);
+    return respond({ current_state_md: `# Current State\n\n- Keep production reads fail-closed. Source: ${source}.`, open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+  };
+  const result = await dream.dreamProject(f.slug, f.options);
+  assert.equal(result.compactionPasses, 2);
+  const current = await fs.readFile(path.join(f.project, "current_state.md"), "utf8");
+  assert.ok(current.includes(source));
+  assert.equal((current.match(/<!-- hippocamp-dream-through:/g) || []).length, 1);
+  assert.equal((await dream.dreamProject(f.slug, f.options)).skipped, "below_threshold");
+  assert.equal(calls, 2);
+});
+
 test("recent reads ignore an index path that points outside its canonical event day", async (t) => {
   const f = await fixture(t);
   const id = await f.event("Safe event", "Canonical event evidence.");
