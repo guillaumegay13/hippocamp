@@ -55,7 +55,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - Default sync is automatic through the local Lagoon repo.
 - Local MCP mode must not require `GITHUB_TOKEN`, GitHub App auth, or a cloud service.
 - Memory must not duplicate facts already tracked by GitHub commits, PRs, issues, reviews, or CI. Store references plus the missing rationale, preference, assumption, or follow-up context instead.
-- Dream compaction sends `current_state.md`, `open_threads.md`, and bounded keyword-indexed event evidence for open-thread decisions. It must not dump full event logs, keyword indexes, or raw GitHub-owned facts into the model prompt.
+- Dream maintains `current_state.md` and `open_threads.md` using bounded recent indexed events and open-thread evidence. It must not dump full event logs, keyword indexes, or raw GitHub-owned facts into the model prompt. Preserve the `hippocamp-dream-through` comment in current state; it tracks the last reviewed event without another file.
 - Dream must compact coherent Markdown snapshots and fail without writing when the snapshot cannot fit. It must not crop wake-up files.
 - The Dream GitHub Actions workflow is a Lagoon repo template. It should remain schedule-only and create PRs rather than pushing directly to `main`. Auto-merge is allowed only for repositories named `lagoon` after exact changed-file validation.
 - The Railway Dream deployment is optional infrastructure. It must exit after each run, keep credentials in environment variables, and preserve the same PR policy.
@@ -84,5 +84,5 @@ When changing code, use the smallest verification that proves the change:
 
 - The cloud/API version is intentionally deferred.
 - Do not reintroduce Next.js, GitHub API token auth, or GitHub App auth for the local MVP.
-- Keep Dream minimal: scheduled coherent compaction, current/open curated files plus bounded thread evidence, one PR per project.
+- Keep Dream minimal: scheduled updates and coherent compaction, two curated files plus bounded indexed evidence, one PR per project.
 - The local install story should stay: `npx hippocamp@latest install`, a local Lagoon repo created if missing, normal Git auth. Installers never create remotes or push.

@@ -119,7 +119,7 @@ while IFS= read -r project; do
   fi
 
   git add "projects/${project}/current_state.md" "projects/${project}/open_threads.md"
-  git commit -m "Dream compact ${project} memory"
+  git commit -m "Dream update ${project} memory"
 
   if git ls-remote --exit-code --heads origin "refs/heads/${branch}" >/dev/null 2>&1; then
     git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
@@ -133,7 +133,7 @@ const project = process.argv[2];
 const payload = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const result = payload.results[0];
 const lines = [
-  `Dream compacted \`${project}\` curated memory.`,
+  `Dream updated \`${project}\` curated memory.`,
   "",
   "Before:",
   `- wake_up: ${result.wakeUpChars} chars`,
@@ -141,6 +141,7 @@ const lines = [
   `- open_threads.md: ${result.files["open_threads.md"]} bytes`,
   "",
   "Context:",
+  `- new event excerpts: ${result.context.recentEvents}`,
   `- open threads found: ${result.context.openThreads}`,
   `- threads with event evidence: ${result.context.threadsWithEvidence}`,
   `- event evidence snippets: ${result.context.evidenceItems}`,
@@ -153,15 +154,15 @@ const lines = [
   "",
   "Policy:",
   "- touched only `current_state.md` and `open_threads.md`",
-  "- used bounded keyword-indexed event evidence for thread decisions",
+  "- used bounded recent and thread evidence to update project memory",
   "- did not modify append-only events or keyword indexes",
-  "- moved historical detail out of wake-up context",
+  "- preserved supported lessons and remaining actions within the size budget",
 ];
 console.log(lines.join("\n"));
 NODE
 
   existing="$(gh pr list --repo "$LAGOON_REPOSITORY" --head "$branch" --state open --json number --jq '.[0].number // empty')"
-  title="Dream compact ${project} memory"
+  title="Dream update ${project} memory"
 
   if [[ -n "$existing" ]]; then
     gh api --method PATCH "repos/${LAGOON_REPOSITORY}/pulls/${existing}" \
