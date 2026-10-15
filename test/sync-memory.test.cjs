@@ -63,3 +63,57 @@ test("sync commits when the Lagoon path goes through a symlink", async (t) => {
     /escapes the memory root/,
   );
 });
+
+test("sync pushes commits left behind by an earlier failed push", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-backlog-"));
+  const remote = path.join(tempRoot, "remote.git");
+  const lagoon = path.join(tempRoot, "lagoon");
+  const projectRoot = path.join(tempRoot, "project");
+  const git = (args, cwd = lagoon) => execFileSync("git", args, { cwd }).toString().trim();
+
+  const identity = { GIT_AUTHOR_NAME: "Test", GIT_AUTHOR_EMAIL: "test@example.com", GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "test@example.com" };
+  const saved = Object.fromEntries(Object.keys(identity).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, identity);
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  git(["init", "-q", "--bare", "-b", "main", remote], tempRoot);
+  git(["clone", "-q", remote, lagoon], tempRoot);
+  git(["commit", "-q", "--allow-empty", "-m", "init"]);
+  git(["push", "-q", "-u", "origin", "main"]);
+  process.env.HIPPOCAMP_GLOBAL_ROOT = lagoon;
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true, maxRetries: 5 });
+  });
+
+  // Simulate an unreachable remote for the first write.
+  git(["remote", "set-url", "origin", path.join(tempRoot, "missing.git")]);
+  const write = await memory.appendEvent({ content: "Use HTTPS.", keywords: ["sync"], projectRoot, scope: "project", title: "Remote" });
+  assert.equal(write.sync.committed, true);
+  assert.equal(write.sync.pushed, false);
+
+  git(["remote", "set-url", "origin", remote]);
+  const result = await memory.syncMemory({
+    scope: "project",
+    projectRoot,
+    paths: await memory.getDefaultSyncPaths("project", projectRoot),
+    message: "sync",
+  });
+
+  assert.equal(result.committed, false);
+  assert.equal(result.pushed, true);
+  assert.equal(git(["rev-parse", "main"], remote), git(["rev-parse", "HEAD"]));
+});
