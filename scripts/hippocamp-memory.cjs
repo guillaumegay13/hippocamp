@@ -510,12 +510,19 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
   }
 
   if (!diffResult.stdout) {
-    return {
-      attempted: true,
-      skipped: true,
-      reason: "no_changes_to_commit",
-      repoRoot,
-    };
+    // Commits left behind by an earlier failed push still need to go up.
+    const aheadResult = await runGit(["rev-list", "--count", "@{u}..HEAD"], repoRoot);
+
+    if (!aheadResult.ok || aheadResult.stdout === "0") {
+      return {
+        attempted: true,
+        skipped: true,
+        reason: "no_changes_to_commit",
+        repoRoot,
+      };
+    }
+
+    return pushToUpstream(repoRoot, { attempted: true, committed: false, repoRoot });
   }
 
   const commitResult = await runGit(["commit", "-m", message, "--", ...repoRelativePaths], repoRoot);
@@ -524,16 +531,22 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
     throw new Error(commitResult.stderr || "git commit failed.");
   }
 
+  return pushToUpstream(repoRoot, {
+    attempted: true,
+    committed: true,
+    repoRoot,
+    commitSummary: commitResult.stdout,
+  });
+}
+
+async function pushToUpstream(repoRoot, result) {
   const upstreamResult = await runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repoRoot);
 
   if (!upstreamResult.ok) {
     return {
-      attempted: true,
-      committed: true,
+      ...result,
       pushed: false,
       reason: "no_upstream",
-      repoRoot,
-      commitSummary: commitResult.stdout,
     };
   }
 
@@ -544,12 +557,9 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
 
     if (!pullResult.ok) {
       return {
-        attempted: true,
-        committed: true,
+        ...result,
         pushed: false,
         reason: "pull_rebase_failed",
-        repoRoot,
-        commitSummary: commitResult.stdout,
         pushError: pushResult.stderr,
         pullError: pullResult.stderr,
       };
@@ -559,23 +569,17 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
 
     if (!pushResult.ok) {
       return {
-        attempted: true,
-        committed: true,
+        ...result,
         pushed: false,
         reason: "push_failed",
-        repoRoot,
-        commitSummary: commitResult.stdout,
         pushError: pushResult.stderr,
       };
     }
   }
 
   return {
-    attempted: true,
-    committed: true,
+    ...result,
     pushed: true,
-    repoRoot,
-    commitSummary: commitResult.stdout,
     pushSummary: pushResult.stdout || pushResult.stderr,
   };
 }
