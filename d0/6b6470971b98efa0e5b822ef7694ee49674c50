@@ -1,0 +1,21 @@
+scripts/hippocamp-memory.cjs
+  s_8bfed41d7c32c5::t_528cc819173bb5 513-525,534-542,547,560,572,581
+test/sync-memory.test.cjs
+  s_8bfed41d7c32c5::t_2b953ecb3250bc 66-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d06b6470971b98efa0e5b822ef7694ee49674c50",
+  "prompts": {},
+  "sessions": {
+    "s_8bfed41d7c32c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "151f902d-32f4-4b2e-96f5-ecbef83705e3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
