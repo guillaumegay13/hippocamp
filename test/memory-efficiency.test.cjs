@@ -662,3 +662,19 @@ test("an empty folder has no project and uses global memory", async (t) => {
   // A folder that does not exist keeps its name, as Dream's synthetic roots do.
   assert.equal(memory.getProjectSlug(path.join(tempRoot, "missing")), "missing");
 });
+
+test("Project slug is the same for NFC and NFD folder names", () => {
+  const name = "Génération IA";
+  assert.equal(memory.getProjectSlug(`/tmp/${name.normalize("NFC")}`), "g-n-ration-ia");
+  assert.equal(memory.getProjectSlug(`/tmp/${name.normalize("NFD")}`), "g-n-ration-ia");
+});
+
+test("A deleted working directory asks for projectRoot", async (t) => {
+  const originalCwd = process.cwd();
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-deleted-cwd-"));
+  t.after(() => process.chdir(originalCwd));
+  process.chdir(tempRoot);
+  await fs.rm(tempRoot, { recursive: true });
+
+  assert.throws(() => memory.getProjectRoot(), /Pass projectRoot/);
+});
