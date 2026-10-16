@@ -79,7 +79,20 @@ function getGlobalRoot() {
 }
 
 function getProjectRoot(projectRoot) {
-  return path.resolve(expandHomePath(projectRoot || process.env.HIPPOCAMP_PROJECT_ROOT || process.cwd()));
+  return path.resolve(expandHomePath(projectRoot || process.env.HIPPOCAMP_PROJECT_ROOT || getWorkingDirectory()));
+}
+
+// A long-running MCP server keeps its cwd after the worktree it started in is deleted.
+function getWorkingDirectory() {
+  try {
+    return process.cwd();
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+
+    throw new Error("The working directory no longer exists, likely a deleted worktree. Pass projectRoot.");
+  }
 }
 
 function findGitRootSync(startPath) {
@@ -140,7 +153,9 @@ function isProjectRepository(projectRoot) {
 }
 
 function slugifyProjectName(value) {
+  // macOS can report the same accented folder name in NFC or NFD form.
   const slug = value
+    .normalize("NFC")
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "");
