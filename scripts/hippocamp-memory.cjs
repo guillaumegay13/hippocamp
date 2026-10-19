@@ -312,7 +312,8 @@ function formatKeywordsSection(keywords) {
     return "";
   }
 
-  return ["Keywords:", ...normalizedKeywords.map((keyword) => `- ${keyword}`)].join("\n");
+  // Wiki links let Obsidian-style graph views group events by keyword.
+  return ["Keywords:", ...normalizedKeywords.map((keyword) => `- [[${keyword}]]`)].join("\n");
 }
 
 function normalizeAgentName(value) {

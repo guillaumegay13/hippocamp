@@ -678,3 +678,41 @@ test("A deleted working directory asks for projectRoot", async (t) => {
 
   assert.throws(() => memory.getProjectRoot(), /Pass projectRoot/);
 });
+
+test("event keywords are written as wiki links and still indexed as plain keywords", async (t) => {
+  const originalRoot = process.env.HIPPOCAMP_GLOBAL_ROOT;
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-wiki-links-"));
+  const projectRoot = path.join(tempRoot, "wiki-links-project");
+
+  process.env.HIPPOCAMP_GLOBAL_ROOT = path.join(tempRoot, "lagoon");
+  await fs.mkdir(projectRoot, { recursive: true });
+  t.after(async () => {
+    if (originalRoot === undefined) {
+      delete process.env.HIPPOCAMP_GLOBAL_ROOT;
+    } else {
+      process.env.HIPPOCAMP_GLOBAL_ROOT = originalRoot;
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const event = await memory.appendEvent({
+    content: "Graph views group events by keyword.",
+    keywords: ["Knowledge Graph", "obsidian"],
+    projectRoot,
+    scope: "project",
+    sync: false,
+    timestamp: "2026-10-16T09:00:00.000Z",
+    title: "Graph note",
+  });
+
+  const content = await fs.readFile(path.join(event.root, event.path), "utf8");
+  const index = JSON.parse(await fs.readFile(event.indexPath, "utf8"));
+
+  assert.match(content, /Keywords:\n- \[\[knowledge-graph\]\]\n- \[\[obsidian\]\]/);
+  assert.match(JSON.stringify(index), /"knowledge-graph"/);
+  assert.doesNotMatch(JSON.stringify(index), /\[\[/);
+
+  const search = await memory.searchMemory({ projectRoot, query: "obsidian", scope: "project" });
+
+  assert.deepEqual(search.results[0].keywords, ["knowledge-graph", "obsidian"]);
+});
