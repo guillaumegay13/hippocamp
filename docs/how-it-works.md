@@ -78,7 +78,7 @@ Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown 
 
 - Keep memory concise.
 - Prefer curated summaries over raw event history.
-- Give events a short `Keywords:` section; keywords weigh the most in search ranking. Older events with a `Cues:` section still search the same way.
+- Give events a short `Keywords:` section; keywords weigh the most in search ranking. `append_event` writes each keyword as a `[[keyword]]` wiki link, so a graph view such as Obsidian's groups events by topic. Older events with plain keywords or a `Cues:` section still search the same way.
 - Do not duplicate GitHub-owned facts such as commits, PRs, issues, reviews, or CI results.
 - Store artifact references plus the missing rationale, preference, assumption, or follow-up context.
 - Use project scope for project-specific state.
@@ -93,9 +93,9 @@ Agent: claude
 Session: mcp-a1b2c3d4
 
 Keywords:
-- local-first
-- token-free
-- install-story
+- [[local-first]]
+- [[token-free]]
+- [[install-story]]
 
 References:
 - commit: abc1234
