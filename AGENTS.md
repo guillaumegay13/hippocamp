@@ -48,7 +48,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - Global memory lives under `HIPPOCAMP_GLOBAL_ROOT/`.
 - Project memory lives under `HIPPOCAMP_GLOBAL_ROOT/projects/<slug>/`.
 - The current project slug is inferred from `HIPPOCAMP_PROJECT_ROOT` or the current working directory. An existing folder with nothing but `.git` has no project; project scope then resolves to the global root.
-- Event logs are append-only daily Markdown files under `events/YYYY-MM-DD.md`, with sibling `events/YYYY-MM-DD.index.json` keyword indexes.
+- Event logs are append-only daily Markdown files under `events/YYYY-MM-DD.md`, with sibling `events/YYYY-MM-DD.index.json` keyword indexes. The one exception is the installer's keyword-link format upgrade of older events.
 - Curated files such as `current_state.md` and `open_threads.md` use explicit file writes.
 - MCP `append_event` requires a title and 1-8 keywords; MCP `write_memory_file` rejects paths under `events/`; an explicit `projectRoot` must be a directory inside a Git repository.
 - `append_event` auto-stamps `Agent:` / `Session:` provenance when resolvable (installer env, MCP client name, or process session id). No manual user config.
@@ -85,4 +85,4 @@ When changing code, use the smallest verification that proves the change:
 - The cloud/API version is intentionally deferred.
 - Do not reintroduce Next.js, GitHub API token auth, or GitHub App auth for the local MVP.
 - Keep Dream minimal: scheduled updates and coherent compaction, two curated files plus bounded indexed evidence, one PR per project.
-- The local install story should stay: `npx hippocamp@latest install`, a local Lagoon repo created if missing, normal Git auth. Installers never create remotes or push.
+- The local install story should stay: `npx hippocamp@latest install`, a local Lagoon repo created if missing, normal Git auth. Installers never create remotes or push; their only event rewrite is one local keyword-link format upgrade of older events, the exception to the append-only event invariant.

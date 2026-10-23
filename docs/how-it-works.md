@@ -78,7 +78,7 @@ Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown 
 
 - Keep memory concise.
 - Prefer curated summaries over raw event history.
-- Give events a short `Keywords:` section; keywords weigh the most in search ranking. `append_event` writes each keyword as a `[[keyword]]` wiki link, so a graph view such as Obsidian's groups events by topic. Older events with plain keywords or a `Cues:` section still search the same way.
+- Give events a short `Keywords:` section; keywords weigh the most in search ranking. `append_event` writes each keyword as a `[[keyword]]` wiki link, so a graph view such as Obsidian's groups events by topic. Install and upgrade convert clear keyword bullets in older events, including legacy `Cues:` sections, to this format and commit the change in the Lagoon; the next memory sync pushes it. A file is rewritten only if search reads exactly the same keywords from it afterwards.
 - Do not duplicate GitHub-owned facts such as commits, PRs, issues, reviews, or CI results.
 - Store artifact references plus the missing rationale, preference, assumption, or follow-up context.
 - Use project scope for project-specific state.

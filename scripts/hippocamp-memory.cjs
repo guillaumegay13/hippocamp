@@ -758,6 +758,72 @@ function parseEventBlocks(content) {
   });
 }
 
+// Older events used a "Cues:" header, inline comma lists, or plain bullets. Rewrite them in the
+// format append_event writes now: a "Keywords:" header and one [[wiki link]] bullet per keyword.
+// Only clear keyword bullets change: short, no spaces or backticks, before the first other line.
+function linkKeywordsInEventContent(content) {
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  const lines = content.split(/\r?\n/);
+  const output = [];
+  let inKeywords = false;
+
+  for (const line of lines) {
+    const header = line.match(/^(\s*)(?:Keywords|Cues):\s*(.*?)\s*$/i);
+
+    if (header) {
+      const inline = normalizeKeywordList(splitInlineKeywordValues(header[2]));
+      output.push(`${header[1]}Keywords:`, ...inline.map((keyword) => `${header[1]}- [[${keyword}]]`));
+      inKeywords = true;
+      continue;
+    }
+
+    const bullet = inKeywords && line.match(/^(\s*-\s+)(.+?)\s*$/);
+
+    if (!bullet) {
+      inKeywords = false;
+      output.push(line);
+      continue;
+    }
+
+    const value = bullet[2];
+    const keyword = normalizeKeyword(value);
+    const plain = !value.startsWith("[[") && value.length <= 60 && !/[\s`]/.test(value);
+    output.push(plain && keyword ? `${bullet[1]}[[${keyword}]]` : line);
+  }
+
+  const linked = output.join(eol);
+  const sameKeywords = (text) => JSON.stringify(parseEventBlocks(text).map((event) => event.keywords));
+
+  // Never change what search reads: keep the file as it is if any keyword would differ.
+  return linked !== content && sameKeywords(linked) === sameKeywords(content) ? linked : content;
+}
+
+// Link keywords in every event file under the Lagoon root, except paths `skip` returns true for.
+// Reads every file before writing any. Returns the changed paths, relative to the root.
+async function linkEventKeywords(globalRoot, skip = () => false) {
+  const rewrites = [];
+
+  for (const relativePath of await walkMarkdownFiles(globalRoot)) {
+    if (!/(?:^|\/)events\/\d{4}-\d{2}-\d{2}\.md$/.test(relativePath) || skip(relativePath)) {
+      continue;
+    }
+
+    const absolutePath = path.join(globalRoot, relativePath);
+    const content = await fs.readFile(absolutePath, "utf8");
+    const linked = linkKeywordsInEventContent(content);
+
+    if (linked !== content) {
+      rewrites.push({ relativePath, absolutePath, linked });
+    }
+  }
+
+  for (const rewrite of rewrites) {
+    await fs.writeFile(rewrite.absolutePath, rewrite.linked);
+  }
+
+  return rewrites.map((rewrite) => rewrite.relativePath);
+}
+
 function buildEventIndex(markdownContent, markdownPath) {
   return {
     version: EVENT_INDEX_VERSION,
@@ -1643,6 +1709,7 @@ module.exports = {
   readMemoryFile,
   writeMemoryFile,
   appendEvent,
+  linkEventKeywords,
   listDirectoryEntries,
   searchMemory,
   readRecentEvents,

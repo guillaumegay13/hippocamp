@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { linkEventKeywords } = require("./hippocamp-memory.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -43,6 +44,7 @@ async function git(args, cwd) {
 
 // Make sure the Lagoon memory repo exists, and say what is still missing for sync.
 // It never creates a remote or pushes: those reach outside this machine.
+// It may commit a local format upgrade of older events.
 async function prepareLagoon(globalRoot) {
   const hints = [];
   let created = false;
@@ -75,6 +77,33 @@ async function prepareLagoon(globalRoot) {
     hints.push('Set a Git identity so memory can be committed: git config --global user.name "Your Name" && git config --global user.email you@example.com');
   }
 
+  // Upgrades bring older events to the current keyword format: [[wiki links]] for graph views.
+  // Best effort, committed locally only; the next memory sync pushes it. Files with uncommitted
+  // or untracked changes are left alone, and a failed commit is undone so the next install retries.
+  let linked = [];
+
+  try {
+    const changes = await Promise.all([
+      git(["ls-files", "-z", "--modified", "--others", "--exclude-standard"], globalRoot),
+      git(["diff", "--cached", "--name-only", "-z"], globalRoot),
+    ]);
+    const known = changes.every((change) => change.ok);
+    const dirty = new Set(changes.flatMap((change) => change.stdout.split("\0").filter(Boolean)));
+    linked = await linkEventKeywords(globalRoot, (relativePath) => !known || dirty.has(relativePath));
+
+    if (linked.length) {
+      const commit = await git(["commit", "-m", "hippocamp: link event keywords", "--", ...linked], globalRoot);
+
+      if (!commit.ok) {
+        await git(["checkout", "--", ...linked], globalRoot);
+        linked = [];
+        hints.push("Older event keywords were not linked because Git could not commit. Run the upgrade again once Git is set up.");
+      }
+    }
+  } catch (error) {
+    hints.push(`Older event keywords were not linked: ${error.message}`);
+  }
+
   const remote = await git(["remote", "get-url", "origin"], globalRoot);
   let push = "no_remote";
 
@@ -88,7 +117,7 @@ async function prepareLagoon(globalRoot) {
     }
   }
 
-  return { root: globalRoot, created, remote: remote.ok ? remote.stdout : null, push, hints };
+  return { root: globalRoot, created, remote: remote.ok ? remote.stdout : null, push, linkedEvents: linked.length, hints };
 }
 
 function printHints(lagoon) {

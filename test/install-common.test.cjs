@@ -127,3 +127,98 @@ test("prepareLagoon gives an empty folder inside another repo its own repo", asy
   assert.equal(result.created, true);
   assert.equal(fsSync.realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: nested }).toString().trim()), fsSync.realpathSync(nested));
 });
+
+test("prepareLagoon links older event keywords once and commits them locally", async (t) => {
+  useGitIdentity(t);
+  const lagoon = path.join(await tempDir(t, "link-keywords"), "lagoon");
+  const eventPath = path.join(lagoon, "projects", "demo", "events", "2026-05-01.md");
+  const notePath = path.join(lagoon, "projects", "demo", "notes.md");
+  const oldEvent = [
+    "# 2026-05-01",
+    "",
+    "## 09:00 - Inline cues",
+    "Cues: Mem0 removal, bare MCP",
+    "",
+    "## 10:00 - Bullet cues",
+    "Shipped it.",
+    "",
+    "Cues:",
+    "- pr-12",
+    "- [[already-linked]]",
+    "- `npm test` passed",
+    "",
+    "- a content bullet",
+    "",
+  ].join("\n");
+
+  await fs.mkdir(path.dirname(eventPath), { recursive: true });
+  await fs.writeFile(eventPath, oldEvent);
+  await fs.writeFile(notePath, "Cues: left, alone\n");
+  execFileSync("git", ["init", "-b", "main", lagoon]);
+  execFileSync("git", ["add", "."], { cwd: lagoon });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: lagoon });
+
+  const first = await prepareLagoon(lagoon);
+  const linked = await fs.readFile(eventPath, "utf8");
+
+  assert.equal(first.linkedEvents, 1);
+  assert.match(linked, /## 09:00 - Inline cues\nKeywords:\n- \[\[mem0-removal\]\]\n- \[\[bare-mcp\]\]\n/);
+  assert.match(linked, /Keywords:\n- \[\[pr-12\]\]\n- \[\[already-linked\]\]\n- `npm test` passed\n\n- a content bullet\n/);
+  assert.equal(await fs.readFile(notePath, "utf8"), "Cues: left, alone\n");
+  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: lagoon, encoding: "utf8" }), "");
+  assert.equal(execFileSync("git", ["log", "-1", "--format=%s"], { cwd: lagoon, encoding: "utf8" }).trim(), "hippocamp: link event keywords");
+
+  const second = await prepareLagoon(lagoon);
+
+  assert.equal(second.linkedEvents, 0);
+  assert.equal(execFileSync("git", ["rev-list", "--count", "HEAD"], { cwd: lagoon, encoding: "utf8" }).trim(), "2");
+});
+
+test("prepareLagoon leaves dirty event files alone and links CRLF events without duplicates", async (t) => {
+  useGitIdentity(t);
+  const lagoon = path.join(await tempDir(t, "link-dirty"), "lagoon");
+  const events = path.join(lagoon, "events");
+  const crlfPath = path.join(events, "2026-05-01.md");
+  const dirtyPath = path.join(events, "2026-05-02.md");
+  const untrackedPath = path.join(events, "2026-05-03.md");
+
+  await fs.mkdir(events, { recursive: true });
+  await fs.writeFile(crlfPath, "# 2026-05-01\r\n\r\n## 09:00 - CRLF\r\nCues: bare MCP, Bare MCP\r\n");
+  await fs.writeFile(dirtyPath, "## 09:00 - Dirty\nCues:\n- pr-1\n");
+  execFileSync("git", ["init", "-b", "main", lagoon]);
+  execFileSync("git", ["add", "."], { cwd: lagoon });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: lagoon });
+  await fs.appendFile(dirtyPath, "- user-edit\n");
+  await fs.writeFile(untrackedPath, "## 09:00 - Untracked\nCues:\n- pr-2\n");
+
+  const result = await prepareLagoon(lagoon);
+
+  assert.equal(result.linkedEvents, 1);
+  assert.equal(await fs.readFile(crlfPath, "utf8"), "# 2026-05-01\r\n\r\n## 09:00 - CRLF\r\nKeywords:\r\n- [[bare-mcp]]\r\n");
+  assert.equal(await fs.readFile(dirtyPath, "utf8"), "## 09:00 - Dirty\nCues:\n- pr-1\n- user-edit\n");
+  assert.equal(await fs.readFile(untrackedPath, "utf8"), "## 09:00 - Untracked\nCues:\n- pr-2\n");
+  assert.equal(execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: lagoon, encoding: "utf8" }).trim(), "events/2026-05-01.md");
+});
+
+test("prepareLagoon undoes linked keywords when Git cannot commit them", async (t) => {
+  useGitIdentity(t);
+  const lagoon = path.join(await tempDir(t, "link-no-commit"), "lagoon");
+  const eventPath = path.join(lagoon, "events", "2026-05-01.md");
+  const oldEvent = "## 09:00 - Old\nCues:\n- pr-1\n";
+
+  await fs.mkdir(path.dirname(eventPath), { recursive: true });
+  await fs.writeFile(eventPath, oldEvent);
+  execFileSync("git", ["init", "-b", "main", lagoon]);
+  execFileSync("git", ["add", "."], { cwd: lagoon });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: lagoon });
+  const hook = path.join(lagoon, ".git", "hooks", "pre-commit");
+  await fs.writeFile(hook, "#!/bin/sh\nexit 1\n");
+  await fs.chmod(hook, 0o755);
+
+  const result = await prepareLagoon(lagoon);
+
+  assert.equal(result.linkedEvents, 0);
+  assert.equal(await fs.readFile(eventPath, "utf8"), oldEvent);
+  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: lagoon, encoding: "utf8" }), "");
+  assert.ok(result.hints.some((hint) => /could not commit/.test(hint)));
+});
