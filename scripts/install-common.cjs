@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { linkEventKeywords } = require("./hippocamp-memory.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -43,6 +44,7 @@ async function git(args, cwd) {
 
 // Make sure the Lagoon memory repo exists, and say what is still missing for sync.
 // It never creates a remote or pushes: those reach outside this machine.
+// It may commit a local format upgrade of older events.
 async function prepareLagoon(globalRoot) {
   const hints = [];
   let created = false;
@@ -75,6 +77,19 @@ async function prepareLagoon(globalRoot) {
     hints.push('Set a Git identity so memory can be committed: git config --global user.name "Your Name" && git config --global user.email you@example.com');
   }
 
+  // Upgrades bring older events to the current keyword format: [[wiki links]] for graph views.
+  // Committed locally only; the next memory sync pushes it.
+  const linked = await linkEventKeywords(globalRoot);
+
+  if (linked.length) {
+    await git(["add", "--", ...linked], globalRoot);
+    const commit = await git(["commit", "-m", "hippocamp: link event keywords", "--", ...linked], globalRoot);
+
+    if (!commit.ok) {
+      hints.push(`Event keywords were linked but not committed. Commit them in ${globalRoot} when Git is set up.`);
+    }
+  }
+
   const remote = await git(["remote", "get-url", "origin"], globalRoot);
   let push = "no_remote";
 
@@ -88,7 +103,7 @@ async function prepareLagoon(globalRoot) {
     }
   }
 
-  return { root: globalRoot, created, remote: remote.ok ? remote.stdout : null, push, hints };
+  return { root: globalRoot, created, remote: remote.ok ? remote.stdout : null, push, linkedEvents: linked.length, hints };
 }
 
 function printHints(lagoon) {

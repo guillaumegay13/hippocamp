@@ -127,3 +127,49 @@ test("prepareLagoon gives an empty folder inside another repo its own repo", asy
   assert.equal(result.created, true);
   assert.equal(fsSync.realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: nested }).toString().trim()), fsSync.realpathSync(nested));
 });
+
+test("prepareLagoon links older event keywords once and commits them locally", async (t) => {
+  useGitIdentity(t);
+  const lagoon = path.join(await tempDir(t, "link-keywords"), "lagoon");
+  const eventPath = path.join(lagoon, "projects", "demo", "events", "2026-05-01.md");
+  const notePath = path.join(lagoon, "projects", "demo", "notes.md");
+  const oldEvent = [
+    "# 2026-05-01",
+    "",
+    "## 09:00 - Inline cues",
+    "Cues: Mem0 removal, bare MCP",
+    "",
+    "## 10:00 - Bullet cues",
+    "Shipped it.",
+    "",
+    "Cues:",
+    "- pr-12",
+    "- [[already-linked]]",
+    "- `npm test` passed",
+    "",
+    "- a content bullet",
+    "",
+  ].join("\n");
+
+  await fs.mkdir(path.dirname(eventPath), { recursive: true });
+  await fs.writeFile(eventPath, oldEvent);
+  await fs.writeFile(notePath, "Cues: left, alone\n");
+  execFileSync("git", ["init", "-b", "main", lagoon]);
+  execFileSync("git", ["add", "."], { cwd: lagoon });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: lagoon });
+
+  const first = await prepareLagoon(lagoon);
+  const linked = await fs.readFile(eventPath, "utf8");
+
+  assert.equal(first.linkedEvents, 1);
+  assert.match(linked, /## 09:00 - Inline cues\nKeywords:\n- \[\[mem0-removal\]\]\n- \[\[bare-mcp\]\]\n/);
+  assert.match(linked, /Keywords:\n- \[\[pr-12\]\]\n- \[\[already-linked\]\]\n- `npm test` passed\n\n- a content bullet\n/);
+  assert.equal(await fs.readFile(notePath, "utf8"), "Cues: left, alone\n");
+  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: lagoon, encoding: "utf8" }), "");
+  assert.equal(execFileSync("git", ["log", "-1", "--format=%s"], { cwd: lagoon, encoding: "utf8" }).trim(), "hippocamp: link event keywords");
+
+  const second = await prepareLagoon(lagoon);
+
+  assert.equal(second.linkedEvents, 0);
+  assert.equal(execFileSync("git", ["rev-list", "--count", "HEAD"], { cwd: lagoon, encoding: "utf8" }).trim(), "2");
+});

@@ -85,4 +85,4 @@ When changing code, use the smallest verification that proves the change:
 - The cloud/API version is intentionally deferred.
 - Do not reintroduce Next.js, GitHub API token auth, or GitHub App auth for the local MVP.
 - Keep Dream minimal: scheduled updates and coherent compaction, two curated files plus bounded indexed evidence, one PR per project.
-- The local install story should stay: `npx hippocamp@latest install`, a local Lagoon repo created if missing, normal Git auth. Installers never create remotes or push.
+- The local install story should stay: `npx hippocamp@latest install`, a local Lagoon repo created if missing, normal Git auth. Installers never create remotes or push; they may commit one local format upgrade of older events (keyword wiki links).
