@@ -762,11 +762,8 @@ function parseEventBlocks(content) {
 // format append_event writes now: a "Keywords:" header and one [[wiki link]] bullet per keyword.
 // Only clear keyword bullets change: short, no spaces or backticks, before the first other line.
 function linkKeywordsInEventContent(content) {
-  if (content.includes("\r")) {
-    return content;
-  }
-
-  const lines = content.split("\n");
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  const lines = content.split(/\r?\n/);
   const output = [];
   let inKeywords = false;
 
@@ -774,7 +771,7 @@ function linkKeywordsInEventContent(content) {
     const header = line.match(/^(\s*)(?:Keywords|Cues):\s*(.*?)\s*$/i);
 
     if (header) {
-      const inline = splitInlineKeywordValues(header[2]).map(normalizeKeyword).filter(Boolean);
+      const inline = normalizeKeywordList(splitInlineKeywordValues(header[2]));
       output.push(`${header[1]}Keywords:`, ...inline.map((keyword) => `${header[1]}- [[${keyword}]]`));
       inKeywords = true;
       continue;
@@ -794,19 +791,20 @@ function linkKeywordsInEventContent(content) {
     output.push(plain && keyword ? `${bullet[1]}[[${keyword}]]` : line);
   }
 
-  const linked = output.join("\n");
+  const linked = output.join(eol);
   const sameKeywords = (text) => JSON.stringify(parseEventBlocks(text).map((event) => event.keywords));
 
   // Never change what search reads: keep the file as it is if any keyword would differ.
   return linked !== content && sameKeywords(linked) === sameKeywords(content) ? linked : content;
 }
 
-// Link keywords in every event file under the Lagoon root. Returns the changed paths, relative to it.
-async function linkEventKeywords(globalRoot) {
-  const changed = [];
+// Link keywords in every event file under the Lagoon root, except paths `skip` returns true for.
+// Reads every file before writing any. Returns the changed paths, relative to the root.
+async function linkEventKeywords(globalRoot, skip = () => false) {
+  const rewrites = [];
 
   for (const relativePath of await walkMarkdownFiles(globalRoot)) {
-    if (!/(?:^|\/)events\/\d{4}-\d{2}-\d{2}\.md$/.test(relativePath)) {
+    if (!/(?:^|\/)events\/\d{4}-\d{2}-\d{2}\.md$/.test(relativePath) || skip(relativePath)) {
       continue;
     }
 
@@ -815,12 +813,15 @@ async function linkEventKeywords(globalRoot) {
     const linked = linkKeywordsInEventContent(content);
 
     if (linked !== content) {
-      await fs.writeFile(absolutePath, linked);
-      changed.push(relativePath);
+      rewrites.push({ relativePath, absolutePath, linked });
     }
   }
 
-  return changed;
+  for (const rewrite of rewrites) {
+    await fs.writeFile(rewrite.absolutePath, rewrite.linked);
+  }
+
+  return rewrites.map((rewrite) => rewrite.relativePath);
 }
 
 function buildEventIndex(markdownContent, markdownPath) {

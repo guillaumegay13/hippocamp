@@ -16,7 +16,7 @@ npx hippocamp@latest install-codex
 npx hippocamp@latest install-grok
 ```
 
-Upgrade with the same command: `npx hippocamp@latest upgrade`. An upgrade also brings older events to the current keyword format, as one local Lagoon commit. Restart your agents afterwards to load the new version. Installers default to `~/.lagoon` as the memory repo; pass `--global-root /absolute/path/to/lagoon` to use another clone.
+Upgrade with the same command: `npx hippocamp@latest upgrade`. When older events need it, an upgrade also brings them to the current keyword format, as one local Lagoon commit. Event files with uncommitted changes are left for a later upgrade. Restart your agents afterwards to load the new version. Installers default to `~/.lagoon` as the memory repo; pass `--global-root /absolute/path/to/lagoon` to use another clone.
 
 Installed through npx, the installer copies the package to `~/.hippocamp/<version>/` and registers that copy, so the server starts without npx or network and keeps working if npm cleans its cache. From a source checkout, `npm install` then `npm run install:claude` (or `install:codex`, `install:grok`) registers the checkout directly.
 

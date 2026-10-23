@@ -78,16 +78,30 @@ async function prepareLagoon(globalRoot) {
   }
 
   // Upgrades bring older events to the current keyword format: [[wiki links]] for graph views.
-  // Committed locally only; the next memory sync pushes it.
-  const linked = await linkEventKeywords(globalRoot);
+  // Best effort, committed locally only; the next memory sync pushes it. Files with uncommitted
+  // or untracked changes are left alone, and a failed commit is undone so the next install retries.
+  let linked = [];
 
-  if (linked.length) {
-    await git(["add", "--", ...linked], globalRoot);
-    const commit = await git(["commit", "-m", "hippocamp: link event keywords", "--", ...linked], globalRoot);
+  try {
+    const changes = await Promise.all([
+      git(["ls-files", "-z", "--modified", "--others", "--exclude-standard"], globalRoot),
+      git(["diff", "--cached", "--name-only", "-z"], globalRoot),
+    ]);
+    const known = changes.every((change) => change.ok);
+    const dirty = new Set(changes.flatMap((change) => change.stdout.split("\0").filter(Boolean)));
+    linked = await linkEventKeywords(globalRoot, (relativePath) => !known || dirty.has(relativePath));
 
-    if (!commit.ok) {
-      hints.push(`Event keywords were linked but not committed. Commit them in ${globalRoot} when Git is set up.`);
+    if (linked.length) {
+      const commit = await git(["commit", "-m", "hippocamp: link event keywords", "--", ...linked], globalRoot);
+
+      if (!commit.ok) {
+        await git(["checkout", "--", ...linked], globalRoot);
+        linked = [];
+        hints.push("Older event keywords were not linked because Git could not commit. Run the upgrade again once Git is set up.");
+      }
     }
+  } catch (error) {
+    hints.push(`Older event keywords were not linked: ${error.message}`);
   }
 
   const remote = await git(["remote", "get-url", "origin"], globalRoot);
