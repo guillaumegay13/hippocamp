@@ -10,6 +10,7 @@ const {
   assertSandboxIntact,
   claudeArgs,
   claudeEnv,
+  completeViaClaude,
   judgeProbe,
   memorySnapshot,
   parseArgs,
@@ -408,4 +409,29 @@ test("assertSandboxIntact refuses results without their sandbox", async (t) => {
   await assertSandboxIntact(paths, path.join(outDir, "none"));
   await fs.rm(path.join(paths.root, ".prepared"));
   await assert.rejects(assertSandboxIntact(paths, path.join(outDir, "none")), /sandbox/);
+});
+
+test("claudeEnv prefers the subscription token over an API key", () => {
+  const env = claudeEnv("native", sandboxPaths("t", "native"), { PATH: "/bin", ANTHROPIC_API_KEY: "k", CLAUDE_CODE_OAUTH_TOKEN: "o", CLAUDE_CONFIG_DIR: "/real" });
+
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "o");
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
+  assert.equal(env.CLAUDE_CONFIG_DIR, sandboxPaths("t", "native").configDir);
+});
+
+test("completeViaClaude sends the prompt on stdin with no tools and reads the result", async () => {
+  let seen = null;
+  const spawn = async (command, args, options) => {
+    seen = { command, args, options };
+    return { code: 0, stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result: '{"items":[]}', total_cost_usd: 0.2 }) };
+  };
+  const response = await completeViaClaude("claude-opus-5-5", { messages: [{ role: "user", content: "grade this" }] }, { spawn, paths: sandboxPaths("t", "judge") });
+
+  assert.equal(seen.command, "claude");
+  assert.equal(seen.options.input, "grade this");
+  assert.equal(seen.args[seen.args.indexOf("--tools") + 1], "");
+  assert.equal(seen.args[seen.args.indexOf("--model") + 1], "claude-opus-5-5");
+  assert.equal(seen.options.env.HOME, sandboxPaths("t", "judge").home);
+  assert.equal(response.text, '{"items":[]}');
+  assert.equal(response.costUsd, 0.2);
 });

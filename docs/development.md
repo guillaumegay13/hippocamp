@@ -39,7 +39,7 @@ npm run eval:continuity -- --systems hippocamp --limit 2 --run smoke   # small p
 npm run eval:continuity -- --run v1                                    # full run
 ```
 
-A full run starts 48 Opus sessions and costs real money: `--dry-run` prints the range, and `--budget` caps each call. Results go to `.context/continuity/<run>/`, and reruns with the same `--run` skip finished sessions.
+Sessions and the Claude judge run through Claude Code, so they use your Claude subscription when `CLAUDE_CODE_OAUTH_TOKEN` is set (create it with `claude setup-token` and put it in `.env`). Without it they bill `ANTHROPIC_API_KEY`. A full run starts 48 Opus sessions, a large share of a subscription's usage window: `--dry-run` prints the API-price range, and `--budget` caps each call. Results go to `.context/continuity/<run>/`, and reruns with the same `--run` skip finished sessions.
 
 ## Releases
 

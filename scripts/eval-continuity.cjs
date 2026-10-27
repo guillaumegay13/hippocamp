@@ -105,7 +105,12 @@ async function assertSandboxIntact(paths, systemDir) {
 }
 
 function claudeEnv(system, paths, baseEnv = process.env) {
-  const env = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => !/^(HIPPOCAMP_|CLAUDE_)/.test(key)));
+  const env = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => key === "CLAUDE_CODE_OAUTH_TOKEN" || !/^(HIPPOCAMP_|CLAUDE_)/.test(key)));
+
+  // A subscription token (claude setup-token) wins: Claude Code would otherwise bill the API key.
+  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+    delete env.ANTHROPIC_API_KEY;
+  }
 
   Object.assign(env, GIT_IDENTITY, { HOME: paths.home, CLAUDE_CONFIG_DIR: paths.configDir });
 
@@ -187,9 +192,14 @@ function parseStream(text) {
   return parsed;
 }
 
-function spawnClaude(command, args, options) {
+function spawnClaude(command, args, { input, ...options }) {
   return new Promise((resolve, reject) => {
-    const child = spawnChild(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnChild(command, args, { ...options, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+
+    if (input !== undefined) {
+      child.stdin.end(input);
+    }
+
     let stdout = "";
     let stderr = "";
 
@@ -502,8 +512,9 @@ Options:
   --help           Show this help
 
 Environment:
-  ANTHROPIC_API_KEY   Claude Code sessions and the default judge
-  OPENAI_API_KEY      only for a GPT judge
+  CLAUDE_CODE_OAUTH_TOKEN   Claude subscription token from \`claude setup-token\`; preferred
+  ANTHROPIC_API_KEY         used only when no subscription token is set
+  OPENAI_API_KEY            only for a GPT judge
 `);
 }
 
@@ -570,7 +581,26 @@ async function readJsonl(file) {
   return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
-async function judgeSystem({ dataset, system, paths, outDir, records, judge, judgedPath, done }) {
+// Claude judges run through Claude Code too, so they use the same auth as the sessions (subscription or API key).
+async function completeViaClaude(model, { system, messages }, { spawn = spawnClaude, paths }) {
+  const args = ["-p", "--model", model, "--output-format", "json", "--tools", "", "--strict-mcp-config"];
+
+  if (system) {
+    args.push("--system-prompt", system);
+  }
+
+  await fs.mkdir(paths.configDir, { recursive: true });
+  const result = await spawn("claude", args, { cwd: paths.root, env: claudeEnv("none", paths), input: messages.map((message) => message.content).join("\n\n") });
+  const parsed = parseStream(result.stdout);
+
+  if (result.code !== 0 || !parsed.ok) {
+    throw new Error(`Judge call failed (exit ${result.code}): ${String(result.stderr || result.stdout).slice(0, 300)}`);
+  }
+
+  return { text: parsed.finalText, costUsd: parsed.costUsd, usage: {} };
+}
+
+async function judgeSystem({ dataset, system, paths, outDir, records, judge, judgedPath, done, complete }) {
   const factsById = new Map(dataset.facts.map((fact) => [fact.id, fact]));
   const rows = [];
 
@@ -592,6 +622,7 @@ async function judgeSystem({ dataset, system, paths, outDir, records, judge, jud
       snapshot: await fs.readFile(path.join(systemDir, `${record.id}.snapshot.md`), "utf8").catch(() => ""),
       signals,
       judgeModel: judge,
+      complete,
     });
 
     for (const item of items) {
@@ -657,10 +688,12 @@ async function run(options) {
   }
 
   const perSystem = settled.map((result) => result.value);
+  const judgePaths = sandboxPaths(options.run, "judge");
+  const complete = options.judge.startsWith("claude-") ? (model, request) => completeViaClaude(model, request, { paths: judgePaths }) : completeModel;
   const done = new Set((await readJsonl(judgedPath)).map((row) => `${row.system}:${row.probe}`));
 
   for (const { system, paths, records } of perSystem) {
-    await judgeSystem({ dataset, system, paths, outDir, records, judge: options.judge, judgedPath, done });
+    await judgeSystem({ dataset, system, paths, outDir, records, judge: options.judge, judgedPath, done, complete });
   }
 
   const rows = (await readJsonl(judgedPath)).filter((row) => options.systems.includes(row.system) && timeline.includes(row.probe));
@@ -689,6 +722,7 @@ module.exports = {
   SYSTEMS,
   claudeArgs,
   claudeEnv,
+  completeViaClaude,
   judgeProbe,
   memorySnapshot,
   parseArgs,
