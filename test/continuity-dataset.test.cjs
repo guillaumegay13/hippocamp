@@ -130,10 +130,10 @@ test("shipped dataset is valid and covers the spec", async () => {
   const distances = items.map(({ probe, fact }) => factDistance(dataset.timeline, fact, probe.id));
 
   assert.deepEqual(validateDataset(dataset), []);
-  assert.equal(sessions.length, 20);
+  assert.equal(sessions.length, 21);
   assert.equal(probes.length, 7);
   // Facts with no trace in the code: a smoke recipe, a blocker, a parked branch, a cross-project preference.
-  for (const id of ["relay-smoke-flag", "ingest-vendor-c-blocked", "ingest-parked-dedupe", "pref-changelog"]) {
+  for (const id of ["ingest-smoke-flag", "ingest-vendor-c-blocked", "ingest-parked-dedupe", "pref-changelog"]) {
     assert.ok(items.some(({ item }) => item.fact === id && item.memory), id);
   }
   // Filler sessions plant nothing and check nothing.

@@ -220,6 +220,15 @@ test("each session starts on main even if the last one ended on a branch", async
   assert.equal(records[1].before, execFileSync("git", ["rev-parse", "main~1"], { cwd: paths.repos.relay, encoding: "utf8" }).trim());
 });
 
+test("a rerun refuses a recorded session whose prompts or checks changed", async (t) => {
+  const { dataset, paths, outDir, calls } = await runnerFixture(t);
+
+  await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn: fakeSpawn(calls) });
+  dataset.sessions.get("S1").turns[0] = "first, reworded";
+
+  await assert.rejects(runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn: fakeSpawn([]) }), /S1 changed since it ran/);
+});
+
 test("completed sessions are skipped on rerun", async (t) => {
   const { dataset, paths, outDir, calls } = await runnerFixture(t);
 

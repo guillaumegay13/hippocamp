@@ -218,6 +218,10 @@ async function head(repo) {
 // Runs the timeline in order, one fresh claude process per session (follow-up turns resume it).
 // Each finished session writes <id>.json last, so a rerun skips it and never commits twice.
 // Probe sessions first save what memory held at their start, for the judge's miss attribution.
+function sessionFingerprint(session) {
+  return crypto.createHash("sha256").update(JSON.stringify({ turns: session.turns, checklist: session.checklist })).digest("hex").slice(0, 16);
+}
+
 async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = Infinity, spawn = spawnClaude, snapshot = null }) {
   const systemDir = path.join(outDir, system);
   const records = [];
@@ -226,16 +230,24 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
 
   for (const id of dataset.timeline.slice(0, limit)) {
     const recordPath = path.join(systemDir, `${id}.json`);
+    const session = dataset.sessions.get(id);
+    const fingerprint = sessionFingerprint(session);
 
+    // A run can be extended with new sessions, but a recorded one must still be the session that ran.
     if (fsSync.existsSync(recordPath)) {
-      records.push(JSON.parse(await fs.readFile(recordPath, "utf8")));
+      const recorded = JSON.parse(await fs.readFile(recordPath, "utf8"));
+
+      if (recorded.fingerprint !== fingerprint) {
+        throw new Error(`${system} ${id} changed since it ran (prompts or checks); start a new --run`);
+      }
+
+      records.push(recorded);
       continue;
     }
 
-    const session = dataset.sessions.get(id);
     const repo = paths.repos[session.project];
     const transcriptPath = path.join(systemDir, `${id}.jsonl`);
-    const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), before: null, after: null };
+    const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), fingerprint, before: null, after: null };
 
     // A transcript without a record means an interrupted attempt: drop its uncommitted work.
     if (fsSync.existsSync(transcriptPath)) {
@@ -741,6 +753,7 @@ module.exports = {
   probeDiff,
   recallSignals,
   runTimeline,
+  sessionFingerprint,
   sandboxPaths,
   summarize,
   transcriptDigest,

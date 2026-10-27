@@ -6,8 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/src/server.js",
-    "test": "tsc && node --test dist/test/*.test.js",
-    "smoke": "tsc && node scripts/smoke.mjs"
+    "test": "tsc && node --test dist/test/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
