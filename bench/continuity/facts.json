@@ -20,5 +20,9 @@
   { "id": "ingest-no-multiprocessing", "project": "ingest", "kind": "preference", "statement": "Multiprocessing was tried and reverted because it broke dedupe ordering.", "plantedIn": "B4", "supersededBy": null },
   { "id": "ingest-history-loaded", "project": "ingest", "kind": "done", "statement": "The vendor_a 2024-2025 history is already loaded into the warehouse; do not reload it.", "plantedIn": "B4", "supersededBy": null },
   { "id": "ingest-batch-2k", "project": "ingest", "kind": "decision", "statement": "Send 2,000 rows per warehouse request, because the warehouse rejects requests over 4 MB.", "plantedIn": "B5", "supersededBy": null },
-  { "id": "ingest-state-cp1252", "project": "ingest", "kind": "state", "statement": "The vendor_b file fails on encoding; the next step is a cp1252 fallback in the reader.", "plantedIn": "B5", "supersededBy": null }
+  { "id": "ingest-state-cp1252", "project": "ingest", "kind": "state", "statement": "The vendor_b file fails on encoding; the next step is a cp1252 fallback in the reader.", "plantedIn": "B5", "supersededBy": null },
+  { "id": "relay-smoke-flag", "project": "relay", "kind": "asset", "statement": "The end-to-end smoke must run as `RELAY_FAKE_UPSTREAM=1 npm run smoke`; without the flag it posts to the client's real production upstream.", "plantedIn": "A4", "supersededBy": null },
+  { "id": "pref-changelog", "project": "shared", "kind": "preference", "statement": "In every repo, each user-facing change gets a line under Unreleased in CHANGELOG.md, creating the file if the repo has none.", "plantedIn": "A5", "supersededBy": null },
+  { "id": "ingest-vendor-c-blocked", "project": "ingest", "kind": "constraint", "statement": "vendor_c rows must not reach the warehouse until finance confirms whether totalPrice includes VAT.", "plantedIn": "B3", "supersededBy": null },
+  { "id": "ingest-parked-dedupe", "project": "ingest", "kind": "state", "statement": "The fix for corrected vendor_a rows losing in dedupe sits on the unmerged branch fix/late-dedupe; main does not have it.", "plantedIn": "B9", "supersededBy": null }
 ]

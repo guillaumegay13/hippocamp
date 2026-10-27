@@ -26,8 +26,8 @@ npm run upgrade:grok
 
 `npm run eval:continuity` measures what Hippocamp is built for: a coding agent that keeps working on a project across independent sessions and acts on earlier decisions, constraints and state without being told to look them up.
 
-- The dataset in `bench/continuity/` is synthetic: two small engineering projects (`relay`, a TypeScript webhook relay, and `ingest`, a Python CSV pipeline) run as one 16-session timeline that shares one memory store.
-- Work sessions are ordinary tickets that plant 22 facts, three of which are later reversed. Six probe sessions are also ordinary tickets, with hidden checklists. No prompt hints at retrieval; the validator rejects words such as "remember" or "your notes".
+- The dataset in `bench/continuity/` is synthetic: two small engineering projects (`relay`, a TypeScript webhook relay, and `ingest`, a Python CSV pipeline) run as one 20-session timeline that shares one memory store.
+- Work sessions are ordinary tickets that plant 26 facts, three of which are later reversed. Some facts leave no trace in the code: a smoke-test recipe, a blocker, work parked on a branch, a preference that spans both projects. Two filler sessions plant nothing. Seven probe sessions are also ordinary tickets, with hidden checklists. No prompt hints at retrieval; the validator rejects words such as "remember" or "your notes".
 - Each session is a fresh headless `claude -p --model claude-opus-5-5` process. Follow-up turns resume the same session, and the repo is committed after each session.
 - Systems: `none` (the repo only), `native` (Claude Code auto-memory) and `hippocamp` (Hippocamp MCP on a throwaway Lagoon).
 - Every run is isolated: sandboxes live under the OS temp dir with their own `HOME`, `CLAUDE_CONFIG_DIR` and Lagoon, so your real `~/.claude` and `~/.lagoon` are never read or written.
@@ -39,7 +39,7 @@ npm run eval:continuity -- --systems hippocamp --limit 2 --run smoke   # small p
 npm run eval:continuity -- --run v1                                    # full run
 ```
 
-Sessions and the Claude judge run through Claude Code, so they use your Claude subscription when `CLAUDE_CODE_OAUTH_TOKEN` is set (create it with `claude setup-token` and put it in `.env`). Without it they bill `ANTHROPIC_API_KEY`. A full run starts 48 Opus sessions, a large share of a subscription's usage window: `--dry-run` prints the API-price range, and `--budget` caps each call. Results go to `.context/continuity/<run>/`, and reruns with the same `--run` skip finished sessions.
+Sessions and the Claude judge run through Claude Code, so they use your Claude subscription when `CLAUDE_CODE_OAUTH_TOKEN` is set (create it with `claude setup-token` and put it in `.env`). Without it they bill `ANTHROPIC_API_KEY`. A full run starts 60 Opus sessions, a large share of a subscription's usage window: `--dry-run` prints the API-price range, and `--budget` caps each call. Results go to `.context/continuity/<run>/`, and reruns with the same `--run` skip finished sessions.
 
 ## Releases
 

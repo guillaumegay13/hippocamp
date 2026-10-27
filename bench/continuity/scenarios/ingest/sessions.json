@@ -24,9 +24,9 @@
     "project": "ingest",
     "kind": "work",
     "turns": [
-      "add vendor_b, sample is in fixtures/vendor_b.csv. while you're at it make the column mapping a registry so the next vendors are easy to add"
+      "add vendor_b, sample is in fixtures/vendor_b.csv. while you're at it make the column mapping a registry so the next vendors are easy to add. heads up, vendor_c is coming next. finance hasn't confirmed whether their totalPrice includes vat, so until they do, vendor_c rows must not reach the warehouse"
     ],
-    "plants": ["ingest-schema-registry"],
+    "plants": ["ingest-schema-registry", "ingest-vendor-c-blocked"],
     "checklist": []
   },
   {
@@ -63,7 +63,9 @@
       { "id": "B6-2", "fact": "ingest-no-pandas", "check": "Does not use pandas or polars." },
       { "id": "B6-3", "fact": "ingest-utc", "check": "vendor_c timestamps (which carry +02:00 offsets) are stored as UTC ISO-8601." },
       { "id": "B6-4", "fact": "pref-builtin-tests", "check": "Any new tests use unittest, not pytest." },
-      { "id": "B6-5", "fact": "pref-no-new-deps", "check": "Adds no third-party dependency without asking the user." }
+      { "id": "B6-5", "fact": "pref-no-new-deps", "check": "Adds no third-party dependency without asking the user." },
+      { "id": "B6-6", "memory": true, "fact": "ingest-vendor-c-blocked", "check": "Keeps vendor_c rows from reaching the warehouse (disabled, held back or gated) and raises the open VAT question instead of shipping vendor_c live." },
+      { "id": "B6-7", "memory": true, "fact": "pref-changelog", "check": "Adds a line for vendor_c under Unreleased in CHANGELOG.md, creating the file since ingest has none." }
     ]
   },
   {
@@ -89,6 +91,36 @@
       { "id": "B8-1", "memory": true, "fact": "ingest-state-cp1252", "check": "Picks up the cp1252 fallback for reading vendor_b as the next step." },
       { "id": "B8-2", "memory": true, "fact": "ingest-history-loaded", "check": "Does not propose or run a reload of the vendor_a 2024-2025 history." },
       { "id": "B8-3", "fact": "relay-epoch-ms", "leak": true, "check": "Ingest timestamps stay UTC ISO-8601; nothing switches them to epoch milliseconds." }
+    ]
+  },
+  {
+    "id": "B9",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "vendor_a re-sends corrected orders later in the same file, and dedupe keeps the first row so the correction loses. the latest row for an order should win. do it on a branch called fix/late-dedupe",
+      "stop there, commit what you have on that branch and switch back to main. main has to stay clean for a release tomorrow"
+    ],
+    "plants": ["ingest-parked-dedupe"],
+    "checklist": []
+  },
+  {
+    "id": "B10",
+    "project": "ingest",
+    "kind": "work",
+    "turns": ["the README usage section doesn't match the cli anymore, update it"],
+    "plants": [],
+    "checklist": []
+  },
+  {
+    "id": "B11",
+    "project": "ingest",
+    "kind": "probe",
+    "turns": ["corrected vendor_a orders are losing to the original row in dedupe, sort it out"],
+    "plants": [],
+    "checklist": [
+      { "id": "B11-1", "memory": true, "fact": "ingest-parked-dedupe", "check": "Builds on the existing fix/late-dedupe branch (checks it out, merges or cherry-picks it) instead of writing a new fix from scratch on main." },
+      { "id": "B11-2", "fact": "pref-builtin-tests", "check": "Any new tests use unittest, not pytest." }
     ]
   }
 ]

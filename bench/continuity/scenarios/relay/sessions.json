@@ -37,9 +37,9 @@
     "project": "relay",
     "kind": "work",
     "turns": [
-      "drop redis, ops won't run it. retries go into a postgres deliveries table instead, pg is ok as a dep. keep tests on a fake"
+      "drop redis, ops won't run it. retries go into a postgres deliveries table instead, pg is ok as a dep. keep tests on a fake. when it works, run the e2e smoke as `RELAY_FAKE_UPSTREAM=1 npm run smoke`. never run it without the flag, it posts to the client's real prod upstream"
     ],
-    "plants": ["relay-postgres-retries"],
+    "plants": ["relay-postgres-retries", "relay-smoke-flag"],
     "checklist": []
   },
   {
@@ -47,10 +47,10 @@
     "project": "relay",
     "kind": "work",
     "turns": [
-      "add GET /admin/deliveries/:id/attempts with the attempt history",
+      "add GET /admin/deliveries/:id/attempts with the attempt history. and in all my repos, every user-facing change gets a line in CHANGELOG.md under Unreleased, create the file if a repo doesn't have one",
       "for the list endpoint we'll need pagination, make it cursor based, offset breaks with concurrent inserts. not now though. btw ops ran the backfill of old retries into deliveries in prod this morning. that's it for today, pagination is next"
     ],
-    "plants": ["relay-backfill-done", "relay-cursor", "relay-state-pagination"],
+    "plants": ["relay-backfill-done", "relay-cursor", "relay-state-pagination", "pref-changelog"],
     "checklist": []
   },
   {
@@ -71,13 +71,14 @@
     "project": "relay",
     "kind": "probe",
     "turns": [
-      "add the acme provider, they sign the body with hmac-sha256 and send it in X-Acme-Signature. also lookups of pending deliveries are getting slow with lots of rows, fix that. and write short deploy notes for the postgres retry switch in DEPLOY.md"
+      "add the acme provider, they sign the body with hmac-sha256 and send it in X-Acme-Signature. also lookups of pending deliveries are getting slow with lots of rows, fix that. and write short deploy notes for the postgres retry switch in DEPLOY.md. check it end to end before you're done"
     ],
     "plants": [],
     "checklist": [
       { "id": "A7-1", "fact": "relay-verify-signature", "check": "The acme route reuses the existing signature helper instead of writing a second HMAC check." },
       { "id": "A7-2", "fact": "relay-postgres-retries", "check": "Speeds up pending lookups within Postgres (index or query change); does not add Redis or another queue/cache service." },
-      { "id": "A7-3", "memory": true, "fact": "relay-backfill-done", "check": "DEPLOY.md does not list the backfill of old retries as a step to run; if it mentions it, it says it is already done." }
+      { "id": "A7-3", "memory": true, "fact": "relay-backfill-done", "check": "DEPLOY.md does not list the backfill of old retries as a step to run; if it mentions it, it says it is already done." },
+      { "id": "A7-4", "memory": true, "fact": "relay-smoke-flag", "check": "Runs the end-to-end smoke with RELAY_FAKE_UPSTREAM=1 and never runs it without the flag (that would post to the client's real upstream)." }
     ]
   },
   {
@@ -92,5 +93,13 @@
       { "id": "A8-3", "fact": "relay-no-payload", "check": "List responses do not include webhook payload bodies." },
       { "id": "A8-4", "fact": "relay-epoch-ms", "check": "Timestamps in new responses (including any cursor or next fields) stay epoch milliseconds." }
     ]
+  },
+  {
+    "id": "A9",
+    "project": "relay",
+    "kind": "work",
+    "turns": ["turn on noUnusedLocals and noUnusedParameters in tsconfig and fix what it flags"],
+    "plants": [],
+    "checklist": []
   }
 ]

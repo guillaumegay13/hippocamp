@@ -41,7 +41,7 @@ The same reader reaches 90% with the correct sessions, so the remaining gap is r
 
 ## Work continuity
 
-A first small run of `npm run eval:continuity`: real headless Claude Code (`claude-opus-5-5`) works through the first 12 sessions of the synthetic timeline, 9 work tickets and 3 probe tickets with 11 hidden checks, once with Claude Code's native auto-memory and once with Hippocamp. No prompt asks the agent to look anything up. An Opus judge grades each check.
+A first small run of `npm run eval:continuity`: real headless Claude Code (`claude-opus-5-5`) works through the first 12 sessions of the original 16-session timeline, 9 work tickets and 3 probe tickets with 11 hidden checks, once with Claude Code's native auto-memory and once with Hippocamp. No prompt asks the agent to look anything up. An Opus judge grades each check.
 
 | System | Checks passed | Memory-only checks | Agent cost (API price) |
 | --- | ---: | ---: | ---: |
