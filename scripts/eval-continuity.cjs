@@ -8,6 +8,7 @@ const crypto = require("node:crypto");
 const { execFile, spawn: spawnChild } = require("node:child_process");
 const { promisify } = require("node:util");
 const { prepareLagoon } = require("./install-common.cjs");
+const { factDistance, loadDataset, validateDataset } = require("./continuity-dataset.cjs");
 const { complete: completeModel } = require("./eval-locomo.cjs");
 const { ensureClaudeInstructionsInstalled, ensureClaudeSkillInstalled } = require("./install-claude.cjs");
 
@@ -15,6 +16,10 @@ const execFileAsync = promisify(execFile);
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const MODEL = "claude-opus-5-5";
+const DATASET_DIR = path.join(REPO_ROOT, "bench", "continuity");
+const RESULTS_DIR = path.join(REPO_ROOT, ".context", "continuity");
+// Rough $ per Opus session, before the smoke run measures it.
+const SESSION_COST_RANGE = [0.3, 1.5];
 const SYSTEMS = ["none", "native", "hippocamp"];
 // Native auto-memory lands in <CLAUDE_CONFIG_DIR>/projects/<cwd slug>/memory/*.md (checked live
 // with claude 2.1.311): MEMORY.md is the index Claude Code loads, the other files hold one memory each.
@@ -181,7 +186,8 @@ async function head(repo) {
 
 // Runs the timeline in order, one fresh claude process per session (follow-up turns resume it).
 // Each finished session writes <id>.json last, so a rerun skips it and never commits twice.
-async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = Infinity, spawn = spawnClaude }) {
+// Probe sessions first save what memory held at their start, for the judge's miss attribution.
+async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = Infinity, spawn = spawnClaude, snapshot = null }) {
   const systemDir = path.join(outDir, system);
   const records = [];
 
@@ -201,6 +207,10 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
     const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), before: await head(repo), after: null };
 
     await fs.rm(transcriptPath, { force: true });
+
+    if (session.kind === "probe" && snapshot) {
+      await fs.writeFile(path.join(systemDir, `${id}.snapshot.md`), await snapshot(session));
+    }
 
     for (const [index, prompt] of session.turns.entries()) {
       const args = claudeArgs({ system, paths, sessionUuid: record.sessionUuid, resume: index > 0, prompt, budgetUsd });
@@ -334,7 +344,7 @@ whether the agent's work in this session respects the fact.
 # Tool calls and final answer of this session
 {digest}
 
-# Memory the agent had available at the end of the session (repo notes, native memory or Hippocamp)
+# Memory available when the session started (repo notes, native memory or Hippocamp)
 {snapshot}
 
 # Memory the session explicitly read
@@ -417,6 +427,207 @@ function summarize(rows, records) {
   return lines.join("\n");
 }
 
+function printHelp() {
+  console.log(`Hippocamp work continuity eval
+
+Runs real headless Claude Code (${MODEL}) through the 16-session timeline in bench/continuity:
+two synthetic projects, one fresh claude process per session, the repo committed after each.
+Probe sessions are ordinary tickets with hidden checklists; a judge model grades each item and
+labels misses as never stored, stored but not recalled, or recalled but ignored.
+
+Systems:
+  none        no memory; the repo still carries over between sessions
+  native      Claude Code auto-memory (CLAUDE.md and the memory folder)
+  hippocamp   Hippocamp MCP on a throwaway Lagoon, installer guidance in the user CLAUDE.md
+
+Every run is isolated: sandboxes under the OS temp dir with their own HOME and CLAUDE_CONFIG_DIR.
+Results go to .context/continuity/<run>/. Reruns with the same --run skip finished sessions.
+
+Usage:
+  npm run eval:continuity -- [options]
+
+Options:
+  --systems LIST   Comma-separated systems. Default: ${SYSTEMS.join(",")}
+  --run ID         Run id, also the results folder. Default: today's date
+  --limit N        Run only the first N timeline sessions
+  --budget USD     --max-budget-usd per claude call. Default: 3
+  --judge MODEL    Judge model. Default: ${MODEL}
+  --dry-run        Validate the dataset and print the run size and cost range; spawns nothing
+  --help           Show this help
+
+Environment:
+  ANTHROPIC_API_KEY   Claude Code sessions and the default judge
+  OPENAI_API_KEY      only for a GPT judge
+`);
+}
+
+function parseArgs(argv) {
+  const options = {
+    systems: [...SYSTEMS],
+    run: new Date().toISOString().slice(0, 10),
+    limit: Infinity,
+    budget: 3,
+    judge: MODEL,
+    dryRun: false,
+    help: false,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = () => {
+      if (index + 1 >= argv.length) {
+        throw new Error(`${arg} needs a value.`);
+      }
+
+      index += 1;
+      return argv[index];
+    };
+
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--dry-run") {
+      options.dryRun = true;
+    } else if (arg === "--systems") {
+      options.systems = next().split(",").filter(Boolean);
+    } else if (arg === "--run") {
+      options.run = next();
+    } else if (arg === "--limit") {
+      options.limit = Number(next());
+    } else if (arg === "--budget") {
+      options.budget = Number(next());
+    } else if (arg === "--judge") {
+      options.judge = next();
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  for (const system of options.systems) {
+    if (!SYSTEMS.includes(system)) {
+      throw new Error(`Unknown system: ${system}. Use ${SYSTEMS.join(", ")}.`);
+    }
+  }
+
+  if (!(options.limit >= 1) || !(options.budget > 0)) {
+    throw new Error("--limit must be a positive integer and --budget a positive number.");
+  }
+
+  if (!/^[\w.-]+$/.test(options.run)) {
+    throw new Error("--run may only contain letters, digits, dots, dashes and underscores.");
+  }
+
+  return options;
+}
+
+async function readJsonl(file) {
+  const text = await fs.readFile(file, "utf8").catch(() => "");
+  return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+async function judgeSystem({ dataset, system, paths, outDir, records, judge, judgedPath, done }) {
+  const factsById = new Map(dataset.facts.map((fact) => [fact.id, fact]));
+  const rows = [];
+
+  for (const record of records) {
+    const session = dataset.sessions.get(record.id);
+
+    if (session.kind !== "probe" || done.has(`${system}:${record.id}`)) {
+      continue;
+    }
+
+    const systemDir = path.join(outDir, system);
+    const stream = parseStream(await fs.readFile(path.join(systemDir, `${record.id}.jsonl`), "utf8").catch(() => ""));
+    const signals = recallSignals(stream.toolCalls, paths);
+    const items = await judgeProbe({
+      session,
+      facts: dataset.facts,
+      diff: await probeDiff(paths.repos[session.project], record.before, record.after),
+      digest: transcriptDigest(stream.toolCalls, stream.finalText),
+      snapshot: await fs.readFile(path.join(systemDir, `${record.id}.snapshot.md`), "utf8").catch(() => ""),
+      signals,
+      judgeModel: judge,
+    });
+
+    for (const item of items) {
+      const checklistItem = session.checklist.find((entry) => entry.id === item.item);
+      const fact = factsById.get(checklistItem.fact);
+      rows.push({ system, probe: record.id, ...item, fact: fact.id, kind: fact.kind, distance: factDistance(dataset.timeline, fact, record.id), leak: Boolean(checklistItem.leak), signals });
+    }
+
+    await fs.appendFile(judgedPath, rows.filter((row) => row.probe === record.id).map((row) => `${JSON.stringify(row)}\n`).join(""));
+  }
+
+  return rows;
+}
+
+async function run(options) {
+  const dataset = await loadDataset(DATASET_DIR);
+  const errors = validateDataset(dataset);
+
+  if (errors.length) {
+    throw new Error(`Dataset is invalid:\n${errors.join("\n")}`);
+  }
+
+  const timeline = dataset.timeline.slice(0, options.limit);
+  const turns = timeline.reduce((sum, id) => sum + dataset.sessions.get(id).turns.length, 0);
+  const probes = timeline.filter((id) => dataset.sessions.get(id).kind === "probe").length;
+  const runs = timeline.length * options.systems.length;
+
+  console.log(`${timeline.length} sessions (${probes} probes, ${turns} turns) x ${options.systems.length} systems (${options.systems.join(", ")})`);
+  console.log(`Estimated agent cost: $${(runs * SESSION_COST_RANGE[0]).toFixed(0)}-$${(runs * SESSION_COST_RANGE[1]).toFixed(0)}, plus ${probes * options.systems.length} judge calls`);
+
+  if (options.dryRun) {
+    return;
+  }
+
+  const outDir = path.join(RESULTS_DIR, options.run);
+  const judgedPath = path.join(outDir, "judged.jsonl");
+  await fs.mkdir(outDir, { recursive: true });
+
+  // Systems run side by side; sessions within a system stay strictly in timeline order.
+  const perSystem = await Promise.all(
+    options.systems.map(async (system) => {
+      const paths = sandboxPaths(options.run, system);
+      await prepareSandbox(dataset, paths, system);
+      const records = await runTimeline({
+        dataset: { ...dataset, timeline },
+        system,
+        paths,
+        outDir,
+        budgetUsd: options.budget,
+        snapshot: (session) => memorySnapshot(system, paths, session.project),
+      });
+      console.log(`${system}: ${records.length} sessions, $${records.reduce((sum, record) => sum + record.costUsd, 0).toFixed(2)}`);
+      return { system, paths, records };
+    }),
+  );
+
+  const done = new Set((await readJsonl(judgedPath)).map((row) => `${row.system}:${row.probe}`));
+
+  for (const { system, paths, records } of perSystem) {
+    await judgeSystem({ dataset, system, paths, outDir, records, judge: options.judge, judgedPath, done });
+  }
+
+  const rows = (await readJsonl(judgedPath)).filter((row) => options.systems.includes(row.system) && timeline.includes(row.probe));
+  const records = perSystem.flatMap(({ system, records }) => records.map((record) => ({ ...record, system })));
+  const report = `# Work continuity run ${options.run}\n\n${summarize(rows, records)}\n`;
+
+  await fs.writeFile(path.join(outDir, "report.md"), report);
+  console.log(`\n${report}`);
+  console.log(`Results: ${outDir}`);
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+
+  if (options.help) {
+    printHelp();
+    return;
+  }
+
+  await run(options);
+}
+
 module.exports = {
   NATIVE_MEMORY_GLOB,
   SYSTEMS,
@@ -424,6 +635,7 @@ module.exports = {
   claudeEnv,
   judgeProbe,
   memorySnapshot,
+  parseArgs,
   parseStream,
   prepareSandbox,
   probeDiff,
@@ -433,3 +645,10 @@ module.exports = {
   summarize,
   transcriptDigest,
 };
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exit(1);
+  });
+}

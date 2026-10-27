@@ -30,6 +30,7 @@
   "scripts": {
     "dream": "node scripts/hippocamp-dream.cjs",
     "dream:railway": "bash assets/railway/run-dream.sh",
+    "eval:continuity": "node --env-file-if-exists=.env scripts/eval-continuity.cjs",
     "eval:lagoon": "node scripts/eval-lagoon.cjs",
     "eval:qa": "node scripts/eval-qa.cjs",
     "eval:retrieval": "node scripts/eval-retrieval.cjs",

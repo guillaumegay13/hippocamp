@@ -16,6 +16,10 @@ pnpm-debug.log*
 .env.production.local
 .hippocamp/
 CLAUDE.md
+docs/superpowers/
 
 # README media loads from GitHub; keep it out of the npm package.
 assets/brand/hippocamp-demo.gif
+
+# Benchmark data is for development runs only.
+bench/

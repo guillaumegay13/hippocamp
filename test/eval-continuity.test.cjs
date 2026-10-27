@@ -11,6 +11,7 @@ const {
   claudeEnv,
   judgeProbe,
   memorySnapshot,
+  parseArgs,
   parseStream,
   prepareSandbox,
   recallSignals,
@@ -296,4 +297,27 @@ test("summarize buckets by kind and distance", () => {
   assert.ok(hippocampRow.includes("| $1.75 | 1 |"), hippocampRow);
   assert.ok(noneRow.startsWith("| none | 0% |"), noneRow);
   assert.ok(table.split("\n")[0].includes("| 1-2 | 3-5 | 6+ |"));
+});
+
+test("runTimeline snapshots memory before each probe session runs", async (t) => {
+  const { dataset, paths, outDir, calls } = await runnerFixture(t);
+  dataset.sessions.get("S2").kind = "probe";
+  const seen = [];
+  const snapshot = async (session) => {
+    seen.push({ id: session.id, callsSoFar: calls.length });
+    return `memory before ${session.id}`;
+  };
+
+  await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn: fakeSpawn(calls), snapshot });
+
+  assert.deepEqual(seen, [{ id: "S2", callsSoFar: 2 }]);
+  assert.equal(await fs.readFile(path.join(outDir, "none", "S2.snapshot.md"), "utf8"), "memory before S2");
+  assert.ok(!fsSync.existsSync(path.join(outDir, "none", "S1.snapshot.md")));
+});
+
+test("parseArgs validates systems and run ids", () => {
+  assert.deepEqual(parseArgs(["--systems", "native,hippocamp", "--limit", "2", "--run", "smoke"]).systems, ["native", "hippocamp"]);
+  assert.throws(() => parseArgs(["--systems", "mem0"]), /Unknown system/);
+  assert.throws(() => parseArgs(["--run", "../../etc"]), /--run/);
+  assert.throws(() => parseArgs(["--limit", "0"]), /--limit/);
 });
