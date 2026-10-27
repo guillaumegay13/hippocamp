@@ -1,0 +1,40 @@
+docs/development.md
+  s_df17c2731cbf68::t_66e142e8f7ffc9 29,42
+bench/continuity/scenarios/ingest/seed/scripts/smoke.py
+  s_df17c2731cbf68::t_b09302676d13c6 1-44
+test/eval-continuity.test.cjs
+  s_df17c2731cbf68::t_59ea0b7055b7eb 223-231
+bench/continuity/scenarios/relay/seed/package.json
+  s_df17c2731cbf68::t_8ced93db726003 9
+bench/continuity/scenarios/relay/sessions.json
+  s_df17c2731cbf68::t_8ced93db726003 40,42,50,53,74,80
+  s_df17c2731cbf68::t_294adf54d31790 100-110
+test/continuity-dataset.test.cjs
+  s_df17c2731cbf68::t_34fb9dc89efd04 133,136
+scripts/eval-continuity.cjs
+  s_df17c2731cbf68::t_2bdb10e45543aa 221-224,250,756
+  s_df17c2731cbf68::t_bc4e486d3cb63f 233-234,236,238-244
+bench/continuity/scenarios/ingest/sessions.json
+  s_df17c2731cbf68::t_8ced93db726003 27,29
+  s_df17c2731cbf68::t_294adf54d31790 48,50,52,75,81-82
+bench/continuity/timeline.json
+  s_df17c2731cbf68::t_294adf54d31790 1
+bench/continuity/facts.json
+  s_df17c2731cbf68::t_294adf54d31790 24-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a8fb8430621f32377898bdc6d99f46ff2e3dce64",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
