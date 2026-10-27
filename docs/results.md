@@ -39,6 +39,17 @@ The same reader reaches 90% with the correct sessions, so the remaining gap is r
 | Right event in top 5, 43 answerable questions | 42 / 43 |
 | No results for 10 questions no memory is about | 10 / 10 |
 
+## Work continuity
+
+A first small run of `npm run eval:continuity`: real headless Claude Code (`claude-opus-5-5`) works through the first 12 sessions of the synthetic timeline, 9 work tickets and 3 probe tickets with 11 hidden checks, once with Claude Code's native auto-memory and once with Hippocamp. No prompt asks the agent to look anything up. An Opus judge grades each check.
+
+| System | Checks passed | Memory-only checks | Agent cost (API price) |
+| --- | ---: | ---: | ---: |
+| Claude Code native memory | 11 / 11 | 5 / 5 | $4.79 |
+| Hippocamp | 11 / 11 | 5 / 5 | $5.71 |
+
+Both systems pass every check, so this run does not separate them. Both recalled on their own: native memory through its auto-loaded `MEMORY.md` and file reads, Hippocamp through `wake_up` and `search_memory`. The probes in this run are 4 to 10 sessions after the facts they check. The later probes, which cross between the two projects and check the reversed decisions, are not run yet. Two sessions, one per system, were cut off by a usage limit and rerun; any memory written before the cutoff was kept.
+
 ## Why less text matters
 
 Memory results share the agent's context with code, diffs, and tool output, and agents search several times per task. About 6k characters per search is roughly 1.5k tokens; whole sessions would be about 16k. Fewer tokens make each turn cheaper and faster, and keep the relevant lines from being buried. Less text is only useful when the answer is still in it, which is why we report answer accuracy next to text size.
