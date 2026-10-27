@@ -34,7 +34,8 @@ const GIT_IDENTITY = {
 // Sandboxes live under the OS temp dir: Claude Code loads CLAUDE.md from parent folders,
 // so a sandbox inside this repo would see Hippocamp's own guidance.
 function sandboxPaths(runId, system) {
-  const root = path.join(os.tmpdir(), "hippocamp-continuity", runId, system);
+  // Resolved, because Claude Code reports its cwd and file paths through symlinks such as macOS /var -> /private/var.
+  const root = path.join(fsSync.realpathSync(os.tmpdir()), "hippocamp-continuity", runId, system);
   const home = path.join(root, "home");
 
   return {
@@ -92,6 +93,15 @@ async function prepareSandbox(dataset, paths, system, { install = true } = {}) {
   }
 
   await fs.writeFile(marker, `${new Date().toISOString()}\n`);
+}
+
+// Records without their sandbox would mean later sessions run with no history while results look valid.
+async function assertSandboxIntact(paths, systemDir) {
+  const records = (await fs.readdir(systemDir).catch(() => [])).filter((name) => name.endsWith(".json"));
+
+  if (records.length && !fsSync.existsSync(path.join(paths.root, ".prepared"))) {
+    throw new Error(`${systemDir} has session results but its sandbox ${paths.root} is gone. Start a new --run.`);
+  }
 }
 
 function claudeEnv(system, paths, baseEnv = process.env) {
@@ -152,7 +162,17 @@ function parseStream(text) {
     if (event.type === "assistant") {
       for (const block of event.message?.content || []) {
         if (block.type === "tool_use") {
-          parsed.toolCalls.push({ name: block.name, input: block.input });
+          parsed.toolCalls.push({ id: block.id, name: block.name, input: block.input });
+        }
+      }
+    }
+
+    if (event.type === "user") {
+      for (const block of Array.isArray(event.message?.content) ? event.message.content : []) {
+        const call = block.type === "tool_result" && parsed.toolCalls.find((entry) => entry.id === block.tool_use_id);
+
+        if (call) {
+          call.result = typeof block.content === "string" ? block.content : (block.content || []).map((part) => part.text || "").join("");
         }
       }
     }
@@ -205,6 +225,13 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
     const repo = paths.repos[session.project];
     const transcriptPath = path.join(systemDir, `${id}.jsonl`);
     const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), before: await head(repo), after: null };
+
+    // A transcript without a record means an interrupted attempt: drop its uncommitted work.
+    if (fsSync.existsSync(transcriptPath)) {
+      record.retried = true;
+      await git(["reset", "-q", "--hard"], repo);
+      await git(["clean", "-fdq"], repo);
+    }
 
     await fs.rm(transcriptPath, { force: true });
 
@@ -288,6 +315,9 @@ async function readMarkdownTree(dir, filter = () => true) {
   return files.sort();
 }
 
+// Files the agent sees without asking: the repo and native CLAUDE.md/MEMORY.md, and what Hippocamp wake_up returns.
+const AUTO_LOADED = new Set(["CLAUDE.md", "MEMORY.md", "current_state.md", "open_threads.md", "project.md", "identity.md", "preferences.md"]);
+
 // Everything the agent could have kept between sessions, for the judge's miss attribution.
 async function memorySnapshot(system, paths, project) {
   const repo = paths.repos[project];
@@ -310,7 +340,7 @@ async function memorySnapshot(system, paths, project) {
   const parts = [];
 
   for (const file of files) {
-    parts.push(`=== ${file} ===\n${await fs.readFile(file, "utf8")}`);
+    parts.push(`=== ${file} (${AUTO_LOADED.has(path.basename(file)) ? "auto-loaded" : "needs a read"}) ===\n${await fs.readFile(file, "utf8")}`);
   }
 
   return cap(parts.join("\n"), 30000);
@@ -318,7 +348,12 @@ async function memorySnapshot(system, paths, project) {
 
 function transcriptDigest(toolCalls, finalText) {
   const final = `\nFINAL ANSWER:\n${cap(finalText, 8000)}`;
-  const lines = toolCalls.map(({ name, input }) => `${name}: ${JSON.stringify(input ?? {}).slice(0, 200)}`);
+  // Memory tools and Markdown reads keep a slice of their result, so the judge can tell not-recalled from ignored.
+  const lines = toolCalls.map(({ name, input, result }) => {
+    const line = `${name}: ${JSON.stringify(input ?? {}).slice(0, 200)}`;
+    const shown = result && (name.startsWith("mcp__") || String(input?.file_path || "").endsWith(".md"));
+    return shown ? `${line}\n  -> ${result.slice(0, 1500).replace(/\n/g, "\n     ")}` : line;
+  });
 
   return `${cap(lines.join("\n"), 40000 - final.length)}${final}`;
 }
@@ -351,7 +386,7 @@ whether the agent's work in this session respects the fact.
 {signals}
 
 For each item return:
-- "pass": true when the work respects the fact, or when the item is not applicable because the agent did not touch that area and did not contradict it; false otherwise.
+- "pass": true when the work respects the fact; false when it contradicts it; "n/a" when the session never touched that area, so the item says nothing either way.
 - "source": where the agent got the fact: "code" (visible in the repo code), "repo-note", "native", "hippocamp", "prompt", or "none".
 - "cause": null when pass is true; otherwise "never-stored" (the fact is not in any memory above), "not-recalled" (it is stored but the session never saw it), or "ignored" (the session saw it and acted against it).
 
@@ -370,7 +405,10 @@ function parseJudgeReply(text) {
 async function judgeProbe({ session, facts, diff, digest, snapshot, signals, judgeModel, complete = completeModel }) {
   const factsById = new Map(facts.map((fact) => [fact.id, fact]));
   const checklist = session.checklist
-    .map((item) => `- ${item.id}: ${item.check} (fact: ${factsById.get(item.fact)?.statement || item.fact})`)
+    .map((item) => {
+      const statement = factsById.get(item.fact)?.statement || item.fact;
+      return `- ${item.id}: ${item.check} (${item.leak ? `must NOT carry over from another project: ${statement}` : `fact: ${statement}`})`;
+    })
     .join("\n");
   const prompt = JUDGE_PROMPT.replace("{request}", () => session.turns.join("\n\n"))
     .replace("{checklist}", () => checklist)
@@ -384,11 +422,15 @@ async function judgeProbe({ session, facts, diff, digest, snapshot, signals, jud
   return session.checklist.map((item) => {
     const reply = replies.get(item.id);
 
+    if (reply?.pass === "n/a") {
+      return { item: item.id, pass: null, source: reply.source || "none", cause: null };
+    }
+
     if (!reply || typeof reply.pass !== "boolean") {
       return { item: item.id, pass: false, source: "none", cause: "judge-missing" };
     }
 
-    return { item: item.id, pass: reply.pass, source: reply.source || "none", cause: reply.pass ? null : reply.cause || "never-stored" };
+    return { item: item.id, pass: reply.pass, source: reply.source || "none", cause: reply.pass ? null : reply.cause || "unknown" };
   });
 }
 
@@ -400,13 +442,15 @@ const BANDS = [
 ];
 const CAUSES = ["never-stored", "not-recalled", "ignored"];
 
+// N/A items (pass === null) count in neither direction.
 function passRate(rows) {
-  return rows.length ? `${Math.round((100 * rows.filter((row) => row.pass).length) / rows.length)}%` : "-";
+  const graded = rows.filter((row) => row.pass !== null);
+  return graded.length ? `${Math.round((100 * graded.filter((row) => row.pass).length) / graded.length)}%` : "-";
 }
 
 // rows: judged checklist items tagged with system, kind and distance. records: session records tagged with system.
 function summarize(rows, records) {
-  const header = ["System", "Pass", ...KINDS, ...BANDS.map(([label]) => label), ...CAUSES, "Agent $", "Failed sessions"];
+  const header = ["System", "Pass", "Memory-only", ...KINDS, ...BANDS.map(([label]) => label), ...CAUSES, "N/A", "Agent $", "Failed sessions"];
   const lines = [`| ${header.join(" | ")} |`, `|${header.map(() => "---").join("|")}|`];
 
   for (const system of SYSTEMS.filter((name) => rows.some((row) => row.system === name))) {
@@ -415,9 +459,11 @@ function summarize(rows, records) {
     const cells = [
       system,
       passRate(mine),
+      passRate(mine.filter((row) => row.memory)),
       ...KINDS.map((kind) => passRate(mine.filter((row) => row.kind === kind))),
       ...BANDS.map(([, inBand]) => passRate(mine.filter((row) => inBand(row.distance)))),
       ...CAUSES.map((cause) => String(mine.filter((row) => row.cause === cause).length)),
+      String(mine.filter((row) => row.pass === null).length),
       `$${sessions.reduce((sum, record) => sum + record.costUsd, 0).toFixed(2)}`,
       String(sessions.filter((record) => !record.ok).length),
     ];
@@ -551,7 +597,7 @@ async function judgeSystem({ dataset, system, paths, outDir, records, judge, jud
     for (const item of items) {
       const checklistItem = session.checklist.find((entry) => entry.id === item.item);
       const fact = factsById.get(checklistItem.fact);
-      rows.push({ system, probe: record.id, ...item, fact: fact.id, kind: fact.kind, distance: factDistance(dataset.timeline, fact, record.id), leak: Boolean(checklistItem.leak), signals });
+      rows.push({ system, probe: record.id, ...item, fact: fact.id, kind: fact.kind, distance: factDistance(dataset.timeline, fact, record.id), leak: Boolean(checklistItem.leak), memory: Boolean(checklistItem.memory), signals });
     }
 
     await fs.appendFile(judgedPath, rows.filter((row) => row.probe === record.id).map((row) => `${JSON.stringify(row)}\n`).join(""));
@@ -585,9 +631,11 @@ async function run(options) {
   await fs.mkdir(outDir, { recursive: true });
 
   // Systems run side by side; sessions within a system stay strictly in timeline order.
-  const perSystem = await Promise.all(
+  // allSettled: one system failing must not exit while the others have claude mid-turn.
+  const settled = await Promise.allSettled(
     options.systems.map(async (system) => {
       const paths = sandboxPaths(options.run, system);
+      await assertSandboxIntact(paths, path.join(outDir, system));
       await prepareSandbox(dataset, paths, system);
       const records = await runTimeline({
         dataset: { ...dataset, timeline },
@@ -602,6 +650,13 @@ async function run(options) {
     }),
   );
 
+  const failures = settled.filter((result) => result.status === "rejected");
+
+  if (failures.length) {
+    throw new Error(failures.map((result) => result.reason.message).join("\n"));
+  }
+
+  const perSystem = settled.map((result) => result.value);
   const done = new Set((await readJsonl(judgedPath)).map((row) => `${row.system}:${row.probe}`));
 
   for (const { system, paths, records } of perSystem) {
@@ -630,6 +685,7 @@ async function main() {
 
 module.exports = {
   NATIVE_MEMORY_GLOB,
+  assertSandboxIntact,
   SYSTEMS,
   claudeArgs,
   claudeEnv,

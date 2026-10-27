@@ -142,4 +142,6 @@ test("shipped dataset is valid and covers the spec", async () => {
   assert.ok(items.some(({ item }) => item.leak));
   assert.ok(Math.min(...distances) <= 2);
   assert.ok(Math.max(...distances) >= 5);
+  assert.ok(items.filter(({ item }) => item.memory).length >= 6);
+  assert.match(dataset.sessions.get("B5").turns[1], /don't fix/);
 });

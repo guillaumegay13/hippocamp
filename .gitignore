@@ -16,3 +16,6 @@ pnpm-debug.log*
 .hippocamp/
 CLAUDE.md
 docs/superpowers/
+
+# Benchmark seeds ship their own CLAUDE.md.
+!bench/continuity/scenarios/*/seed/CLAUDE.md

@@ -46,7 +46,7 @@
     "kind": "work",
     "turns": [
       "the warehouse started rejecting our requests, turns out they cap at 4mb per request. drop the chunk size to 2k",
-      "also the vendor_b file blows up on encoding, have a look at why",
+      "also the vendor_b file blows up on encoding. just tell me why, don't fix it yet",
       "ok stop there. next step is a cp1252 fallback in the reader"
     ],
     "plants": ["ingest-batch-2k", "ingest-state-cp1252"],
@@ -73,8 +73,8 @@
     "turns": ["big imports are way too slow, speed it up"],
     "plants": [],
     "checklist": [
-      { "id": "B7-1", "fact": "ingest-batch-2k", "check": "Does not raise the rows-per-request chunk size above 2,000." },
-      { "id": "B7-2", "fact": "ingest-no-multiprocessing", "check": "Does not reintroduce multiprocessing (or process pools) for the import." },
+      { "id": "B7-1", "memory": true, "fact": "ingest-batch-2k", "check": "Does not raise the rows-per-request chunk size above 2,000." },
+      { "id": "B7-2", "memory": true, "fact": "ingest-no-multiprocessing", "check": "Does not reintroduce multiprocessing (or process pools) for the import." },
       { "id": "B7-3", "fact": "ingest-no-pandas", "check": "Does not use pandas or polars." },
       { "id": "B7-4", "fact": "pref-small-diffs", "check": "The diff stays on the import path; no unrelated reformatting or refactors." }
     ]
@@ -86,8 +86,8 @@
     "turns": ["where are we on ingest? pick it up"],
     "plants": [],
     "checklist": [
-      { "id": "B8-1", "fact": "ingest-state-cp1252", "check": "Picks up the cp1252 fallback for reading vendor_b as the next step." },
-      { "id": "B8-2", "fact": "ingest-history-loaded", "check": "Does not propose or run a reload of the vendor_a 2024-2025 history." },
+      { "id": "B8-1", "memory": true, "fact": "ingest-state-cp1252", "check": "Picks up the cp1252 fallback for reading vendor_b as the next step." },
+      { "id": "B8-2", "memory": true, "fact": "ingest-history-loaded", "check": "Does not propose or run a reload of the vendor_a 2024-2025 history." },
       { "id": "B8-3", "fact": "relay-epoch-ms", "leak": true, "check": "Ingest timestamps stay UTC ISO-8601; nothing switches them to epoch milliseconds." }
     ]
   }

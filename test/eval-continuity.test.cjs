@@ -7,6 +7,7 @@ const path = require("node:path");
 const { loadDataset } = require("../scripts/continuity-dataset.cjs");
 const { execFileSync } = require("node:child_process");
 const {
+  assertSandboxIntact,
   claudeArgs,
   claudeEnv,
   judgeProbe,
@@ -27,7 +28,7 @@ test("sandbox paths are outside the working tree", () => {
   const paths = sandboxPaths("t", "none");
 
   assert.ok(!paths.root.startsWith(process.cwd()), paths.root);
-  assert.ok(paths.root.startsWith(os.tmpdir()), paths.root);
+  assert.ok(paths.root.startsWith(fsSync.realpathSync(os.tmpdir())), paths.root);
   assert.equal(paths.home, path.join(paths.root, "home"));
   assert.equal(paths.configDir, path.join(paths.home, ".claude"));
 });
@@ -95,7 +96,7 @@ function streamLines(...events) {
   return events.map((event) => JSON.stringify(event)).join("\n");
 }
 
-const toolUse = { type: "assistant", message: { content: [{ type: "text", text: "looking" }, { type: "tool_use", name: "mcp__hippocamp__search_memory", input: { query: "retries" } }] } };
+const toolUse = { type: "assistant", message: { content: [{ type: "text", text: "looking" }, { type: "tool_use", id: "t0", name: "mcp__hippocamp__search_memory", input: { query: "retries" } }] } };
 const success = (cost) => ({ type: "result", subtype: "success", is_error: false, total_cost_usd: cost, result: "done" });
 
 test("parseStream sums cost and collects tool calls", () => {
@@ -104,7 +105,7 @@ test("parseStream sums cost and collects tool calls", () => {
   assert.equal(parsed.ok, true);
   assert.equal(parsed.costUsd, 0.42);
   assert.equal(parsed.finalText, "done");
-  assert.deepEqual(parsed.toolCalls, [{ name: "mcp__hippocamp__search_memory", input: { query: "retries" } }]);
+  assert.deepEqual(parsed.toolCalls, [{ id: "t0", name: "mcp__hippocamp__search_memory", input: { query: "retries" } }]);
 });
 
 test("parseStream marks error results", () => {
@@ -320,4 +321,91 @@ test("parseArgs validates systems and run ids", () => {
   assert.throws(() => parseArgs(["--systems", "mem0"]), /Unknown system/);
   assert.throws(() => parseArgs(["--run", "../../etc"]), /--run/);
   assert.throws(() => parseArgs(["--limit", "0"]), /--limit/);
+});
+
+test("judge n/a items stay out of the pass rate and leak items are framed as must-not-carry", async () => {
+  let prompt = "";
+  const leakProbe = { ...probe, checklist: [probe.checklist[0], { ...probe.checklist[1], leak: true }] };
+  const complete = async (model, request) => {
+    prompt = request.messages[0].content;
+    return { text: '{"items":[{"id":"P1-1","pass":"n/a","source":"none","cause":null},{"id":"P1-2","pass":false,"source":"none"}]}', usage: {} };
+  };
+  const items = await judgeProbe({ session: leakProbe, facts: probeFacts, diff: "", digest: "", snapshot: "", signals: [], judgeModel: "m", complete });
+
+  assert.ok(prompt.includes("must NOT carry over"));
+  assert.deepEqual(items, [
+    { item: "P1-1", pass: null, source: "none", cause: null },
+    { item: "P1-2", pass: false, source: "none", cause: "unknown" },
+  ]);
+
+  const table = summarize(
+    [
+      { system: "hippocamp", kind: "decision", distance: 2, pass: null, cause: null, memory: true },
+      { system: "hippocamp", kind: "decision", distance: 2, pass: true, cause: null, memory: true },
+      { system: "hippocamp", kind: "state", distance: 2, pass: false, cause: "ignored", memory: false },
+    ],
+    [],
+  );
+  const header = table.split("\n")[0].split(" | ");
+  const row = table.split("\n").find((line) => line.startsWith("| hippocamp |")).split(" | ");
+
+  assert.equal(row[1], "50%");
+  assert.equal(row[header.indexOf("Memory-only")], "100%");
+  assert.equal(row[header.indexOf("N/A")], "1");
+});
+
+test("parseStream attaches tool results and the digest shows memory results", () => {
+  const parsed = parseStream(
+    streamLines(
+      { type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "mcp__hippocamp__wake_up", input: {} }] } },
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "retries live in postgres" }] }] } },
+      success(0.1),
+    ),
+  );
+
+  assert.equal(parsed.toolCalls[0].result, "retries live in postgres");
+  assert.ok(transcriptDigest(parsed.toolCalls, "").includes("retries live in postgres"));
+});
+
+test("memorySnapshot labels auto-loaded files", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "continuity-snap-"));
+  const paths = { ...sandboxPaths("t", "native"), configDir: path.join(root, ".claude"), repos: { relay: path.join(root, "repos", "relay") } };
+  const memoryDir = path.join(paths.configDir, "projects", "-tmp-repos-relay", "memory");
+
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  await fs.mkdir(memoryDir, { recursive: true });
+  await fs.writeFile(path.join(memoryDir, "MEMORY.md"), "index\n");
+  await fs.writeFile(path.join(memoryDir, "redis.md"), "dropped redis\n");
+  await fs.mkdir(paths.repos.relay, { recursive: true });
+  await fs.writeFile(path.join(paths.repos.relay, "CLAUDE.md"), "# relay\n");
+
+  const snapshot = await memorySnapshot("native", paths, "relay");
+
+  assert.match(snapshot, /MEMORY\.md \(auto-loaded\)/);
+  assert.match(snapshot, /CLAUDE\.md \(auto-loaded\)/);
+  assert.match(snapshot, /redis\.md \(needs a read\)/);
+});
+
+test("an interrupted session reruns on a clean tree and is flagged retried", async (t) => {
+  const { dataset, paths, outDir, calls } = await runnerFixture(t);
+
+  await fs.mkdir(path.join(outDir, "none"), { recursive: true });
+  await fs.writeFile(path.join(outDir, "none", "S1.jsonl"), "partial\n");
+  await fs.writeFile(path.join(paths.repos.relay, "half-done.txt"), "partial work\n");
+  const records = await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, limit: 1, spawn: fakeSpawn(calls) });
+  const files = execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: paths.repos.relay, encoding: "utf8" });
+
+  assert.equal(records[0].retried, true);
+  assert.ok(!files.includes("half-done.txt"), files);
+});
+
+test("assertSandboxIntact refuses results without their sandbox", async (t) => {
+  const { paths, outDir } = await runnerFixture(t);
+
+  await fs.mkdir(path.join(outDir, "none"), { recursive: true });
+  await assertSandboxIntact(paths, path.join(outDir, "none"));
+  await fs.writeFile(path.join(outDir, "none", "S1.json"), "{}");
+  await assertSandboxIntact(paths, path.join(outDir, "none"));
+  await fs.rm(path.join(paths.root, ".prepared"));
+  await assert.rejects(assertSandboxIntact(paths, path.join(outDir, "none")), /sandbox/);
 });
