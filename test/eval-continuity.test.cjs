@@ -6,7 +6,19 @@ const os = require("node:os");
 const path = require("node:path");
 const { loadDataset } = require("../scripts/continuity-dataset.cjs");
 const { execFileSync } = require("node:child_process");
-const { claudeArgs, claudeEnv, parseStream, prepareSandbox, runTimeline, sandboxPaths } = require("../scripts/eval-continuity.cjs");
+const {
+  claudeArgs,
+  claudeEnv,
+  judgeProbe,
+  memorySnapshot,
+  parseStream,
+  prepareSandbox,
+  recallSignals,
+  runTimeline,
+  sandboxPaths,
+  summarize,
+  transcriptDigest,
+} = require("../scripts/eval-continuity.cjs");
 
 const DATASET_DIR = path.join(__dirname, "..", "bench", "continuity");
 
@@ -179,4 +191,109 @@ test("runTimeline stops at limit", async (t) => {
   const records = await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, limit: 1, spawn: fakeSpawn(calls) });
 
   assert.deepEqual(records.map((record) => record.id), ["S1"]);
+});
+
+test("recallSignals tags hippocamp, native and repo note reads", () => {
+  const paths = sandboxPaths("t", "native");
+  const signals = recallSignals(
+    [
+      { name: "mcp__hippocamp__wake_up", input: {} },
+      { name: "mcp__hippocamp__search_memory", input: { query: "redis" } },
+      { name: "mcp__hippocamp__search_memory", input: { query: "node" } },
+      { name: "Read", input: { file_path: path.join(paths.configDir, "projects", "x", "memory", "a.md") } },
+      { name: "Bash", input: { command: "cat ~/.claude/projects/x/memory/MEMORY.md" } },
+      { name: "Read", input: { file_path: path.join(paths.repos.relay, "NOTES.md") } },
+      { name: "Read", input: { file_path: path.join(paths.repos.relay, "README.md") } },
+      { name: "Read", input: { file_path: path.join(paths.repos.relay, "src", "server.ts") } },
+    ],
+    paths,
+  );
+
+  assert.deepEqual(signals, ["hippocamp:wake_up", "hippocamp:search_memory", "native:read", "repo-note:NOTES.md"]);
+});
+
+test("digest caps length", () => {
+  const calls = Array.from({ length: 10000 }, (_, index) => ({ name: "Bash", input: { command: `echo ${index} ${"x".repeat(300)}` } }));
+  const digest = transcriptDigest(calls, "final answer");
+
+  assert.ok(digest.length <= 40000, String(digest.length));
+  assert.ok(digest.includes("final answer"));
+  assert.ok(digest.startsWith("Bash: "));
+});
+
+test("memorySnapshot reads native memory for its own project only", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "continuity-snap-"));
+  const paths = { ...sandboxPaths("t", "native"), configDir: path.join(root, ".claude"), repos: { relay: path.join(root, "repos", "relay"), ingest: path.join(root, "repos", "ingest") } };
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(paths.configDir, "projects", "-tmp-repos-relay", "memory"), { recursive: true });
+  await fs.mkdir(path.join(paths.configDir, "projects", "-tmp-repos-ingest", "memory"), { recursive: true });
+  await fs.writeFile(path.join(paths.configDir, "projects", "-tmp-repos-relay", "memory", "MEMORY.md"), "relay uses postgres\n");
+  await fs.writeFile(path.join(paths.configDir, "projects", "-tmp-repos-ingest", "memory", "MEMORY.md"), "ingest uses utc\n");
+  await fs.mkdir(paths.repos.relay, { recursive: true });
+  await fs.writeFile(path.join(paths.repos.relay, "CLAUDE.md"), "# relay\n");
+
+  const snapshot = await memorySnapshot("native", paths, "relay");
+
+  assert.ok(snapshot.includes("relay uses postgres"));
+  assert.ok(!snapshot.includes("ingest uses utc"));
+  assert.ok(snapshot.includes("# relay"));
+});
+
+const probe = {
+  id: "P1",
+  project: "relay",
+  kind: "probe",
+  turns: ["add retry metrics"],
+  checklist: [
+    { id: "P1-1", fact: "f1", check: "Reads Postgres." },
+    { id: "P1-2", fact: "f2", check: "No new deps." },
+  ],
+};
+const probeFacts = [
+  { id: "f1", kind: "decision", statement: "Postgres." },
+  { id: "f2", kind: "preference", statement: "No deps." },
+];
+
+test("judge output missing items become failures", async () => {
+  let prompt = "";
+  const complete = async (model, request) => {
+    prompt = request.messages[0].content;
+    return { text: '```json\n{"items":[{"id":"P1-1","pass":true,"source":"hippocamp","cause":null}]}\n```', usage: {} };
+  };
+  const items = await judgeProbe({ session: probe, facts: probeFacts, diff: "diff", digest: "digest", snapshot: "snap", signals: [], judgeModel: "m", complete });
+
+  assert.ok(prompt.includes("Reads Postgres.") && prompt.includes("Postgres."));
+  assert.deepEqual(items, [
+    { item: "P1-1", pass: true, source: "hippocamp", cause: null },
+    { item: "P1-2", pass: false, source: "none", cause: "judge-missing" },
+  ]);
+});
+
+test("judge reply that is not JSON fails every item", async () => {
+  const complete = async () => ({ text: "I think it passes.", usage: {} });
+  const items = await judgeProbe({ session: probe, facts: probeFacts, diff: "", digest: "", snapshot: "", signals: [], judgeModel: "m", complete });
+
+  assert.deepEqual(items.map((item) => item.cause), ["judge-missing", "judge-missing"]);
+});
+
+test("summarize buckets by kind and distance", () => {
+  const rows = [
+    { system: "hippocamp", kind: "decision", distance: 2, pass: true, cause: null },
+    { system: "hippocamp", kind: "state", distance: 7, pass: false, cause: "not-recalled" },
+    { system: "none", kind: "decision", distance: 4, pass: false, cause: "never-stored" },
+  ];
+  const records = [
+    { system: "hippocamp", ok: true, costUsd: 1.25 },
+    { system: "hippocamp", ok: false, costUsd: 0.5 },
+    { system: "none", ok: true, costUsd: 1 },
+  ];
+  const table = summarize(rows, records);
+  const hippocampRow = table.split("\n").find((line) => line.startsWith("| hippocamp |"));
+  const noneRow = table.split("\n").find((line) => line.startsWith("| none |"));
+
+  assert.ok(hippocampRow.startsWith("| hippocamp | 50% |"), hippocampRow);
+  assert.ok(hippocampRow.includes("| $1.75 | 1 |"), hippocampRow);
+  assert.ok(noneRow.startsWith("| none | 0% |"), noneRow);
+  assert.ok(table.split("\n")[0].includes("| 1-2 | 3-5 | 6+ |"));
 });

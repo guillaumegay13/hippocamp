@@ -8,6 +8,7 @@ const crypto = require("node:crypto");
 const { execFile, spawn: spawnChild } = require("node:child_process");
 const { promisify } = require("node:util");
 const { prepareLagoon } = require("./install-common.cjs");
+const { complete: completeModel } = require("./eval-locomo.cjs");
 const { ensureClaudeInstructionsInstalled, ensureClaudeSkillInstalled } = require("./install-claude.cjs");
 
 const execFileAsync = promisify(execFile);
@@ -224,4 +225,210 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
   return records;
 }
 
-module.exports = { NATIVE_MEMORY_GLOB, SYSTEMS, claudeArgs, claudeEnv, parseStream, prepareSandbox, runTimeline, sandboxPaths };
+function cap(text, limit) {
+  return text.length <= limit ? text : `${text.slice(0, limit - 40)}\n[... truncated ${text.length - limit + 40} chars]`;
+}
+
+// Which memory the session actually looked at. Native MEMORY.md and the repo CLAUDE.md are
+// loaded automatically, so they show up in the snapshot instead.
+function recallSignals(toolCalls, paths) {
+  const signals = [];
+  const nativeDir = path.join(paths.configDir, "projects");
+  const add = (signal) => signals.includes(signal) || signals.push(signal);
+
+  for (const { name, input = {} } of toolCalls) {
+    if (name.startsWith("mcp__hippocamp__")) {
+      add(`hippocamp:${name.slice("mcp__hippocamp__".length)}`);
+      continue;
+    }
+
+    const target = String(input.file_path || input.path || input.command || "");
+
+    if (target.includes(nativeDir) || target.includes("~/.claude/projects")) {
+      add("native:read");
+      continue;
+    }
+
+    if (name === "Read" && target.endsWith(".md")) {
+      for (const repo of Object.values(paths.repos)) {
+        const relative = path.relative(repo, target);
+
+        if (!relative.startsWith("..") && !["README.md", "CLAUDE.md"].includes(relative) && !relative.startsWith("node_modules")) {
+          add(`repo-note:${relative}`);
+        }
+      }
+    }
+  }
+
+  return signals;
+}
+
+async function readMarkdownTree(dir, filter = () => true) {
+  const files = [];
+
+  for (const entry of await fs.readdir(dir, { withFileTypes: true, recursive: true }).catch(() => [])) {
+    const file = path.join(entry.parentPath || entry.path, entry.name);
+
+    if (entry.isFile() && entry.name.endsWith(".md") && filter(file)) {
+      files.push(file);
+    }
+  }
+
+  return files.sort();
+}
+
+// Everything the agent could have kept between sessions, for the judge's miss attribution.
+async function memorySnapshot(system, paths, project) {
+  const repo = paths.repos[project];
+  const files = await readMarkdownTree(repo, (file) => !file.includes(`${path.sep}node_modules${path.sep}`) && path.basename(file) !== "README.md");
+
+  if (system === "native") {
+    const projectsDir = path.join(paths.configDir, ...NATIVE_MEMORY_GLOB.slice(0, 1));
+    files.push(...(await readMarkdownTree(projectsDir, (file) => file.includes(`repos-${project}${path.sep}memory${path.sep}`))));
+  }
+
+  if (system === "hippocamp") {
+    files.push(
+      ...(await readMarkdownTree(paths.lagoon, (file) => {
+        const relative = path.relative(paths.lagoon, file);
+        return !relative.startsWith("projects") || relative.startsWith(path.join("projects", project));
+      })),
+    );
+  }
+
+  const parts = [];
+
+  for (const file of files) {
+    parts.push(`=== ${file} ===\n${await fs.readFile(file, "utf8")}`);
+  }
+
+  return cap(parts.join("\n"), 30000);
+}
+
+function transcriptDigest(toolCalls, finalText) {
+  const final = `\nFINAL ANSWER:\n${cap(finalText, 8000)}`;
+  const lines = toolCalls.map(({ name, input }) => `${name}: ${JSON.stringify(input ?? {}).slice(0, 200)}`);
+
+  return `${cap(lines.join("\n"), 40000 - final.length)}${final}`;
+}
+
+async function probeDiff(repo, before, after) {
+  const { stdout } = await git(["diff", before, after, "--", ".", ":!node_modules", ":!*.csv", ":!package-lock.json"], repo);
+  return cap(stdout, 60000);
+}
+
+const JUDGE_PROMPT = `You grade one session of a coding agent that works on a project across many independent sessions.
+Earlier sessions established facts the agent was never reminded of in this session. Decide, for each checklist item,
+whether the agent's work in this session respects the fact.
+
+# Session request
+{request}
+
+# Checklist (item id, check, underlying fact)
+{checklist}
+
+# Diff of this session
+{diff}
+
+# Tool calls and final answer of this session
+{digest}
+
+# Memory the agent had available at the end of the session (repo notes, native memory or Hippocamp)
+{snapshot}
+
+# Memory the session explicitly read
+{signals}
+
+For each item return:
+- "pass": true when the work respects the fact, or when the item is not applicable because the agent did not touch that area and did not contradict it; false otherwise.
+- "source": where the agent got the fact: "code" (visible in the repo code), "repo-note", "native", "hippocamp", "prompt", or "none".
+- "cause": null when pass is true; otherwise "never-stored" (the fact is not in any memory above), "not-recalled" (it is stored but the session never saw it), or "ignored" (the session saw it and acted against it).
+
+Reply with JSON only: {"items":[{"id":"...","pass":true,"source":"...","cause":null}]}`;
+
+function parseJudgeReply(text) {
+  const match = String(text).match(/\{[\s\S]*\}/);
+
+  try {
+    return match ? JSON.parse(match[0]).items || [] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function judgeProbe({ session, facts, diff, digest, snapshot, signals, judgeModel, complete = completeModel }) {
+  const factsById = new Map(facts.map((fact) => [fact.id, fact]));
+  const checklist = session.checklist
+    .map((item) => `- ${item.id}: ${item.check} (fact: ${factsById.get(item.fact)?.statement || item.fact})`)
+    .join("\n");
+  const prompt = JUDGE_PROMPT.replace("{request}", () => session.turns.join("\n\n"))
+    .replace("{checklist}", () => checklist)
+    .replace("{diff}", () => diff || "(no changes)")
+    .replace("{digest}", () => digest || "(none)")
+    .replace("{snapshot}", () => snapshot || "(empty)")
+    .replace("{signals}", () => (signals.length ? signals.join(", ") : "(none)"));
+  const response = await complete(judgeModel, { messages: [{ role: "user", content: prompt }], json: true });
+  const replies = new Map(parseJudgeReply(response.text).map((item) => [item.id, item]));
+
+  return session.checklist.map((item) => {
+    const reply = replies.get(item.id);
+
+    if (!reply || typeof reply.pass !== "boolean") {
+      return { item: item.id, pass: false, source: "none", cause: "judge-missing" };
+    }
+
+    return { item: item.id, pass: reply.pass, source: reply.source || "none", cause: reply.pass ? null : reply.cause || "never-stored" };
+  });
+}
+
+const KINDS = ["state", "decision", "constraint", "asset", "done", "preference"];
+const BANDS = [
+  ["1-2", (distance) => distance <= 2],
+  ["3-5", (distance) => distance >= 3 && distance <= 5],
+  ["6+", (distance) => distance >= 6],
+];
+const CAUSES = ["never-stored", "not-recalled", "ignored"];
+
+function passRate(rows) {
+  return rows.length ? `${Math.round((100 * rows.filter((row) => row.pass).length) / rows.length)}%` : "-";
+}
+
+// rows: judged checklist items tagged with system, kind and distance. records: session records tagged with system.
+function summarize(rows, records) {
+  const header = ["System", "Pass", ...KINDS, ...BANDS.map(([label]) => label), ...CAUSES, "Agent $", "Failed sessions"];
+  const lines = [`| ${header.join(" | ")} |`, `|${header.map(() => "---").join("|")}|`];
+
+  for (const system of SYSTEMS.filter((name) => rows.some((row) => row.system === name))) {
+    const mine = rows.filter((row) => row.system === system);
+    const sessions = records.filter((record) => record.system === system);
+    const cells = [
+      system,
+      passRate(mine),
+      ...KINDS.map((kind) => passRate(mine.filter((row) => row.kind === kind))),
+      ...BANDS.map(([, inBand]) => passRate(mine.filter((row) => inBand(row.distance)))),
+      ...CAUSES.map((cause) => String(mine.filter((row) => row.cause === cause).length)),
+      `$${sessions.reduce((sum, record) => sum + record.costUsd, 0).toFixed(2)}`,
+      String(sessions.filter((record) => !record.ok).length),
+    ];
+    lines.push(`| ${cells.join(" | ")} |`);
+  }
+
+  return lines.join("\n");
+}
+
+module.exports = {
+  NATIVE_MEMORY_GLOB,
+  SYSTEMS,
+  claudeArgs,
+  claudeEnv,
+  judgeProbe,
+  memorySnapshot,
+  parseStream,
+  prepareSandbox,
+  probeDiff,
+  recallSignals,
+  runTimeline,
+  sandboxPaths,
+  summarize,
+  transcriptDigest,
+};
