@@ -235,7 +235,7 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
     const session = dataset.sessions.get(id);
     const repo = paths.repos[session.project];
     const transcriptPath = path.join(systemDir, `${id}.jsonl`);
-    const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), before: await head(repo), after: null };
+    const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), before: null, after: null };
 
     // A transcript without a record means an interrupted attempt: drop its uncommitted work.
     if (fsSync.existsSync(transcriptPath)) {
@@ -243,6 +243,10 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
       await git(["reset", "-q", "--hard"], repo);
       await git(["clean", "-fdq"], repo);
     }
+
+    // The user comes back to main; work a session left on another branch stays there.
+    await git(["checkout", "-q", "main"], repo);
+    record.before = await head(repo);
 
     await fs.rm(transcriptPath, { force: true });
 

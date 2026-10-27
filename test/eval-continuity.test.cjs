@@ -199,6 +199,27 @@ test("a usage limit stops the timeline and the rerun resumes at that session", a
   assert.equal(fsSync.readFileSync(path.join(paths.repos.relay, "work.txt"), "utf8").includes("partial"), false);
 });
 
+test("each session starts on main even if the last one ended on a branch", async (t) => {
+  const { dataset, paths, outDir, calls } = await runnerFixture(t);
+  const branches = [];
+  const spawn = async (command, args, options) => {
+    branches.push(execFileSync("git", ["branch", "--show-current"], { cwd: options.cwd, encoding: "utf8" }).trim());
+
+    if (calls.length === 0) {
+      execFileSync("git", ["checkout", "-q", "-b", "fix/parked"], { cwd: options.cwd });
+    }
+
+    return fakeSpawn(calls)(command, args, options);
+  };
+
+  const records = await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn });
+  const parked = execFileSync("git", ["log", "--format=%s", "fix/parked"], { cwd: paths.repos.relay, encoding: "utf8" });
+
+  assert.deepEqual(branches, ["main", "fix/parked", "main"]);
+  assert.deepEqual(parked.trim().split("\n"), ["S1", "seed"]);
+  assert.equal(records[1].before, execFileSync("git", ["rev-parse", "main~1"], { cwd: paths.repos.relay, encoding: "utf8" }).trim());
+});
+
 test("completed sessions are skipped on rerun", async (t) => {
   const { dataset, paths, outDir, calls } = await runnerFixture(t);
 
