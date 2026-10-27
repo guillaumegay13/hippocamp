@@ -15,3 +15,4 @@ pnpm-debug.log*
 .env.production.local
 .hippocamp/
 CLAUDE.md
+docs/superpowers/
