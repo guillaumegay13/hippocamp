@@ -185,6 +185,7 @@ function parseStream(text) {
     if (event.type === "result") {
       parsed.costUsd += event.total_cost_usd || 0;
       parsed.ok = event.is_error === false && event.subtype === "success";
+      parsed.limited = event.api_error_status === 429;
       parsed.finalText = typeof event.result === "string" ? event.result : "";
     }
   }
@@ -256,6 +257,11 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
 
       await fs.appendFile(transcriptPath, result.stdout.endsWith("\n") || !result.stdout ? result.stdout : `${result.stdout}\n`);
       record.costUsd += parsed.costUsd;
+
+      // A usage or rate limit says nothing about the system: stop without a record so a rerun redoes this session.
+      if (parsed.limited) {
+        throw new Error(`${system} ${id}: hit the usage limit; rerun the same command after it resets`);
+      }
 
       if (result.code !== 0 || !parsed.ok) {
         record.ok = false;

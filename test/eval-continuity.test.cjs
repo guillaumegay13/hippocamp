@@ -178,6 +178,27 @@ test("runTimeline commits and continues after a failed session", async (t) => {
   assert.deepEqual(log.trim().split("\n"), ["S2", "S1", "seed"]);
 });
 
+test("a usage limit stops the timeline and the rerun resumes at that session", async (t) => {
+  const { dataset, paths, outDir, calls } = await runnerFixture(t);
+  const limited = async (command, args, options) => {
+    calls.push(args);
+    await fs.appendFile(path.join(options.cwd, "work.txt"), "partial\n");
+    return { code: 1, stdout: streamLines({ type: "result", subtype: "success", is_error: true, api_error_status: 429, total_cost_usd: 0 }) };
+  };
+
+  await assert.rejects(runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn: limited }), /usage limit/);
+  assert.equal(calls.length, 1);
+  assert.equal(fsSync.existsSync(path.join(outDir, "none", "S1.json")), false);
+
+  const again = [];
+  const records = await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn: fakeSpawn(again) });
+
+  assert.equal(again.length, 3);
+  assert.deepEqual(records.map((record) => record.ok), [true, true]);
+  assert.equal(records[0].retried, true);
+  assert.equal(fsSync.readFileSync(path.join(paths.repos.relay, "work.txt"), "utf8").includes("partial"), false);
+});
+
 test("completed sessions are skipped on rerun", async (t) => {
   const { dataset, paths, outDir, calls } = await runnerFixture(t);
 
