@@ -1,0 +1,27 @@
+bench/continuity/scenarios/ingest/sessions.json
+  s_df17c2731cbf68::t_e04cd66cb57a33 1-94
+bench/continuity/facts.json
+  s_df17c2731cbf68::t_e04cd66cb57a33 1-24
+bench/continuity/scenarios/relay/sessions.json
+  s_df17c2731cbf68::t_e04cd66cb57a33 1-96
+test/continuity-dataset.test.cjs
+  s_df17c2731cbf68::t_4dc2e3abf8f740 122-145
+bench/continuity/timeline.json
+  s_df17c2731cbf68::t_e04cd66cb57a33 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "76ba7fec753c4a3e63d4ff04d15ed4aaaa17a5b4",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
