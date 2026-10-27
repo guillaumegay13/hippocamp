@@ -1,0 +1,32 @@
+scripts/eval-continuity.cjs
+  s_df17c2731cbf68::t_2d4c3e537df919 189-190,211-214,347,502,508,536,555
+  s_df17c2731cbf68::t_eb6322da05e692 11,19-22,430-501,503-507,509-535,537-554,556-630,638,648-654
+test/eval-continuity.test.cjs
+  s_df17c2731cbf68::t_c03d271e02471b 14,316-322
+  s_df17c2731cbf68::t_fd3051e19b9af0 301-315,323
+.npmignore
+  s_df17c2731cbf68::t_28377bdc40a9da 19,23-25
+AGENTS.md
+  s_df17c2731cbf68::t_28377bdc40a9da 32-35,86
+docs/development.md
+  s_df17c2731cbf68::t_28377bdc40a9da 13,25-42
+  s_df17c2731cbf68::t_774d01c73dba63 43
+package.json
+  s_df17c2731cbf68::t_6b0fccec6253b5 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "547d7ba66f2fdad23c7329ed9403a1ad317e1b65",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
