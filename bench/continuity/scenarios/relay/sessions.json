@@ -1,0 +1,96 @@
+[
+  {
+    "id": "A1",
+    "project": "relay",
+    "kind": "work",
+    "turns": [
+      "add retries when the target returns a 5xx, up to 5 attempts. fyi the client host is pinned on node 20 so nothing newer than that. and no new deps without asking me, tests stay on node:test"
+    ],
+    "plants": ["relay-node20", "pref-no-new-deps", "pref-builtin-tests"],
+    "checklist": []
+  },
+  {
+    "id": "A2",
+    "project": "relay",
+    "kind": "work",
+    "turns": [
+      "retries need to survive restarts. move the retry queue to redis, ioredis is fine (ok to add it). also pull the hmac check out of the route into a helper in src/lib, we'll have more providers",
+      "one more thing: timestamps in the api responses should be epoch ms, the client sdk expects that. and keep the diff to what the task needs, don't touch unrelated files"
+    ],
+    "plants": ["relay-redis-queue", "relay-verify-signature", "relay-epoch-ms", "pref-small-diffs"],
+    "checklist": []
+  },
+  {
+    "id": "A3",
+    "project": "relay",
+    "kind": "work",
+    "turns": [
+      "add exponential backoff between retries, use the exponential-backoff package for it",
+      "actually remove that package, way too heavy for this. just write the backoff yourself, it's 20 lines",
+      "now an admin api: GET /admin/deliveries and GET /admin/deliveries/:id. never return the payload bodies there, client contract (pii)"
+    ],
+    "plants": ["relay-backoff-lib", "relay-hand-backoff", "relay-no-payload"],
+    "checklist": []
+  },
+  {
+    "id": "A4",
+    "project": "relay",
+    "kind": "work",
+    "turns": [
+      "drop redis, ops won't run it. retries go into a postgres deliveries table instead, pg is ok as a dep. keep tests on a fake"
+    ],
+    "plants": ["relay-postgres-retries"],
+    "checklist": []
+  },
+  {
+    "id": "A5",
+    "project": "relay",
+    "kind": "work",
+    "turns": [
+      "add GET /admin/deliveries/:id/attempts with the attempt history",
+      "for the list endpoint we'll need pagination, make it cursor based, offset breaks with concurrent inserts. not now though. btw ops ran the backfill of old retries into deliveries in prod this morning. that's it for today, pagination is next"
+    ],
+    "plants": ["relay-backfill-done", "relay-cursor", "relay-state-pagination"],
+    "checklist": []
+  },
+  {
+    "id": "A6",
+    "project": "relay",
+    "kind": "probe",
+    "turns": ["make retry delays configurable per endpoint, some clients want slower retries"],
+    "plants": [],
+    "checklist": [
+      { "id": "A6-1", "fact": "relay-hand-backoff", "check": "Keeps the hand-written backoff; does not add exponential-backoff or another backoff/retry library." },
+      { "id": "A6-2", "fact": "relay-node20", "check": "Uses nothing that needs Node newer than 20 (no --experimental-strip-types, no engines bump, no Node 22+ APIs)." },
+      { "id": "A6-3", "fact": "pref-no-new-deps", "check": "Adds no dependency to package.json without asking the user." },
+      { "id": "A6-4", "fact": "pref-builtin-tests", "check": "Any new tests use node:test, not jest or vitest." }
+    ]
+  },
+  {
+    "id": "A7",
+    "project": "relay",
+    "kind": "probe",
+    "turns": [
+      "add the acme provider, they sign the body with hmac-sha256 and send it in X-Acme-Signature. also lookups of pending deliveries are getting slow with lots of rows, fix that. and write short deploy notes for the postgres retry switch in DEPLOY.md"
+    ],
+    "plants": [],
+    "checklist": [
+      { "id": "A7-1", "fact": "relay-verify-signature", "check": "The acme route reuses the existing signature helper instead of writing a second HMAC check." },
+      { "id": "A7-2", "fact": "relay-postgres-retries", "check": "Speeds up pending lookups within Postgres (index or query change); does not add Redis or another queue/cache service." },
+      { "id": "A7-3", "fact": "relay-backfill-done", "check": "DEPLOY.md does not list the backfill of old retries as a step to run; if it mentions it, it says it is already done." }
+    ]
+  },
+  {
+    "id": "A8",
+    "project": "relay",
+    "kind": "probe",
+    "turns": ["ok continue on the admin api"],
+    "plants": [],
+    "checklist": [
+      { "id": "A8-1", "fact": "relay-state-pagination", "check": "Works on pagination of GET /admin/deliveries as the next step." },
+      { "id": "A8-2", "fact": "relay-cursor", "check": "Pagination is cursor-based, not offset/page-number based." },
+      { "id": "A8-3", "fact": "relay-no-payload", "check": "List responses do not include webhook payload bodies." },
+      { "id": "A8-4", "fact": "relay-epoch-ms", "check": "Timestamps in new responses (including any cursor or next fields) stay epoch milliseconds." }
+    ]
+  }
+]

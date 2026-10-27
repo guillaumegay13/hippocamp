@@ -119,3 +119,27 @@ test("loadDataset reads facts, sessions, timeline and seeds", async () => {
   assert.equal(loaded.seeds.relay, path.join(dir, "scenarios", "relay", "seed"));
   assert.equal(loaded.sessions.get("P1").kind, "probe");
 });
+
+test("shipped dataset is valid and covers the spec", async () => {
+  const path = require("node:path");
+  const dataset = await loadDataset(path.join(__dirname, "..", "bench", "continuity"));
+  const sessions = [...dataset.sessions.values()];
+  const probes = sessions.filter((session) => session.kind === "probe");
+  const factsById = new Map(dataset.facts.map((fact) => [fact.id, fact]));
+  const items = probes.flatMap((probe) => probe.checklist.map((item) => ({ probe, item, fact: factsById.get(item.fact) })));
+  const distances = items.map(({ probe, fact }) => factDistance(dataset.timeline, fact, probe.id));
+
+  assert.deepEqual(validateDataset(dataset), []);
+  assert.equal(sessions.length, 16);
+  assert.equal(probes.length, 6);
+
+  for (const kind of ["state", "decision", "constraint", "asset", "done", "preference"]) {
+    assert.ok(dataset.facts.filter((fact) => fact.kind === kind).length >= 2, kind);
+  }
+
+  assert.ok(dataset.facts.filter((fact) => fact.supersededBy).length >= 3);
+  assert.ok(items.filter(({ probe, fact }) => probe.project === "ingest" && fact.project === "shared").length >= 2);
+  assert.ok(items.some(({ item }) => item.leak));
+  assert.ok(Math.min(...distances) <= 2);
+  assert.ok(Math.max(...distances) >= 5);
+});

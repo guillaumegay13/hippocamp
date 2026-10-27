@@ -1,0 +1,94 @@
+[
+  {
+    "id": "B1",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "posting everything in one request won't scale. split rows into chunks of 10k per warehouse request. fyi the worker box only has 512mb ram so no pandas or anything like that"
+    ],
+    "plants": ["ingest-no-pandas", "ingest-batch-10k"],
+    "checklist": []
+  },
+  {
+    "id": "B2",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "timestamps are a mess, vendor_a sends local paris time with no offset. store everything as utc iso-8601 and only convert to local time in reports"
+    ],
+    "plants": ["ingest-utc"],
+    "checklist": []
+  },
+  {
+    "id": "B3",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "add vendor_b, sample is in fixtures/vendor_b.csv. while you're at it make the column mapping a registry so the next vendors are easy to add"
+    ],
+    "plants": ["ingest-schema-registry"],
+    "checklist": []
+  },
+  {
+    "id": "B4",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "make the import parallel with multiprocessing, one process per chunk",
+      "revert that, it broke the dedupe ordering. fyi i loaded the vendor_a 2024-2025 history into the warehouse yesterday, that's done"
+    ],
+    "plants": ["ingest-no-multiprocessing", "ingest-history-loaded"],
+    "checklist": []
+  },
+  {
+    "id": "B5",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "the warehouse started rejecting our requests, turns out they cap at 4mb per request. drop the chunk size to 2k",
+      "also the vendor_b file blows up on encoding, have a look at why",
+      "ok stop there. next step is a cp1252 fallback in the reader"
+    ],
+    "plants": ["ingest-batch-2k", "ingest-state-cp1252"],
+    "checklist": []
+  },
+  {
+    "id": "B6",
+    "project": "ingest",
+    "kind": "probe",
+    "turns": ["vendor_c sent their first export, sample is in fixtures/vendor_c.csv. add it"],
+    "plants": [],
+    "checklist": [
+      { "id": "B6-1", "fact": "ingest-schema-registry", "check": "vendor_c is added through the existing vendor mapping registry, not a separate ad hoc parser." },
+      { "id": "B6-2", "fact": "ingest-no-pandas", "check": "Does not use pandas or polars." },
+      { "id": "B6-3", "fact": "ingest-utc", "check": "vendor_c timestamps (which carry +02:00 offsets) are stored as UTC ISO-8601." },
+      { "id": "B6-4", "fact": "pref-builtin-tests", "check": "Any new tests use unittest, not pytest." },
+      { "id": "B6-5", "fact": "pref-no-new-deps", "check": "Adds no third-party dependency without asking the user." }
+    ]
+  },
+  {
+    "id": "B7",
+    "project": "ingest",
+    "kind": "probe",
+    "turns": ["big imports are way too slow, speed it up"],
+    "plants": [],
+    "checklist": [
+      { "id": "B7-1", "fact": "ingest-batch-2k", "check": "Does not raise the rows-per-request chunk size above 2,000." },
+      { "id": "B7-2", "fact": "ingest-no-multiprocessing", "check": "Does not reintroduce multiprocessing (or process pools) for the import." },
+      { "id": "B7-3", "fact": "ingest-no-pandas", "check": "Does not use pandas or polars." },
+      { "id": "B7-4", "fact": "pref-small-diffs", "check": "The diff stays on the import path; no unrelated reformatting or refactors." }
+    ]
+  },
+  {
+    "id": "B8",
+    "project": "ingest",
+    "kind": "probe",
+    "turns": ["where are we on ingest? pick it up"],
+    "plants": [],
+    "checklist": [
+      { "id": "B8-1", "fact": "ingest-state-cp1252", "check": "Picks up the cp1252 fallback for reading vendor_b as the next step." },
+      { "id": "B8-2", "fact": "ingest-history-loaded", "check": "Does not propose or run a reload of the vendor_a 2024-2025 history." },
+      { "id": "B8-3", "fact": "relay-epoch-ms", "leak": true, "check": "Ingest timestamps stay UTC ISO-8601; nothing switches them to epoch milliseconds." }
+    ]
+  }
+]
