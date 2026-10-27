@@ -4,7 +4,8 @@ const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { execFile } = require("node:child_process");
+const crypto = require("node:crypto");
+const { execFile, spawn: spawnChild } = require("node:child_process");
 const { promisify } = require("node:util");
 const { prepareLagoon } = require("./install-common.cjs");
 const { ensureClaudeInstructionsInstalled, ensureClaudeSkillInstalled } = require("./install-claude.cjs");
@@ -127,4 +128,100 @@ function claudeArgs({ system, paths, sessionUuid, resume, prompt, budgetUsd }) {
   return args;
 }
 
-module.exports = { NATIVE_MEMORY_GLOB, SYSTEMS, claudeArgs, claudeEnv, prepareSandbox, sandboxPaths };
+// Reads Claude Code's stream-json output. A missing result, an error flag or any subtype
+// other than success (budget cap, max turns) marks the turn as failed.
+function parseStream(text) {
+  const parsed = { costUsd: 0, ok: false, toolCalls: [], finalText: "" };
+
+  for (const line of text.split("\n")) {
+    let event;
+
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (event.type === "assistant") {
+      for (const block of event.message?.content || []) {
+        if (block.type === "tool_use") {
+          parsed.toolCalls.push({ name: block.name, input: block.input });
+        }
+      }
+    }
+
+    if (event.type === "result") {
+      parsed.costUsd += event.total_cost_usd || 0;
+      parsed.ok = event.is_error === false && event.subtype === "success";
+      parsed.finalText = typeof event.result === "string" ? event.result : "";
+    }
+  }
+
+  return parsed;
+}
+
+function spawnClaude(command, args, options) {
+  return new Promise((resolve, reject) => {
+    const child = spawnChild(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function head(repo) {
+  return (await git(["rev-parse", "HEAD"], repo)).stdout.trim();
+}
+
+// Runs the timeline in order, one fresh claude process per session (follow-up turns resume it).
+// Each finished session writes <id>.json last, so a rerun skips it and never commits twice.
+async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = Infinity, spawn = spawnClaude }) {
+  const systemDir = path.join(outDir, system);
+  const records = [];
+
+  await fs.mkdir(systemDir, { recursive: true });
+
+  for (const id of dataset.timeline.slice(0, limit)) {
+    const recordPath = path.join(systemDir, `${id}.json`);
+
+    if (fsSync.existsSync(recordPath)) {
+      records.push(JSON.parse(await fs.readFile(recordPath, "utf8")));
+      continue;
+    }
+
+    const session = dataset.sessions.get(id);
+    const repo = paths.repos[session.project];
+    const transcriptPath = path.join(systemDir, `${id}.jsonl`);
+    const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), before: await head(repo), after: null };
+
+    await fs.rm(transcriptPath, { force: true });
+
+    for (const [index, prompt] of session.turns.entries()) {
+      const args = claudeArgs({ system, paths, sessionUuid: record.sessionUuid, resume: index > 0, prompt, budgetUsd });
+      const result = await spawn("claude", args, { cwd: repo, env: claudeEnv(system, paths) });
+      const parsed = parseStream(result.stdout);
+
+      await fs.appendFile(transcriptPath, result.stdout.endsWith("\n") || !result.stdout ? result.stdout : `${result.stdout}\n`);
+      record.costUsd += parsed.costUsd;
+
+      if (result.code !== 0 || !parsed.ok) {
+        record.ok = false;
+        break;
+      }
+    }
+
+    await git(["add", "-A"], repo);
+    await git(["commit", "-q", "--allow-empty", "-m", id], repo);
+    record.after = await head(repo);
+    await fs.writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+    records.push(record);
+  }
+
+  return records;
+}
+
+module.exports = { NATIVE_MEMORY_GLOB, SYSTEMS, claudeArgs, claudeEnv, parseStream, prepareSandbox, runTimeline, sandboxPaths };
