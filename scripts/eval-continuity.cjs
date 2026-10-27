@@ -42,8 +42,9 @@ function sandboxPaths(runId, system) {
   };
 }
 
+// Background auto-maintenance would keep writing in a sandbox repo after the call returns.
 async function git(args, cwd) {
-  return execFileAsync("git", args, { cwd, env: { ...process.env, ...GIT_IDENTITY }, maxBuffer: 64 * 1024 * 1024 });
+  return execFileAsync("git", ["-c", "gc.auto=0", "-c", "maintenance.auto=false", ...args], { cwd, env: { ...process.env, ...GIT_IDENTITY }, maxBuffer: 64 * 1024 * 1024 });
 }
 
 async function prepareSandbox(dataset, paths, system, { install = true } = {}) {

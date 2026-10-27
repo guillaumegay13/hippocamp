@@ -86,7 +86,7 @@ test("prepareSandbox gives every system the same repo CLAUDE.md", async () => {
     assert.equal(mcp.mcpServers.hippocamp.env.HIPPOCAMP_GLOBAL_ROOT, hippocamp.lagoon);
     assert.ok(!fsSync.existsSync(path.join(sandboxPaths(runId, "native").configDir, "CLAUDE.md")));
   } finally {
-    await fs.rm(path.dirname(sandboxPaths(runId, "none").root), { recursive: true, force: true });
+    await fs.rm(path.dirname(sandboxPaths(runId, "none").root), { recursive: true, force: true, maxRetries: 5 });
   }
 });
 
@@ -136,7 +136,7 @@ async function runnerFixture(t) {
   const calls = [];
 
   await prepareSandbox(dataset, paths, "none", { install: false });
-  t.after(() => Promise.all([fs.rm(seedRoot, { recursive: true, force: true }), fs.rm(path.dirname(paths.root), { recursive: true, force: true })]));
+  t.after(() => Promise.all([fs.rm(seedRoot, { recursive: true, force: true, maxRetries: 5 }), fs.rm(path.dirname(paths.root), { recursive: true, force: true, maxRetries: 5 })]));
 
   return { dataset, paths, outDir, calls };
 }
@@ -225,7 +225,7 @@ test("memorySnapshot reads native memory for its own project only", async (t) =>
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "continuity-snap-"));
   const paths = { ...sandboxPaths("t", "native"), configDir: path.join(root, ".claude"), repos: { relay: path.join(root, "repos", "relay"), ingest: path.join(root, "repos", "ingest") } };
 
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 5 }));
   await fs.mkdir(path.join(paths.configDir, "projects", "-tmp-repos-relay", "memory"), { recursive: true });
   await fs.mkdir(path.join(paths.configDir, "projects", "-tmp-repos-ingest", "memory"), { recursive: true });
   await fs.writeFile(path.join(paths.configDir, "projects", "-tmp-repos-relay", "memory", "MEMORY.md"), "relay uses postgres\n");
