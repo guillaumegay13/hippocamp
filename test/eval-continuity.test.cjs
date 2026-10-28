@@ -21,6 +21,7 @@ const {
   sandboxPaths,
   summarize,
   transcriptDigest,
+  validationSheet,
 } = require("../scripts/eval-continuity.cjs");
 
 const DATASET_DIR = path.join(__dirname, "..", "bench", "continuity");
@@ -334,6 +335,15 @@ test("judge asks for and keeps one line of evidence per item", async () => {
 
   assert.match(prompt, /"evidence"/);
   assert.deepEqual(items.map((item) => item.evidence), ["load.py sets CHUNK_SIZE = 10_000", "no dependency change"]);
+});
+
+test("validationSheet lists each verdict with blank columns for a human grade", () => {
+  const sessions = new Map([["P1", probe]]);
+  const rows = [{ system: "native", probe: "P1", item: "P1-1", fact: "f1", memory: true, pass: false, cause: "never-stored", evidence: 'set "size" to 10,000' }];
+  const lines = validationSheet(rows, { sessions, facts: probeFacts }).trim().split("\n");
+
+  assert.equal(lines[0], "system,probe,item,memory,check,fact,judge_pass,judge_cause,evidence,human_pass,human_note");
+  assert.equal(lines[1], 'native,P1,P1-1,true,Reads Postgres.,Postgres.,false,never-stored,"set ""size"" to 10,000",,');
 });
 
 test("judge reply that is not JSON fails every item", async () => {

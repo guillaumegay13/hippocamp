@@ -506,6 +506,24 @@ function summarize(rows, records) {
   return lines.join("\n");
 }
 
+function csvCell(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// One row per judged item with empty human columns, for checking the judge by hand.
+function validationSheet(rows, { sessions, facts }) {
+  const factsById = new Map(facts.map((fact) => [fact.id, fact]));
+  const header = "system,probe,item,memory,check,fact,judge_pass,judge_cause,evidence,human_pass,human_note";
+  const lines = rows.map((row) => {
+    const check = sessions.get(row.probe).checklist.find((entry) => entry.id === row.item).check;
+    const cells = [row.system, row.probe, row.item, row.memory, check, factsById.get(row.fact)?.statement, row.pass === null ? "n/a" : row.pass, row.cause, row.evidence, "", ""];
+    return cells.map(csvCell).join(",");
+  });
+
+  return `${[header, ...lines].join("\n")}\n`;
+}
+
 function printHelp() {
   console.log(`Hippocamp work continuity eval
 
@@ -724,6 +742,7 @@ async function run(options) {
   const report = `# Work continuity run ${options.run}\n\n${summarize(rows, records)}\n`;
 
   await fs.writeFile(path.join(outDir, "report.md"), report);
+  await fs.writeFile(path.join(outDir, "validation.csv"), validationSheet(rows, dataset));
   console.log(`\n${report}`);
   console.log(`Results: ${outDir}`);
 }
@@ -758,6 +777,7 @@ module.exports = {
   sandboxPaths,
   summarize,
   transcriptDigest,
+  validationSheet,
 };
 
 if (require.main === module) {
