@@ -41,24 +41,17 @@ The same reader reaches 90% with the correct sessions, so the remaining gap is r
 
 ## Work continuity
 
-`npm run eval:continuity` runs real headless Claude Code (`claude-opus-5-5`) through 21 synthetic sessions over two projects, a TypeScript webhook relay and a Python CSV pipeline: 14 work tickets and 7 probe tickets with 28 hidden checks. It runs once with Claude Code's native auto-memory and once with Hippocamp. No prompt asks the agent to look anything up. An Opus judge grades each check from the diff, the tool calls and the memory available when the probe started.
+Preliminary, not yet a result. `npm run eval:continuity` runs real headless Claude Code (`claude-opus-5-5`) through 21 synthetic sessions over two projects, once with Claude Code's native auto-memory and once with Hippocamp. An Opus judge grades 28 hidden checks.
 
-| System | Checks passed | Memory-only checks | Cross-project preferences | Agent cost (API price) |
-| --- | ---: | ---: | ---: | ---: |
-| Claude Code native memory | 24 / 27 | 9 / 12 | 3 / 4 | $7.30 |
-| Hippocamp | 27 / 27 | 12 / 12 | 4 / 4 | $8.93 |
+One development run gave Hippocamp 27 / 27 and native memory 24 / 27. An independent review found this does not yet support a claim:
 
-Memory-only checks cannot be passed from the repo alone. One check had nothing to grade in either run (no new tests were written).
+- It is a single run per system, and the difference is not statistically meaningful.
+- The three cases native missed were added after the first 12 sessions ended in a tie.
+- Hippocamp's install adds `CLAUDE.md` instructions to use memory on every task; native memory got no equivalent instructions.
+- No `none` (no memory) run has checked which items really need memory.
+- Native's misses included acting on its own stale note (a batch size it never updated) and storing a cross-repo preference under one project only. These are real behaviors, but the harness also kept git history uninformative and never answered the agent's offer to save the preference globally.
 
-Native memory missed three checks, all in the Python project:
-
-- It raised the warehouse chunk size back from 2,000 to 10,000 rows. Six sessions earlier, the chunk size had been lowered to 2,000 because the warehouse rejects requests over 4 MB. Native memory never stored that reason.
-- It reported that nothing was in progress, missing that the next step was a cp1252 fallback for one vendor's file. This was never stored either.
-- It did not add a CHANGELOG line. The user had asked for one in every repo, but native memory saved that preference only under the other project.
-
-Hippocamp passed all three. It stored the same facts as events, and in the third case as a global preference. It cost about 22% more because of its memory tool calls.
-
-The first 12 sessions ran first, and both systems passed all 11 of their checks. The rest was added later as an extension of the same run, without redoing those sessions. Two early sessions, one per system, were cut off by a usage limit and rerun; any memory written before the cutoff was kept. This is a single run per system, so treat the gap as a first signal, not a measured rate.
+The harness, checks and protocol are being fixed and frozen before final runs with a `none` baseline and repeated runs per system.
 
 ## Why less text matters
 
