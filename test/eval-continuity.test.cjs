@@ -319,9 +319,21 @@ test("judge output missing items become failures", async () => {
 
   assert.ok(prompt.includes("Reads Postgres.") && prompt.includes("Postgres."));
   assert.deepEqual(items, [
-    { item: "P1-1", pass: true, source: "hippocamp", cause: null },
-    { item: "P1-2", pass: false, source: "none", cause: "judge-missing" },
+    { item: "P1-1", pass: true, source: "hippocamp", cause: null, evidence: "" },
+    { item: "P1-2", pass: false, source: "none", cause: "judge-missing", evidence: "" },
   ]);
+});
+
+test("judge asks for and keeps one line of evidence per item", async () => {
+  let prompt = "";
+  const complete = async (model, request) => {
+    prompt = request.messages[0].content;
+    return { text: '{"items":[{"id":"P1-1","pass":false,"source":"none","cause":"never-stored","evidence":"load.py sets CHUNK_SIZE = 10_000"},{"id":"P1-2","pass":"n/a","evidence":"no dependency change"}]}', usage: {} };
+  };
+  const items = await judgeProbe({ session: probe, facts: probeFacts, diff: "", digest: "", snapshot: "", signals: [], judgeModel: "m", complete });
+
+  assert.match(prompt, /"evidence"/);
+  assert.deepEqual(items.map((item) => item.evidence), ["load.py sets CHUNK_SIZE = 10_000", "no dependency change"]);
 });
 
 test("judge reply that is not JSON fails every item", async () => {
@@ -386,8 +398,8 @@ test("judge n/a items stay out of the pass rate and leak items are framed as mus
 
   assert.ok(prompt.includes("must NOT carry over"));
   assert.deepEqual(items, [
-    { item: "P1-1", pass: null, source: "none", cause: null },
-    { item: "P1-2", pass: false, source: "none", cause: "unknown" },
+    { item: "P1-1", pass: null, source: "none", cause: null, evidence: "" },
+    { item: "P1-2", pass: false, source: "none", cause: "unknown", evidence: "" },
   ]);
 
   const table = summarize(

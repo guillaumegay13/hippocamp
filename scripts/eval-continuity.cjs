@@ -421,8 +421,9 @@ For each item return:
 - "pass": true when the work respects the fact; false when it contradicts it; "n/a" when the session never touched that area, so the item says nothing either way.
 - "source": where the agent got the fact: "code" (visible in the repo code), "repo-note", "native", "hippocamp", "prompt", or "none".
 - "cause": null when pass is true; otherwise "never-stored" (the fact is not in any memory above), "not-recalled" (it is stored but the session never saw it), or "ignored" (the session saw it and acted against it).
+- "evidence": one short sentence naming the diff line, tool call or answer text that decided it, so a person can check the verdict.
 
-Reply with JSON only: {"items":[{"id":"...","pass":true,"source":"...","cause":null}]}`;
+Reply with JSON only: {"items":[{"id":"...","pass":true,"source":"...","cause":null,"evidence":"..."}]}`;
 
 function parseJudgeReply(text) {
   const match = String(text).match(/\{[\s\S]*\}/);
@@ -455,14 +456,14 @@ async function judgeProbe({ session, facts, diff, digest, snapshot, signals, jud
     const reply = replies.get(item.id);
 
     if (reply?.pass === "n/a") {
-      return { item: item.id, pass: null, source: reply.source || "none", cause: null };
+      return { item: item.id, pass: null, source: reply.source || "none", cause: null, evidence: reply.evidence || "" };
     }
 
     if (!reply || typeof reply.pass !== "boolean") {
-      return { item: item.id, pass: false, source: "none", cause: "judge-missing" };
+      return { item: item.id, pass: false, source: "none", cause: "judge-missing", evidence: "" };
     }
 
-    return { item: item.id, pass: reply.pass, source: reply.source || "none", cause: reply.pass ? null : reply.cause || "unknown" };
+    return { item: item.id, pass: reply.pass, source: reply.source || "none", cause: reply.pass ? null : reply.cause || "unknown", evidence: reply.evidence || "" };
   });
 }
 
