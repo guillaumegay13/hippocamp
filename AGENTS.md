@@ -29,7 +29,10 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - `scripts/eval-lagoon.cjs`: read-only retrieval check against real Lagoon cases in `<Lagoon root>/evals/retrieval-cases.json`.
 - `scripts/eval-qa.cjs`: LongMemEval-S answer-accuracy check (reader and grader models) for Hippocamp snippets against the labeled answer sessions.
 - `scripts/eval-retrieval.cjs`: retrieval-only LongMemEval-S check for `searchMemory` against a BM25 reference.
-- `scripts/eval-continuity.cjs`: work continuity benchmark that runs real headless Claude Code through successive sessions per memory system (`none`, `native`, `hippocamp`) in isolated sandboxes and judges probe checklists.
+- `scripts/eval-continuity.cjs`: work continuity benchmark runner and CLI: real headless Claude Code through successive sessions per arm (`cc-none`, `cc-native`, `cc-hippocamp`) in isolated sandboxes, with a frozen run manifest and `--report`.
+- `scripts/continuity-adapters.cjs`: one adapter per benchmark arm, each installed the way a developer has it (Hippocamp through its real installer).
+- `scripts/continuity-judge.cjs`: blind task judge, miss attribution, and the memory-quality judge.
+- `scripts/continuity-report.cjs`: outcome, efficiency and memory-quality tables, pooled over runs, with a probe-level bootstrap.
 - `scripts/continuity-dataset.cjs`: loader and validator for the continuity dataset, including the retrieval-hint check on prompts.
 - `scripts/eval-locomo.cjs`: LoCoMo answer-accuracy check with the MemoryTax protocol; its `complete` model client is shared with the continuity judge.
 - `bench/continuity/`: synthetic continuity dataset: two seed repos, session tickets, planted facts and the run timeline.

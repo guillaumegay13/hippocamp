@@ -398,34 +398,40 @@ async function probeDiff(repo, before, after) {
 function printHelp() {
   console.log(`Hippocamp work continuity eval
 
-Runs real headless Claude Code (${MODEL}) through the 16-session timeline in bench/continuity:
-two synthetic projects, one fresh claude process per session, the repo committed after each.
-Probe sessions are ordinary tickets with hidden checklists; a judge model grades each item and
-labels misses as never stored, stored but not recalled, or recalled but ignored.
+Runs real headless Claude Code (${MODEL}) through the timeline in bench/continuity: synthetic
+projects, one fresh claude process per session, the repo committed after each with the agent's own
+summary as the message. If a session ends with an offer or question, the user answers once with
+"yes, go ahead". Probe sessions are ordinary tickets with hidden checklists. A blind judge grades
+each item; a second call explains each miss; a third grades what each memory stored.
 
-Systems:
-  none        no memory; the repo still carries over between sessions
-  native      Claude Code auto-memory (CLAUDE.md and the memory folder)
-  hippocamp   Hippocamp MCP on a throwaway Lagoon, installer guidance in the user CLAUDE.md
+Arms (each installed the way a developer has it):
+  cc-none        no memory; auto-memory off
+  cc-native      Claude Code defaults: auto-memory on
+  cc-hippocamp   Hippocamp through its real installer; auto-memory off
+  (old names none, native and hippocamp still work)
 
-Every run is isolated: sandboxes under the OS temp dir with their own HOME and CLAUDE_CONFIG_DIR.
-Results go to .context/continuity/<run>/. Reruns with the same --run skip finished sessions.
+Sandboxes live in $HIPPOCAMP_BENCH_DIR (default ~/.cache/hippocamp-bench), each with its own HOME
+and CLAUDE_CONFIG_DIR. Results go to .context/continuity/<run>/. Reruns with the same --run skip
+finished sessions; a run is frozen by manifest.json (dataset, harness, model, CLI version).
 
 Usage:
   npm run eval:continuity -- [options]
 
 Options:
-  --systems LIST   Comma-separated systems. Default: ${SYSTEMS.join(",")}
+  --systems LIST   Comma-separated arms. Default: ${SYSTEMS.join(",")}
   --run ID         Run id, also the results folder. Default: today's date
   --limit N        Run only the first N timeline sessions
   --budget USD     --max-budget-usd per claude call. Default: 3
   --judge MODEL    Judge model. Default: ${MODEL}
   --dry-run        Validate the dataset and print the run size and cost range; spawns nothing
+  --report RUNS    Rebuild the report for comma-separated finished runs, pooled; spawns nothing
+  --force-manifest Resume a run whose manifest changed, recording the change (development only)
   --help           Show this help
 
 Environment:
   CLAUDE_CODE_OAUTH_TOKEN   Claude subscription token from \`claude setup-token\`; preferred
   ANTHROPIC_API_KEY         used only when no subscription token is set
+  HIPPOCAMP_BENCH_DIR       where sandboxes live; default ~/.cache/hippocamp-bench
   OPENAI_API_KEY            only for a GPT judge
 `);
 }
