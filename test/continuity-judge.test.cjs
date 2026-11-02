@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { ADAPTERS } = require("../scripts/continuity-adapters.cjs");
-const { attributeMisses, blindDigest, judgeProbe } = require("../scripts/continuity-judge.cjs");
+const { attributeMisses, blindDigest, judgeMemory, judgeProbe, memoryQuality } = require("../scripts/continuity-judge.cjs");
 
 const root = "/bench/r1/cc-hippocamp";
 const paths = {
@@ -75,4 +75,30 @@ test("attributeMisses maps an unknown cause to unknown", async () => {
 
   assert.equal(cause.cause, "unknown");
   assert.equal(path.basename("x"), "x");
+});
+
+test("memoryQuality computes coverage over live facts and precision over entries", () => {
+  const live = [{ id: "a" }, { id: "b", supersededBy: "c" }, { id: "c" }];
+  const labels = [{ label: "fact-current", fact: "a" }, { label: "fact-stale", fact: "b" }, { label: "noise" }, { label: "useful-other" }];
+
+  assert.deepEqual(memoryQuality(labels, live), { entries: 4, coverage: 0.5, precision: 0.5, stale: 1, noise: 1, duplicates: 0 });
+  assert.deepEqual(memoryQuality([], live), { entries: 0, coverage: 0, precision: null, stale: 0, noise: 0, duplicates: 0 });
+});
+
+test("judgeMemory hides file paths from the judge and labels every entry", async () => {
+  let prompt = "";
+  const entries = [
+    { file: "/x/lagoon/projects/relay/events/a.md", text: "retries in postgres" },
+    { file: "/x/sandbox-home/.claude/projects/s/memory/b.md", text: "fixed a typo" },
+  ];
+  const complete = async (model, request) => {
+    prompt = request.messages[0].content;
+    return { text: '{"items":[{"id":"m1","label":"fact-current","fact":"f1"},{"id":"m2","label":"noise"}]}' };
+  };
+  const result = await judgeMemory({ facts, entries, judgeModel: "m", complete });
+
+  assert.ok(prompt.includes("m1") && prompt.includes("m2") && prompt.includes("retries in postgres"));
+  assert.ok(!/lagoon|\.claude|hippocamp/i.test(prompt), prompt);
+  assert.deepEqual(result.labels.map((entry) => entry.label), ["fact-current", "noise"]);
+  assert.equal(result.quality.noise, 1);
 });

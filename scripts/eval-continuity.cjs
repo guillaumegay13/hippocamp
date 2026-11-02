@@ -9,7 +9,7 @@ const { execFile, spawn: spawnChild } = require("node:child_process");
 const { promisify } = require("node:util");
 const { factDistance, loadDataset, validateDataset } = require("./continuity-dataset.cjs");
 const { complete: completeModel } = require("./eval-locomo.cjs");
-const { CAUSES, attributeMisses, blindDigest, judgeProbe, transcriptDigest } = require("./continuity-judge.cjs");
+const { CAUSES, attributeMisses, blindDigest, judgeMemory, judgeProbe, transcriptDigest } = require("./continuity-judge.cjs");
 const { ADAPTERS, ARMS, AUTO_LOADED, GIT_IDENTITY, MODEL, resolveArm } = require("./continuity-adapters.cjs");
 
 const execFileAsync = promisify(execFile);
@@ -692,6 +692,29 @@ async function run(options) {
 
   for (const { system, paths, records } of perSystem) {
     await judgeSystem({ dataset, system, paths, outDir, records, judge: options.judge, judgedPath, done, complete });
+  }
+
+  // What each memory holds at the end of the run, judged blind against the facts planted so far.
+  const planted = dataset.facts.filter((fact) => timeline.includes(fact.plantedIn));
+
+  for (const { system, paths } of perSystem) {
+    const qualityPath = path.join(outDir, system, "memory-quality.json");
+
+    if (fsSync.existsSync(qualityPath)) {
+      continue;
+    }
+
+    const entries = await ADAPTERS[resolveArm(system)].exportMemory(paths, Object.keys(paths.repos)[0]);
+    const finalDir = path.join(outDir, system, "memory-final");
+    await fs.rm(finalDir, { recursive: true, force: true });
+    await fs.mkdir(finalDir, { recursive: true });
+
+    for (const [index, entry] of entries.entries()) {
+      await fs.writeFile(path.join(finalDir, `m${index + 1}.md`), `<!-- ${path.relative(paths.root, entry.file)} -->\n${entry.text}`);
+    }
+
+    const result = entries.length ? await judgeMemory({ facts: planted, entries, judgeModel: options.judge, complete }) : { labels: [], quality: null };
+    await fs.writeFile(qualityPath, `${JSON.stringify(result, null, 2)}\n`);
   }
 
   const rows = (await readJsonl(judgedPath)).filter((row) => options.systems.includes(row.system) && timeline.includes(row.probe));

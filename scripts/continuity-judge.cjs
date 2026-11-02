@@ -145,4 +145,54 @@ async function attributeMisses({ session, facts, misses, snapshot, digest, judge
   });
 }
 
-module.exports = { CAUSES, attributeMisses, blindDigest, judgeProbe, parseJudgeReply, transcriptDigest };
+const LABELS = ["fact-current", "fact-stale", "useful-other", "noise", "duplicate"];
+
+// coverage: live (not superseded) facts stored in their current version. precision: entries worth keeping.
+function memoryQuality(labels, facts) {
+  const live = facts.filter((fact) => !fact.supersededBy);
+  const covered = new Set(labels.filter((entry) => entry.label === "fact-current").map((entry) => entry.fact));
+  const count = (label) => labels.filter((entry) => entry.label === label).length;
+
+  return {
+    entries: labels.length,
+    coverage: live.length ? live.filter((fact) => covered.has(fact.id)).length / live.length : 0,
+    precision: labels.length ? (count("fact-current") + count("useful-other")) / labels.length : null,
+    stale: count("fact-stale"),
+    noise: count("noise"),
+    duplicates: count("duplicate"),
+  };
+}
+
+const MEMORY_PROMPT = `You audit what a coding agent's memory system stored over a multi-session project.
+Below are the project's facts (some later replaced by others) and every memory entry, anonymized as m1, m2, ...
+
+# Facts (id, statement, replaced by)
+{facts}
+
+# Memory entries
+{entries}
+
+Label every entry:
+- "fact-current": states a fact above in its current version (give its id in "fact");
+- "fact-stale": states a replaced fact, or an old version, without saying it was replaced (give the old fact's id);
+- "useful-other": not a listed fact, but something a later session would reasonably need;
+- "noise": nothing a later decision depends on (routine work logs, restated code, chatter);
+- "duplicate": repeats an earlier entry's content.
+
+Reply with JSON only: {"items":[{"id":"m1","label":"...","fact":"..."}]}`;
+
+async function judgeMemory({ facts, entries, judgeModel, complete }) {
+  const factList = facts.map((fact) => `- ${fact.id}: ${fact.statement}${fact.supersededBy ? ` (replaced by ${fact.supersededBy})` : ""}`).join("\n");
+  const entryList = entries.map((entry, index) => `=== m${index + 1} ===\n${cap(entry.text, 4000)}`).join("\n");
+  const prompt = MEMORY_PROMPT.replace("{facts}", () => factList).replace("{entries}", () => cap(entryList, 120000));
+  const response = await complete(judgeModel, { messages: [{ role: "user", content: prompt }], json: true });
+  const replies = new Map(parseJudgeReply(response.text).map((item) => [item.id, item]));
+  const labels = entries.map((entry, index) => {
+    const reply = replies.get(`m${index + 1}`);
+    return { id: `m${index + 1}`, file: entry.file, label: LABELS.includes(reply?.label) ? reply.label : "unlabeled", fact: reply?.fact || null };
+  });
+
+  return { labels, quality: memoryQuality(labels, facts), prompt, reply: response.text };
+}
+
+module.exports = { CAUSES, judgeMemory, memoryQuality, attributeMisses, blindDigest, judgeProbe, parseJudgeReply, transcriptDigest };
