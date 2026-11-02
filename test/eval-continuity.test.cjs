@@ -426,8 +426,8 @@ test("judge output missing items become failures", async () => {
 
   assert.ok(prompt.includes("Reads Postgres.") && prompt.includes("Postgres."));
   assert.deepEqual(items, [
-    { item: "P1-1", pass: true, source: "hippocamp", cause: null, evidence: "" },
-    { item: "P1-2", pass: false, source: "none", cause: "judge-missing", evidence: "" },
+    { item: "P1-1", pass: true, evidence: "" },
+    { item: "P1-2", pass: false, evidence: "", cause: "judge-missing" },
   ]);
 });
 
@@ -514,8 +514,8 @@ test("judge n/a items stay out of the pass rate and leak items are framed as mus
 
   assert.ok(prompt.includes("must NOT carry over"));
   assert.deepEqual(items, [
-    { item: "P1-1", pass: null, source: "none", cause: null, evidence: "" },
-    { item: "P1-2", pass: false, source: "none", cause: "unknown", evidence: "" },
+    { item: "P1-1", pass: null, evidence: "" },
+    { item: "P1-2", pass: false, evidence: "" },
   ]);
 
   const table = summarize(

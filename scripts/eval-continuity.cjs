@@ -9,6 +9,7 @@ const { execFile, spawn: spawnChild } = require("node:child_process");
 const { promisify } = require("node:util");
 const { factDistance, loadDataset, validateDataset } = require("./continuity-dataset.cjs");
 const { complete: completeModel } = require("./eval-locomo.cjs");
+const { CAUSES, attributeMisses, blindDigest, judgeProbe, transcriptDigest } = require("./continuity-judge.cjs");
 const { ADAPTERS, ARMS, AUTO_LOADED, GIT_IDENTITY, MODEL, resolveArm } = require("./continuity-adapters.cjs");
 
 const execFileAsync = promisify(execFile);
@@ -388,93 +389,9 @@ async function memorySnapshot(system, paths, project) {
   return cap(parts.join("\n"), 30000);
 }
 
-function transcriptDigest(toolCalls, finalText) {
-  const final = `\nFINAL ANSWER:\n${cap(finalText, 8000)}`;
-  // Memory tools and Markdown reads keep a slice of their result, so the judge can tell not-recalled from ignored.
-  const lines = toolCalls.map(({ name, input, result }) => {
-    const line = `${name}: ${JSON.stringify(input ?? {}).slice(0, 200)}`;
-    const shown = result && (name.startsWith("mcp__") || String(input?.file_path || "").endsWith(".md"));
-    return shown ? `${line}\n  -> ${result.slice(0, 1500).replace(/\n/g, "\n     ")}` : line;
-  });
-
-  return `${cap(lines.join("\n"), 40000 - final.length)}${final}`;
-}
-
 async function probeDiff(repo, before, after) {
   const { stdout } = await git(["diff", before, after, "--", ".", ":!node_modules", ":!*.csv", ":!package-lock.json"], repo);
   return cap(stdout, 60000);
-}
-
-const JUDGE_PROMPT = `You grade one session of a coding agent that works on a project across many independent sessions.
-Earlier sessions established facts the agent was never reminded of in this session. Decide, for each checklist item,
-whether the agent's work in this session respects the fact.
-
-# Session request
-{request}
-
-# Checklist (item id, check, underlying fact)
-{checklist}
-
-# Diff of this session
-{diff}
-
-# Tool calls and final answer of this session
-{digest}
-
-# Memory available when the session started (repo notes, native memory or Hippocamp)
-{snapshot}
-
-# Memory the session explicitly read
-{signals}
-
-For each item return:
-- "pass": true when the work respects the fact; false when it contradicts it; "n/a" when the session never touched that area, so the item says nothing either way.
-- "source": where the agent got the fact: "code" (visible in the repo code), "repo-note", "native", "hippocamp", "prompt", or "none".
-- "cause": null when pass is true; otherwise "never-stored" (the fact is not in any memory above), "not-recalled" (it is stored but the session never saw it), or "ignored" (the session saw it and acted against it).
-- "evidence": one short sentence naming the diff line, tool call or answer text that decided it, so a person can check the verdict.
-
-Reply with JSON only: {"items":[{"id":"...","pass":true,"source":"...","cause":null,"evidence":"..."}]}`;
-
-function parseJudgeReply(text) {
-  const match = String(text).match(/\{[\s\S]*\}/);
-
-  try {
-    return match ? JSON.parse(match[0]).items || [] : [];
-  } catch {
-    return [];
-  }
-}
-
-async function judgeProbe({ session, facts, diff, digest, snapshot, signals, judgeModel, complete = completeModel }) {
-  const factsById = new Map(facts.map((fact) => [fact.id, fact]));
-  const checklist = session.checklist
-    .map((item) => {
-      const statement = factsById.get(item.fact)?.statement || item.fact;
-      return `- ${item.id}: ${item.check} (${item.leak ? `must NOT carry over from another project: ${statement}` : `fact: ${statement}`})`;
-    })
-    .join("\n");
-  const prompt = JUDGE_PROMPT.replace("{request}", () => session.turns.join("\n\n"))
-    .replace("{checklist}", () => checklist)
-    .replace("{diff}", () => diff || "(no changes)")
-    .replace("{digest}", () => digest || "(none)")
-    .replace("{snapshot}", () => snapshot || "(empty)")
-    .replace("{signals}", () => (signals.length ? signals.join(", ") : "(none)"));
-  const response = await complete(judgeModel, { messages: [{ role: "user", content: prompt }], json: true });
-  const replies = new Map(parseJudgeReply(response.text).map((item) => [item.id, item]));
-
-  return session.checklist.map((item) => {
-    const reply = replies.get(item.id);
-
-    if (reply?.pass === "n/a") {
-      return { item: item.id, pass: null, source: reply.source || "none", cause: null, evidence: reply.evidence || "" };
-    }
-
-    if (!reply || typeof reply.pass !== "boolean") {
-      return { item: item.id, pass: false, source: "none", cause: "judge-missing", evidence: "" };
-    }
-
-    return { item: item.id, pass: reply.pass, source: reply.source || "none", cause: reply.pass ? null : reply.cause || "unknown", evidence: reply.evidence || "" };
-  });
 }
 
 const KINDS = ["state", "decision", "constraint", "asset", "done", "preference"];
@@ -483,7 +400,6 @@ const BANDS = [
   ["3-5", (distance) => distance >= 3 && distance <= 5],
   ["6+", (distance) => distance >= 6],
 ];
-const CAUSES = ["never-stored", "not-recalled", "ignored"];
 
 // N/A items (pass === null) count in neither direction.
 function passRate(rows) {
@@ -669,17 +585,40 @@ async function judgeSystem({ dataset, system, paths, outDir, records, judge, jud
       exchange.reply = response.text;
       return response;
     };
-    const signals = recallSignals(stream.toolCalls, paths);
+    const adapter = ADAPTERS[resolveArm(system)];
     const items = await judgeProbe({
       session,
       facts: dataset.facts,
       diff,
-      digest: transcriptDigest(stream.toolCalls, stream.finalText),
-      snapshot: await fs.readFile(path.join(systemDir, `${record.id}.snapshot.md`), "utf8").catch(() => ""),
-      signals,
+      digest: blindDigest(stream.toolCalls, stream.finalText, { adapter, paths }),
       judgeModel: judge,
       complete: recording,
     });
+    const misses = items.filter((item) => item.pass === false && !item.cause).map((item) => item.item);
+
+    // Attribution sees the memory and the real tool names; it runs only after the blind verdicts are fixed.
+    if (misses.length) {
+      const attribution = {};
+      const causes = await attributeMisses({
+        session,
+        facts: dataset.facts,
+        misses,
+        snapshot: await fs.readFile(path.join(systemDir, `${record.id}.snapshot.md`), "utf8").catch(() => ""),
+        digest: transcriptDigest(stream.toolCalls, stream.finalText),
+        judgeModel: judge,
+        complete: async (model, request) => {
+          attribution.prompt = request.messages[0].content;
+          const response = await complete(model, request);
+          attribution.reply = response.text;
+          return response;
+        },
+      });
+      exchange.attribution = attribution;
+
+      for (const { item, cause, source } of causes) {
+        Object.assign(items.find((entry) => entry.item === item), { cause, source });
+      }
+    }
 
     await fs.writeFile(path.join(systemDir, `${record.id}.diff`), diff);
     await fs.writeFile(path.join(systemDir, `${record.id}.judge.json`), `${JSON.stringify(exchange, null, 2)}\n`);
@@ -687,7 +626,7 @@ async function judgeSystem({ dataset, system, paths, outDir, records, judge, jud
     for (const item of items) {
       const checklistItem = session.checklist.find((entry) => entry.id === item.item);
       const fact = factsById.get(checklistItem.fact);
-      rows.push({ system, probe: record.id, ...item, fact: fact.id, kind: fact.kind, distance: factDistance(dataset.timeline, fact, record.id), leak: Boolean(checklistItem.leak), memory: Boolean(checklistItem.memory), signals });
+      rows.push({ system, probe: record.id, cause: null, source: null, ...item, fact: fact.id, kind: fact.kind, distance: factDistance(dataset.timeline, fact, record.id), leak: Boolean(checklistItem.leak), memory: Boolean(checklistItem.memory) });
     }
 
     await fs.appendFile(judgedPath, rows.filter((row) => row.probe === record.id).map((row) => `${JSON.stringify(row)}\n`).join(""));
