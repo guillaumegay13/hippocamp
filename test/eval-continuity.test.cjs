@@ -9,6 +9,7 @@ const { ADAPTERS } = require("../scripts/continuity-adapters.cjs");
 const { execFileSync } = require("node:child_process");
 const {
   assertSandboxIntact,
+  checkManifest,
   benchRoot,
   claudeArgs,
   claudeEnv,
@@ -21,6 +22,7 @@ const {
   parseStream,
   prepareSandbox,
   recallSignals,
+  runManifest,
   runTimeline,
   sandboxPaths,
   summarize,
@@ -334,6 +336,45 @@ test("a retried session restores memory dirs to their state before the attempt",
   await runTimeline({ dataset, system: "none", adapter, paths, outDir, budgetUsd: 3, spawn: observing });
 
   assert.deepEqual(seen[0], { a: true, x: false, absent: false });
+});
+
+test("runManifest ignores docs and tests but tracks the dataset and harness", async (t) => {
+  const repo = await fs.mkdtemp(path.join(os.tmpdir(), "manifest-"));
+  const datasetDir = path.join(repo, "bench", "continuity");
+  t.after(() => fs.rm(repo, { recursive: true, force: true }));
+
+  await fs.mkdir(path.join(datasetDir, "scenarios", "relay"), { recursive: true });
+  await fs.mkdir(path.join(repo, "scripts"), { recursive: true });
+  await fs.mkdir(path.join(repo, "docs"), { recursive: true });
+  await fs.writeFile(path.join(datasetDir, "facts.json"), "[]");
+  await fs.writeFile(path.join(datasetDir, "scenarios", "relay", "sessions.json"), "[]");
+  await fs.writeFile(path.join(repo, "scripts", "eval-continuity.cjs"), "// v1");
+  const options = { repoRoot: repo, datasetDir, judgeModel: "m", budgetUsd: 3, versions: { claude: "1" } };
+  const first = await runManifest(options);
+
+  await fs.writeFile(path.join(repo, "docs", "x.md"), "edit");
+  assert.deepEqual(await runManifest(options), first);
+
+  await fs.appendFile(path.join(datasetDir, "scenarios", "relay", "sessions.json"), " ");
+  assert.notEqual((await runManifest(options)).datasetHash, first.datasetHash);
+
+  await fs.writeFile(path.join(repo, "scripts", "eval-continuity.cjs"), "// v2");
+  assert.notEqual((await runManifest(options)).harnessHash, first.harnessHash);
+});
+
+test("checkManifest writes the first manifest and refuses a different one unless forced", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "manifest-run-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const manifest = { datasetHash: "d", harnessHash: "h", model: "m", judgeModel: "j", budgetUsd: 3, versions: { claude: "1" } };
+
+  await checkManifest(dir, "r1", manifest);
+  await checkManifest(dir, "r1", manifest);
+  await assert.rejects(checkManifest(dir, "r1", { ...manifest, versions: { claude: "2" } }), /run r1 was started with a different versions/);
+
+  await checkManifest(dir, "r1", { ...manifest, versions: { claude: "2" } }, { force: true });
+  const saved = JSON.parse(await fs.readFile(path.join(dir, "manifest.json"), "utf8"));
+  assert.equal(saved.changes.length, 1);
+  assert.equal(saved.versions.claude, "1");
 });
 
 test("completed sessions are skipped on rerun", async (t) => {

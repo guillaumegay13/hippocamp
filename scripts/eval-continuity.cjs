@@ -493,6 +493,7 @@ function parseArgs(argv) {
     budget: 3,
     judge: MODEL,
     dryRun: false,
+    forceManifest: false,
     help: false,
   };
 
@@ -509,6 +510,8 @@ function parseArgs(argv) {
 
     if (arg === "--help" || arg === "-h") {
       options.help = true;
+    } else if (arg === "--force-manifest") {
+      options.forceManifest = true;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
     } else if (arg === "--systems") {
@@ -537,6 +540,68 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+// Everything that changes what a run measures. Docs and tests are left out on purpose.
+const HARNESS_FILES = [
+  "scripts/eval-continuity.cjs",
+  "scripts/continuity-adapters.cjs",
+  "scripts/continuity-judge.cjs",
+  "scripts/continuity-dataset.cjs",
+  "scripts/install-claude.cjs",
+  "scripts/install-common.cjs",
+  "scripts/hippocamp-mcp.cjs",
+  "scripts/hippocamp-memory.cjs",
+  "skills/hippocamp-memory/SKILL.md",
+];
+
+async function hashFiles(files) {
+  const hash = crypto.createHash("sha256");
+
+  for (const file of [...files].sort()) {
+    hash.update(file).update("\0").update(await fs.readFile(file).catch(() => "")).update("\0");
+  }
+
+  return hash.digest("hex").slice(0, 16);
+}
+
+async function runManifest({ repoRoot = REPO_ROOT, datasetDir = DATASET_DIR, judgeModel, budgetUsd, versions }) {
+  const datasetFiles = (await fs.readdir(datasetDir, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(entry.parentPath || entry.path, entry.name));
+
+  return {
+    datasetHash: await hashFiles(datasetFiles.map((file) => path.relative(repoRoot, file)).map((file) => path.join(repoRoot, file))),
+    harnessHash: await hashFiles(HARNESS_FILES.map((file) => path.join(repoRoot, file))),
+    model: MODEL,
+    judgeModel,
+    budgetUsd,
+    versions,
+  };
+}
+
+// A run is frozen at its first start; resuming or extending it with anything different is refused.
+async function checkManifest(outDir, runId, manifest, { force = false } = {}) {
+  const file = path.join(outDir, "manifest.json");
+
+  if (!fsSync.existsSync(file)) {
+    await fs.writeFile(file, `${JSON.stringify(manifest, null, 2)}\n`);
+    return;
+  }
+
+  const saved = JSON.parse(await fs.readFile(file, "utf8"));
+  const changed = Object.keys(manifest).filter((key) => JSON.stringify(saved[key]) !== JSON.stringify(manifest[key]));
+
+  if (!changed.length) {
+    return;
+  }
+
+  if (!force) {
+    throw new Error(`run ${runId} was started with a different ${changed.join(", ")}; start a new --run`);
+  }
+
+  saved.changes = [...(saved.changes || []), { at: new Date().toISOString(), keys: changed, now: Object.fromEntries(changed.map((key) => [key, manifest[key]])) }];
+  await fs.writeFile(file, `${JSON.stringify(saved, null, 2)}\n`);
 }
 
 async function readJsonl(file) {
@@ -658,6 +723,8 @@ async function run(options) {
   const outDir = path.join(RESULTS_DIR, options.run);
   const judgedPath = path.join(outDir, "judged.jsonl");
   await fs.mkdir(outDir, { recursive: true });
+  const claudeVersion = (await execFileAsync("claude", ["--version"])).stdout.trim();
+  await checkManifest(outDir, options.run, await runManifest({ judgeModel: options.judge, budgetUsd: options.budget, versions: { claude: claudeVersion } }), { force: options.forceManifest });
 
   // Systems run side by side; sessions within a system stay strictly in timeline order.
   // allSettled: one system failing must not exit while the others have claude mid-turn.
@@ -742,6 +809,7 @@ module.exports = {
   assertSandboxIntact,
   benchRoot,
   SYSTEMS,
+  checkManifest,
   claudeArgs,
   claudeEnv,
   commitMessage,
@@ -754,6 +822,7 @@ module.exports = {
   prepareSandbox,
   probeDiff,
   recallSignals,
+  runManifest,
   runTimeline,
   sessionFingerprint,
   sandboxPaths,
