@@ -7,29 +7,18 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { execFile, spawn: spawnChild } = require("node:child_process");
 const { promisify } = require("node:util");
-const { prepareLagoon } = require("./install-common.cjs");
 const { factDistance, loadDataset, validateDataset } = require("./continuity-dataset.cjs");
 const { complete: completeModel } = require("./eval-locomo.cjs");
-const { ensureClaudeInstructionsInstalled, ensureClaudeSkillInstalled } = require("./install-claude.cjs");
+const { ADAPTERS, ARMS, AUTO_LOADED, GIT_IDENTITY, MODEL, resolveArm } = require("./continuity-adapters.cjs");
 
 const execFileAsync = promisify(execFile);
 
 const REPO_ROOT = path.resolve(__dirname, "..");
-const MODEL = "claude-opus-5-5";
 const DATASET_DIR = path.join(REPO_ROOT, "bench", "continuity");
 const RESULTS_DIR = path.join(REPO_ROOT, ".context", "continuity");
 // Rough $ per Opus session, before the smoke run measures it.
 const SESSION_COST_RANGE = [0.3, 1.5];
-const SYSTEMS = ["none", "native", "hippocamp"];
-// Native auto-memory lands in <CLAUDE_CONFIG_DIR>/projects/<cwd slug>/memory/*.md (checked live
-// with claude 2.1.311): MEMORY.md is the index Claude Code loads, the other files hold one memory each.
-const NATIVE_MEMORY_GLOB = ["projects", "*", "memory"];
-const GIT_IDENTITY = {
-  GIT_AUTHOR_NAME: "Bench",
-  GIT_AUTHOR_EMAIL: "bench@example.com",
-  GIT_COMMITTER_NAME: "Bench",
-  GIT_COMMITTER_EMAIL: "bench@example.com",
-};
+const SYSTEMS = ARMS;
 
 // Sandboxes live outside this repo, because Claude Code loads CLAUDE.md from parent folders and a
 // sandbox inside the repo would see Hippocamp's own guidance. They also stay out of the OS temp dir,
@@ -60,7 +49,7 @@ async function git(args, cwd) {
   return execFileAsync("git", ["-c", "gc.auto=0", "-c", "maintenance.auto=false", ...args], { cwd, env: { ...process.env, ...GIT_IDENTITY }, maxBuffer: 64 * 1024 * 1024 });
 }
 
-async function prepareSandbox(dataset, paths, system, { install = true } = {}) {
+async function prepareSandbox(dataset, paths, system, { install = true, adapterSpawn } = {}) {
   const marker = path.join(paths.root, ".prepared");
 
   if (fsSync.existsSync(marker)) {
@@ -82,22 +71,7 @@ async function prepareSandbox(dataset, paths, system, { install = true } = {}) {
     await git(["commit", "-q", "-m", "seed"], repo);
   }
 
-  if (system === "hippocamp") {
-    await prepareLagoon(paths.lagoon);
-    await ensureClaudeInstructionsInstalled({ claudeHome: paths.configDir });
-    await ensureClaudeSkillInstalled({ claudeHome: paths.configDir, repoRoot: REPO_ROOT });
-
-    for (const [key, value] of [["user.name", GIT_IDENTITY.GIT_AUTHOR_NAME], ["user.email", GIT_IDENTITY.GIT_AUTHOR_EMAIL]]) {
-      await git(["config", key, value], paths.lagoon);
-    }
-
-    const server = {
-      command: process.execPath,
-      args: [path.join(REPO_ROOT, "scripts", "hippocamp-mcp.cjs")],
-      env: { HIPPOCAMP_GLOBAL_ROOT: paths.lagoon, ...GIT_IDENTITY },
-    };
-    await fs.writeFile(paths.mcpConfig, `${JSON.stringify({ mcpServers: { hippocamp: server } }, null, 2)}\n`);
-  }
+  await ADAPTERS[resolveArm(system)].prepare(paths, { spawn: adapterSpawn });
 
   await fs.writeFile(marker, `${new Date().toISOString()}\n`);
 }
@@ -112,53 +86,13 @@ async function assertSandboxIntact(paths, systemDir) {
 }
 
 function claudeEnv(system, paths, baseEnv = process.env) {
-  const env = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => key === "CLAUDE_CODE_OAUTH_TOKEN" || !/^(HIPPOCAMP_|CLAUDE_)/.test(key)));
-
-  // A subscription token (claude setup-token) wins: Claude Code would otherwise bill the API key.
-  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
-    delete env.ANTHROPIC_API_KEY;
-  }
-
-  Object.assign(env, GIT_IDENTITY, { HOME: paths.home, CLAUDE_CONFIG_DIR: paths.configDir });
-
-  if (system !== "native") {
-    env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
-  }
-
-  if (system === "hippocamp") {
-    env.HIPPOCAMP_GLOBAL_ROOT = paths.lagoon;
-  }
-
-  return env;
+  return ADAPTERS[resolveArm(system)].env(paths, baseEnv);
 }
 
-function claudeArgs({ system, paths, sessionUuid, resume, prompt, budgetUsd }) {
-  const args = [
-    "-p",
-    prompt,
-    "--model",
-    MODEL,
-    "--output-format",
-    "stream-json",
-    "--verbose",
-    "--permission-mode",
-    "bypassPermissions",
-    "--strict-mcp-config",
-    "--max-budget-usd",
-    String(budgetUsd),
-    resume ? "--resume" : "--session-id",
-    sessionUuid,
-  ];
-
-  if (system === "hippocamp") {
-    args.push("--mcp-config", paths.mcpConfig);
-  }
-
-  return args;
+function claudeArgs({ system, ...options }) {
+  return ADAPTERS[resolveArm(system)].args(options);
 }
 
-// Reads Claude Code's stream-json output. A missing result, an error flag or any subtype
-// other than success (budget cap, max turns) marks the turn as failed.
 function parseStream(text) {
   const parsed = { costUsd: 0, ok: false, toolCalls: [], finalText: "" };
 
@@ -354,33 +288,12 @@ async function readMarkdownTree(dir, filter = () => true) {
   return files.sort();
 }
 
-// Files the agent sees without asking: the repo and native CLAUDE.md/MEMORY.md, and what Hippocamp wake_up returns.
-const AUTO_LOADED = new Set(["CLAUDE.md", "MEMORY.md", "current_state.md", "open_threads.md", "project.md", "identity.md", "preferences.md"]);
-
-// Everything the agent could have kept between sessions, for the judge's miss attribution.
+// Every memory scope the arm has, not only this project's: a fact stored in the wrong scope must be visible to the judge.
 async function memorySnapshot(system, paths, project) {
   const repo = paths.repos[project];
-  const files = await readMarkdownTree(repo, (file) => !file.includes(`${path.sep}node_modules${path.sep}`) && path.basename(file) !== "README.md");
-
-  if (system === "native") {
-    const projectsDir = path.join(paths.configDir, ...NATIVE_MEMORY_GLOB.slice(0, 1));
-    files.push(...(await readMarkdownTree(projectsDir, (file) => file.includes(`repos-${project}${path.sep}memory${path.sep}`))));
-  }
-
-  if (system === "hippocamp") {
-    files.push(
-      ...(await readMarkdownTree(paths.lagoon, (file) => {
-        const relative = path.relative(paths.lagoon, file);
-        return !relative.startsWith("projects") || relative.startsWith(path.join("projects", project));
-      })),
-    );
-  }
-
-  const parts = [];
-
-  for (const file of files) {
-    parts.push(`=== ${file} (${AUTO_LOADED.has(path.basename(file)) ? "auto-loaded" : "needs a read"}) ===\n${await fs.readFile(file, "utf8")}`);
-  }
+  const notes = await readMarkdownTree(repo, (file) => !file.includes(`${path.sep}node_modules${path.sep}`) && path.basename(file) !== "README.md");
+  const entries = [...(await Promise.all(notes.map(async (file) => ({ file, text: await fs.readFile(file, "utf8"), autoLoaded: AUTO_LOADED.has(path.basename(file)) })))), ...(await ADAPTERS[resolveArm(system)].exportMemory(paths, project))];
+  const parts = entries.map((entry) => `=== ${entry.file} (${entry.autoLoaded ? "auto-loaded" : "needs a read"}) ===\n${entry.text}`);
 
   return cap(parts.join("\n"), 30000);
 }
@@ -607,11 +520,7 @@ function parseArgs(argv) {
     }
   }
 
-  for (const system of options.systems) {
-    if (!SYSTEMS.includes(system)) {
-      throw new Error(`Unknown system: ${system}. Use ${SYSTEMS.join(", ")}.`);
-    }
-  }
+  options.systems = options.systems.map(resolveArm);
 
   if (!(options.limit >= 1) || !(options.budget > 0)) {
     throw new Error("--limit must be a positive integer and --budget a positive number.");
@@ -778,7 +687,6 @@ async function main() {
 }
 
 module.exports = {
-  NATIVE_MEMORY_GLOB,
   assertSandboxIntact,
   benchRoot,
   SYSTEMS,

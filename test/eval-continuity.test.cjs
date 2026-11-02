@@ -59,12 +59,13 @@ test("claudeEnv isolates home and memory per system", () => {
   assert.equal(none.PATH, "/bin");
   assert.equal(native.CLAUDE_CODE_DISABLE_AUTO_MEMORY, undefined);
   assert.equal(hippocamp.CLAUDE_CODE_DISABLE_AUTO_MEMORY, "1");
-  assert.equal(hippocamp.HIPPOCAMP_GLOBAL_ROOT, sandboxPaths("t", "hippocamp").lagoon);
+  // The MCP server gets HIPPOCAMP_GLOBAL_ROOT from the config the installer wrote, as in a real install.
+  assert.equal(hippocamp.HIPPOCAMP_GLOBAL_ROOT, undefined);
 });
 
 test("claudeArgs uses resume after the first turn and mcp only for hippocamp", () => {
-  const first = claudeArgs({ system: "native", paths: sandboxPaths("t", "native"), sessionUuid: "u1", resume: false, prompt: "hi", budgetUsd: 3 });
-  const later = claudeArgs({ system: "hippocamp", paths: sandboxPaths("t", "hippocamp"), sessionUuid: "u1", resume: true, prompt: "more", budgetUsd: 3 });
+  const first = claudeArgs({ system: "cc-native", paths: sandboxPaths("t", "native"), sessionUuid: "u1", resume: false, prompt: "hi", budgetUsd: 3 });
+  const later = claudeArgs({ system: "cc-hippocamp", paths: sandboxPaths("t", "hippocamp"), sessionUuid: "u1", resume: true, prompt: "more", budgetUsd: 3 });
 
   assert.deepEqual(first.slice(0, 2), ["-p", "hi"]);
   assert.ok(first.includes("--session-id") && !first.includes("--resume"));
@@ -286,7 +287,7 @@ test("digest caps length", () => {
   assert.ok(digest.startsWith("Bash: "));
 });
 
-test("memorySnapshot reads native memory for its own project only", async (t) => {
+test("memorySnapshot shows every native scope so a wrongly scoped fact is visible", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "continuity-snap-"));
   const paths = { ...sandboxPaths("t", "native"), configDir: path.join(root, ".claude"), repos: { relay: path.join(root, "repos", "relay"), ingest: path.join(root, "repos", "ingest") } };
 
@@ -301,7 +302,7 @@ test("memorySnapshot reads native memory for its own project only", async (t) =>
   const snapshot = await memorySnapshot("native", paths, "relay");
 
   assert.ok(snapshot.includes("relay uses postgres"));
-  assert.ok(!snapshot.includes("ingest uses utc"));
+  assert.ok(snapshot.includes("ingest uses utc"));
   assert.ok(snapshot.includes("# relay"));
 });
 
@@ -349,11 +350,11 @@ test("judge asks for and keeps one line of evidence per item", async () => {
 
 test("validationSheet lists each verdict with blank columns for a human grade", () => {
   const sessions = new Map([["P1", probe]]);
-  const rows = [{ system: "native", probe: "P1", item: "P1-1", fact: "f1", memory: true, pass: false, cause: "never-stored", evidence: 'set "size" to 10,000' }];
+  const rows = [{ system: "cc-native", probe: "P1", item: "P1-1", fact: "f1", memory: true, pass: false, cause: "never-stored", evidence: 'set "size" to 10,000' }];
   const lines = validationSheet(rows, { sessions, facts: probeFacts }).trim().split("\n");
 
   assert.equal(lines[0], "system,probe,item,memory,check,fact,judge_pass,judge_cause,evidence,human_pass,human_note");
-  assert.equal(lines[1], 'native,P1,P1-1,true,Reads Postgres.,Postgres.,false,never-stored,"set ""size"" to 10,000",,');
+  assert.equal(lines[1], 'cc-native,P1,P1-1,true,Reads Postgres.,Postgres.,false,never-stored,"set ""size"" to 10,000",,');
 });
 
 test("judge reply that is not JSON fails every item", async () => {
@@ -365,22 +366,22 @@ test("judge reply that is not JSON fails every item", async () => {
 
 test("summarize buckets by kind and distance", () => {
   const rows = [
-    { system: "hippocamp", kind: "decision", distance: 2, pass: true, cause: null },
-    { system: "hippocamp", kind: "state", distance: 7, pass: false, cause: "not-recalled" },
-    { system: "none", kind: "decision", distance: 4, pass: false, cause: "never-stored" },
+    { system: "cc-hippocamp", kind: "decision", distance: 2, pass: true, cause: null },
+    { system: "cc-hippocamp", kind: "state", distance: 7, pass: false, cause: "not-recalled" },
+    { system: "cc-none", kind: "decision", distance: 4, pass: false, cause: "never-stored" },
   ];
   const records = [
-    { system: "hippocamp", ok: true, costUsd: 1.25 },
-    { system: "hippocamp", ok: false, costUsd: 0.5 },
-    { system: "none", ok: true, costUsd: 1 },
+    { system: "cc-hippocamp", ok: true, costUsd: 1.25 },
+    { system: "cc-hippocamp", ok: false, costUsd: 0.5 },
+    { system: "cc-none", ok: true, costUsd: 1 },
   ];
   const table = summarize(rows, records);
-  const hippocampRow = table.split("\n").find((line) => line.startsWith("| hippocamp |"));
-  const noneRow = table.split("\n").find((line) => line.startsWith("| none |"));
+  const hippocampRow = table.split("\n").find((line) => line.startsWith("| cc-hippocamp |"));
+  const noneRow = table.split("\n").find((line) => line.startsWith("| cc-none |"));
 
-  assert.ok(hippocampRow.startsWith("| hippocamp | 50% |"), hippocampRow);
+  assert.ok(hippocampRow.startsWith("| cc-hippocamp | 50% |"), hippocampRow);
   assert.ok(hippocampRow.includes("| $1.75 | 1 |"), hippocampRow);
-  assert.ok(noneRow.startsWith("| none | 0% |"), noneRow);
+  assert.ok(noneRow.startsWith("| cc-none | 0% |"), noneRow);
   assert.ok(table.split("\n")[0].includes("| 1-2 | 3-5 | 6+ |"));
 });
 
@@ -401,8 +402,8 @@ test("runTimeline snapshots memory before each probe session runs", async (t) =>
 });
 
 test("parseArgs validates systems and run ids", () => {
-  assert.deepEqual(parseArgs(["--systems", "native,hippocamp", "--limit", "2", "--run", "smoke"]).systems, ["native", "hippocamp"]);
-  assert.throws(() => parseArgs(["--systems", "mem0"]), /Unknown system/);
+  assert.deepEqual(parseArgs(["--systems", "native,hippocamp", "--limit", "2", "--run", "smoke"]).systems, ["cc-native", "cc-hippocamp"]);
+  assert.throws(() => parseArgs(["--systems", "mem0"]), /Unknown arm/);
   assert.throws(() => parseArgs(["--run", "../../etc"]), /--run/);
   assert.throws(() => parseArgs(["--limit", "0"]), /--limit/);
 });
@@ -424,14 +425,14 @@ test("judge n/a items stay out of the pass rate and leak items are framed as mus
 
   const table = summarize(
     [
-      { system: "hippocamp", kind: "decision", distance: 2, pass: null, cause: null, memory: true },
-      { system: "hippocamp", kind: "decision", distance: 2, pass: true, cause: null, memory: true },
-      { system: "hippocamp", kind: "state", distance: 2, pass: false, cause: "ignored", memory: false },
+      { system: "cc-hippocamp", kind: "decision", distance: 2, pass: null, cause: null, memory: true },
+      { system: "cc-hippocamp", kind: "decision", distance: 2, pass: true, cause: null, memory: true },
+      { system: "cc-hippocamp", kind: "state", distance: 2, pass: false, cause: "ignored", memory: false },
     ],
     [],
   );
   const header = table.split("\n")[0].split(" | ");
-  const row = table.split("\n").find((line) => line.startsWith("| hippocamp |")).split(" | ");
+  const row = table.split("\n").find((line) => line.startsWith("| cc-hippocamp |")).split(" | ");
 
   assert.equal(row[1], "50%");
   assert.equal(row[header.indexOf("Memory-only")], "100%");
