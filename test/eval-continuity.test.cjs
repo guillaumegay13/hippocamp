@@ -8,6 +8,7 @@ const { loadDataset } = require("../scripts/continuity-dataset.cjs");
 const { execFileSync } = require("node:child_process");
 const {
   assertSandboxIntact,
+  benchRoot,
   claudeArgs,
   claudeEnv,
   completeViaClaude,
@@ -26,11 +27,20 @@ const {
 
 const DATASET_DIR = path.join(__dirname, "..", "bench", "continuity");
 
-test("sandbox paths are outside the working tree", () => {
-  const paths = sandboxPaths("t", "none");
+// Tests never write sandboxes into the real ~/.cache.
+process.env.HIPPOCAMP_BENCH_DIR = fsSync.mkdtempSync(path.join(os.tmpdir(), "bench-root-"));
 
-  assert.ok(!paths.root.startsWith(process.cwd()), paths.root);
-  assert.ok(paths.root.startsWith(fsSync.realpathSync(os.tmpdir())), paths.root);
+test("benchRoot defaults under ~/.cache and honors HIPPOCAMP_BENCH_DIR", () => {
+  assert.equal(benchRoot({ HOME: "/h" }), "/h/.cache/hippocamp-bench");
+  assert.equal(benchRoot({ HOME: "/h", HIPPOCAMP_BENCH_DIR: "/x" }), "/x");
+});
+
+test("sandboxPaths stays outside the OS temp dir and this repo", () => {
+  const paths = sandboxPaths("r1", "cc-native", { HOME: os.homedir() });
+
+  assert.ok(!paths.root.startsWith(fsSync.realpathSync(os.tmpdir())), paths.root);
+  assert.ok(!paths.root.startsWith(path.resolve(__dirname, "..")), paths.root);
+  assert.ok(paths.root.endsWith(path.join("r1", "cc-native")), paths.root);
   assert.equal(paths.home, path.join(paths.root, "home"));
   assert.equal(paths.configDir, path.join(paths.home, ".claude"));
 });

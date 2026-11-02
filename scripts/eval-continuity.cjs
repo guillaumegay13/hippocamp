@@ -31,11 +31,18 @@ const GIT_IDENTITY = {
   GIT_COMMITTER_EMAIL: "bench@example.com",
 };
 
-// Sandboxes live under the OS temp dir: Claude Code loads CLAUDE.md from parent folders,
-// so a sandbox inside this repo would see Hippocamp's own guidance.
-function sandboxPaths(runId, system) {
+// Sandboxes live outside this repo, because Claude Code loads CLAUDE.md from parent folders and a
+// sandbox inside the repo would see Hippocamp's own guidance. They also stay out of the OS temp dir,
+// which macOS clears, so a run can be resumed, extended and published days later.
+function benchRoot(env = process.env) {
+  return env.HIPPOCAMP_BENCH_DIR || path.join(env.HOME || os.homedir(), ".cache", "hippocamp-bench");
+}
+
+function sandboxPaths(runId, system, env = process.env) {
+  const base = benchRoot(env);
+  fsSync.mkdirSync(base, { recursive: true });
   // Resolved, because Claude Code reports its cwd and file paths through symlinks such as macOS /var -> /private/var.
-  const root = path.join(fsSync.realpathSync(os.tmpdir()), "hippocamp-continuity", runId, system);
+  const root = path.join(fsSync.realpathSync(base), runId, system);
   const home = path.join(root, "home");
 
   return {
@@ -654,17 +661,29 @@ async function judgeSystem({ dataset, system, paths, outDir, records, judge, jud
 
     const systemDir = path.join(outDir, system);
     const stream = parseStream(await fs.readFile(path.join(systemDir, `${record.id}.jsonl`), "utf8").catch(() => ""));
+    const diff = await probeDiff(paths.repos[session.project], record.before, record.after);
+    const exchange = {};
+    // Keep exactly what the judge saw and said, so every verdict can be audited and published.
+    const recording = async (model, request) => {
+      exchange.prompt = request.messages.map((message) => message.content).join("\n\n");
+      const response = await complete(model, request);
+      exchange.reply = response.text;
+      return response;
+    };
     const signals = recallSignals(stream.toolCalls, paths);
     const items = await judgeProbe({
       session,
       facts: dataset.facts,
-      diff: await probeDiff(paths.repos[session.project], record.before, record.after),
+      diff,
       digest: transcriptDigest(stream.toolCalls, stream.finalText),
       snapshot: await fs.readFile(path.join(systemDir, `${record.id}.snapshot.md`), "utf8").catch(() => ""),
       signals,
       judgeModel: judge,
-      complete,
+      complete: recording,
     });
+
+    await fs.writeFile(path.join(systemDir, `${record.id}.diff`), diff);
+    await fs.writeFile(path.join(systemDir, `${record.id}.judge.json`), `${JSON.stringify(exchange, null, 2)}\n`);
 
     for (const item of items) {
       const checklistItem = session.checklist.find((entry) => entry.id === item.item);
@@ -761,6 +780,7 @@ async function main() {
 module.exports = {
   NATIVE_MEMORY_GLOB,
   assertSandboxIntact,
+  benchRoot,
   SYSTEMS,
   claudeArgs,
   claudeEnv,
