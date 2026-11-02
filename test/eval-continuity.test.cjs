@@ -5,13 +5,16 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { loadDataset } = require("../scripts/continuity-dataset.cjs");
+const { ADAPTERS } = require("../scripts/continuity-adapters.cjs");
 const { execFileSync } = require("node:child_process");
 const {
   assertSandboxIntact,
   benchRoot,
   claudeArgs,
   claudeEnv,
+  commitMessage,
   completeViaClaude,
+  isOffer,
   judgeProbe,
   memorySnapshot,
   parseArgs,
@@ -156,6 +159,12 @@ async function runnerFixture(t) {
   return { dataset, paths, outDir, calls };
 }
 
+// The last line of each commit message, newest first: "Session <id>", or the subject for seed and failed sessions.
+function sessionLog(repo, ref = "HEAD") {
+  const messages = execFileSync("git", ["log", "--format=%B%x00", ref], { cwd: repo, encoding: "utf8" }).split("\0");
+  return messages.map((message) => message.trim().split("\n").pop().replace(/^Session /, "")).filter(Boolean);
+}
+
 function fakeSpawn(calls, code = 0) {
   return async (command, args, options) => {
     calls.push(args);
@@ -167,13 +176,13 @@ function fakeSpawn(calls, code = 0) {
 test("runTimeline resumes turns and commits per session", async (t) => {
   const { dataset, paths, outDir, calls } = await runnerFixture(t);
   const records = await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn: fakeSpawn(calls) });
-  const log = execFileSync("git", ["log", "--format=%s"], { cwd: paths.repos.relay, encoding: "utf8" });
+  const log = sessionLog(paths.repos.relay);
 
   assert.equal(calls.length, 3);
   assert.ok(calls[0].includes("--session-id"));
   assert.ok(calls[1].includes("--resume"));
   assert.equal(calls[1][calls[1].indexOf("--resume") + 1], calls[0][calls[0].indexOf("--session-id") + 1]);
-  assert.deepEqual(log.trim().split("\n"), ["S2", "S1", "seed"]);
+  assert.deepEqual(log, ["S2", "S1", "seed"]);
   assert.equal(records.length, 2);
   assert.ok(Math.abs(records[0].costUsd - 0.2) < 1e-9);
   assert.equal(records[0].ok, true);
@@ -225,10 +234,10 @@ test("each session starts on main even if the last one ended on a branch", async
   };
 
   const records = await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn });
-  const parked = execFileSync("git", ["log", "--format=%s", "fix/parked"], { cwd: paths.repos.relay, encoding: "utf8" });
+  const parked = sessionLog(paths.repos.relay, "fix/parked");
 
   assert.deepEqual(branches, ["main", "fix/parked", "main"]);
-  assert.deepEqual(parked.trim().split("\n"), ["S1", "seed"]);
+  assert.deepEqual(parked, ["S1", "seed"]);
   assert.equal(records[1].before, execFileSync("git", ["rev-parse", "main~1"], { cwd: paths.repos.relay, encoding: "utf8" }).trim());
 });
 
@@ -239,6 +248,71 @@ test("a rerun refuses a recorded session whose prompts or checks changed", async
   dataset.sessions.get("S1").turns[0] = "first, reworded";
 
   await assert.rejects(runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn: fakeSpawn([]) }), /S1 changed since it ran/);
+});
+
+test("commitMessage uses the first line of the agent's summary", () => {
+  assert.equal(commitMessage("B5", "**Lowered chunk size to 2,000 rows.**\n\nDetails…"), "Lowered chunk size to 2,000 rows.\n\nSession B5");
+  assert.equal(commitMessage("B5", ""), "B5");
+  assert.equal(commitMessage("B5", "## `Fixed` it"), "Fixed it\n\nSession B5");
+  assert.ok(commitMessage("B5", "word ".repeat(40)).split("\n")[0].length <= 72);
+});
+
+test("isOffer detects offers and questions, not code or quoted errors", () => {
+  assert.equal(isOffer("Done.\n\nWant me to add it to your user CLAUDE.md?"), true);
+  assert.equal(isOffer("Done. Should I also update the README?"), true);
+  assert.equal(isOffer("Done.\n\n```\nif (x?) {}\n```"), false);
+  assert.equal(isOffer("Fixed the error `Is the server running?`."), false);
+  assert.equal(isOffer("All tests pass."), false);
+  assert.equal(isOffer(""), false);
+});
+
+test("an offer gets exactly one 'yes, go ahead' turn", async (t) => {
+  const { dataset, paths, outDir, calls } = await runnerFixture(t);
+  const offering = async (command, args) => {
+    calls.push(args);
+    return { code: 0, stdout: streamLines({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.1, result: "Done. Want me to update the docs?" }) };
+  };
+  const records = await runTimeline({ dataset: { ...dataset, timeline: ["S2"] }, system: "none", paths, outDir, budgetUsd: 3, spawn: offering });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1][calls[1].indexOf("-p") + 1], "yes, go ahead");
+  assert.ok(calls[1].includes("--resume"));
+  assert.equal(records[0].offerReplied, true);
+  assert.equal(records[0].turns, 2);
+});
+
+test("sessions commit with the agent's summary", async (t) => {
+  const { dataset, paths, outDir, calls } = await runnerFixture(t);
+  await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, spawn: fakeSpawn(calls) });
+  const log = execFileSync("git", ["log", "-1", "--format=%B"], { cwd: paths.repos.relay, encoding: "utf8" }).trim();
+
+  assert.equal(log, "done\n\nSession S2");
+});
+
+test("a retried session restores memory dirs to their state before the attempt", async (t) => {
+  const { dataset, paths, outDir } = await runnerFixture(t);
+  const kept = path.join(paths.root, "mem");
+  const absent = path.join(paths.root, "mem2");
+  const adapter = { ...ADAPTERS["cc-none"], memoryDirs: () => [kept, absent] };
+  const seen = [];
+
+  await fs.mkdir(kept, { recursive: true });
+  await fs.writeFile(path.join(kept, "a.md"), "before\n");
+  const limited = async () => {
+    await fs.writeFile(path.join(kept, "x.md"), "partial\n");
+    await fs.mkdir(absent, { recursive: true });
+    await fs.writeFile(path.join(absent, "y.md"), "partial\n");
+    return { code: 1, stdout: streamLines({ type: "result", subtype: "success", is_error: true, api_error_status: 429, total_cost_usd: 0 }) };
+  };
+  const observing = async (command, args, options) => {
+    seen.push({ a: fsSync.existsSync(path.join(kept, "a.md")), x: fsSync.existsSync(path.join(kept, "x.md")), absent: fsSync.existsSync(absent) });
+    return fakeSpawn([])(command, args, options);
+  };
+
+  await assert.rejects(runTimeline({ dataset, system: "none", adapter, paths, outDir, budgetUsd: 3, spawn: limited }), /usage limit/);
+  await runTimeline({ dataset, system: "none", adapter, paths, outDir, budgetUsd: 3, spawn: observing });
+
+  assert.deepEqual(seen[0], { a: true, x: false, absent: false });
 });
 
 test("completed sessions are skipped on rerun", async (t) => {

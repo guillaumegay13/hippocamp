@@ -163,7 +163,60 @@ function sessionFingerprint(session) {
   return crypto.createHash("sha256").update(JSON.stringify({ turns: session.turns, checklist: session.checklist })).digest("hex").slice(0, 16);
 }
 
-async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = Infinity, spawn = spawnClaude, snapshot = null }) {
+// First line of the agent's own summary, as a person would write the commit.
+function commitMessage(id, finalText) {
+  const line = String(finalText)
+    .split("\n")
+    .map((text) => text.replace(/[*_`#>]/g, "").trim())
+    .find(Boolean);
+
+  if (!line) {
+    return id;
+  }
+
+  const subject = line.length <= 72 ? line : line.slice(0, 72).replace(/\s+\S*$/, "");
+  return `${subject}\n\nSession ${id}`;
+}
+
+// Whether the agent's final message offers or asks something a user would answer.
+function isOffer(finalText) {
+  const prose = String(finalText).replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "").trim();
+  const last = prose.split(/\n\s*\n/).pop() || "";
+  return /\?\s*$/.test(last) || /\b(want me to|should I|shall I|would you like|do you want)\b/i.test(last);
+}
+
+// Memory the session can change, saved before it starts so an interrupted attempt leaves no trace.
+async function saveMemory(adapter, paths, id) {
+  const saved = path.join(paths.root, ".pre", id);
+  await fs.rm(saved, { recursive: true, force: true });
+  await fs.mkdir(saved, { recursive: true });
+
+  for (const [index, dir] of adapter.memoryDirs(paths).entries()) {
+    if (fsSync.existsSync(dir)) {
+      await fs.cp(dir, path.join(saved, String(index)), { recursive: true });
+    } else {
+      await fs.writeFile(path.join(saved, `absent-${index}`), "");
+    }
+  }
+}
+
+async function restoreMemory(adapter, paths, id) {
+  const saved = path.join(paths.root, ".pre", id);
+
+  if (!fsSync.existsSync(saved)) {
+    return;
+  }
+
+  for (const [index, dir] of adapter.memoryDirs(paths).entries()) {
+    await fs.rm(dir, { recursive: true, force: true });
+
+    if (!fsSync.existsSync(path.join(saved, `absent-${index}`))) {
+      await fs.cp(path.join(saved, String(index)), dir, { recursive: true });
+    }
+  }
+}
+
+async function runTimeline({ dataset, system, adapter = ADAPTERS[resolveArm(system)], paths, outDir, budgetUsd, limit = Infinity, spawn = spawnClaude, snapshot = null }) {
   const systemDir = path.join(outDir, system);
   const records = [];
 
@@ -188,13 +241,16 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
 
     const repo = paths.repos[session.project];
     const transcriptPath = path.join(systemDir, `${id}.jsonl`);
-    const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), fingerprint, before: null, after: null };
+    const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), fingerprint, turns: 0, offerReplied: false, before: null, after: null };
 
-    // A transcript without a record means an interrupted attempt: drop its uncommitted work.
+    // A transcript without a record means an interrupted attempt: drop its uncommitted work and its memory writes.
     if (fsSync.existsSync(transcriptPath)) {
       record.retried = true;
+      await restoreMemory(adapter, paths, id);
       await git(["reset", "-q", "--hard"], repo);
       await git(["clean", "-fdq"], repo);
+    } else {
+      await saveMemory(adapter, paths, id);
     }
 
     // The user comes back to main; work a session left on another branch stays there.
@@ -207,10 +263,14 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
       await fs.writeFile(path.join(systemDir, `${id}.snapshot.md`), await snapshot(session));
     }
 
-    for (const [index, prompt] of session.turns.entries()) {
-      const args = claudeArgs({ system, paths, sessionUuid: record.sessionUuid, resume: index > 0, prompt, budgetUsd });
-      const result = await spawn("claude", args, { cwd: repo, env: claudeEnv(system, paths) });
+    const prompts = [...session.turns];
+    let finalText = "";
+
+    for (let index = 0; index < prompts.length; index += 1) {
+      const args = adapter.args({ paths, sessionUuid: record.sessionUuid, resume: index > 0, prompt: prompts[index], budgetUsd });
+      const result = await spawn("claude", args, { cwd: repo, env: adapter.env(paths) });
       const parsed = parseStream(result.stdout);
+      record.turns += 1;
 
       await fs.appendFile(transcriptPath, result.stdout.endsWith("\n") || !result.stdout ? result.stdout : `${result.stdout}\n`);
       record.costUsd += parsed.costUsd;
@@ -224,10 +284,18 @@ async function runTimeline({ dataset, system, paths, outDir, budgetUsd, limit = 
         record.ok = false;
         break;
       }
+
+      finalText = parsed.finalText;
+
+      // Fixed simulated-user rule, the same for every arm: answer one offer or question with a yes.
+      if (index === session.turns.length - 1 && isOffer(finalText)) {
+        prompts.push("yes, go ahead");
+        record.offerReplied = true;
+      }
     }
 
     await git(["add", "-A"], repo);
-    await git(["commit", "-q", "--allow-empty", "-m", id], repo);
+    await git(["commit", "-q", "--allow-empty", "-m", commitMessage(id, finalText)], repo);
     record.after = await head(repo);
     await fs.writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
     records.push(record);
@@ -692,7 +760,9 @@ module.exports = {
   SYSTEMS,
   claudeArgs,
   claudeEnv,
+  commitMessage,
   completeViaClaude,
+  isOffer,
   judgeProbe,
   memorySnapshot,
   parseArgs,
