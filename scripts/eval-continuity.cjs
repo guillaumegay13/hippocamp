@@ -94,7 +94,7 @@ function claudeArgs({ system, ...options }) {
 }
 
 function parseStream(text) {
-  const parsed = { costUsd: 0, ok: false, toolCalls: [], finalText: "" };
+  const parsed = { costUsd: 0, ok: false, toolCalls: [], finalText: "", tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, durationMs: 0 };
 
   for (const line of text.split("\n")) {
     let event;
@@ -119,12 +119,18 @@ function parseStream(text) {
 
         if (call) {
           call.result = typeof block.content === "string" ? block.content : (block.content || []).map((part) => part.text || "").join("");
+          call.resultBytes = Buffer.byteLength(call.result);
         }
       }
     }
 
     if (event.type === "result") {
       parsed.costUsd += event.total_cost_usd || 0;
+      parsed.durationMs += event.duration_ms || 0;
+      parsed.tokens.input += event.usage?.input_tokens || 0;
+      parsed.tokens.output += event.usage?.output_tokens || 0;
+      parsed.tokens.cacheRead += event.usage?.cache_read_input_tokens || 0;
+      parsed.tokens.cacheWrite += event.usage?.cache_creation_input_tokens || 0;
       parsed.ok = event.is_error === false && event.subtype === "success";
       parsed.limited = event.api_error_status === 429;
       parsed.finalText = typeof event.result === "string" ? event.result : "";
@@ -242,6 +248,7 @@ async function runTimeline({ dataset, system, adapter = ADAPTERS[resolveArm(syst
     const repo = paths.repos[session.project];
     const transcriptPath = path.join(systemDir, `${id}.jsonl`);
     const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), fingerprint, turns: 0, offerReplied: false, before: null, after: null };
+    Object.assign(record, { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, durationMs: 0, memoryCalls: 0, memoryBytesIn: 0, autoLoadedBytes: 0 });
 
     // A transcript without a record means an interrupted attempt: drop its uncommitted work and its memory writes.
     if (fsSync.existsSync(transcriptPath)) {
@@ -263,6 +270,11 @@ async function runTimeline({ dataset, system, adapter = ADAPTERS[resolveArm(syst
       await fs.writeFile(path.join(systemDir, `${id}.snapshot.md`), await snapshot(session));
     }
 
+    // Memory already in context when the session starts, before any tool call.
+    for (const entry of await adapter.exportMemory(paths, session.project)) {
+      record.autoLoadedBytes += entry.autoLoaded ? Buffer.byteLength(entry.text) : 0;
+    }
+
     const prompts = [...session.turns];
     let finalText = "";
 
@@ -271,6 +283,16 @@ async function runTimeline({ dataset, system, adapter = ADAPTERS[resolveArm(syst
       const result = await spawn("claude", args, { cwd: repo, env: adapter.env(paths) });
       const parsed = parseStream(result.stdout);
       record.turns += 1;
+      record.durationMs += parsed.durationMs;
+
+      for (const key of Object.keys(record.tokens)) {
+        record.tokens[key] += parsed.tokens[key];
+      }
+
+      for (const call of parsed.toolCalls.filter((entry) => adapter.isMemoryCall(entry, paths))) {
+        record.memoryCalls += 1;
+        record.memoryBytesIn += call.resultBytes || 0;
+      }
 
       await fs.appendFile(transcriptPath, result.stdout.endsWith("\n") || !result.stdout ? result.stdout : `${result.stdout}\n`);
       record.costUsd += parsed.costUsd;

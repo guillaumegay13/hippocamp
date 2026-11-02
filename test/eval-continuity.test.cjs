@@ -115,6 +115,27 @@ function streamLines(...events) {
 const toolUse = { type: "assistant", message: { content: [{ type: "text", text: "looking" }, { type: "tool_use", id: "t0", name: "mcp__hippocamp__search_memory", input: { query: "retries" } }] } };
 const success = (cost) => ({ type: "result", subtype: "success", is_error: false, total_cost_usd: cost, result: "done" });
 
+test("parseStream sums tokens and duration across turns", () => {
+  const usage = (input, output) => ({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.1, duration_ms: 1000, usage: { input_tokens: input, output_tokens: output, cache_read_input_tokens: 5, cache_creation_input_tokens: 2 }, result: "ok" });
+  const parsed = parseStream(streamLines(usage(10, 3), usage(20, 4)));
+
+  assert.deepEqual(parsed.tokens, { input: 30, output: 7, cacheRead: 10, cacheWrite: 4 });
+  assert.equal(parsed.durationMs, 2000);
+});
+
+test("records count memory calls, memory bytes read and auto-loaded memory", async (t) => {
+  const { dataset, paths, outDir } = await runnerFixture(t);
+  const adapter = { ...ADAPTERS["cc-hippocamp"], args: ADAPTERS["cc-none"].args, exportMemory: async () => [{ file: "a", text: "x".repeat(40), autoLoaded: true }, { file: "b", text: "y".repeat(99), autoLoaded: false }] };
+  const search = { type: "assistant", message: { content: [{ type: "tool_use", id: "s1", name: "mcp__hippocamp__search_memory", input: { query: "chunk" } }] } };
+  const found = { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "s1", content: "z".repeat(25) }] } };
+  const spawn = async () => ({ code: 0, stdout: streamLines(search, found, success(0.1)) });
+  const records = await runTimeline({ dataset: { ...dataset, timeline: ["S2"] }, system: "none", adapter, paths, outDir, budgetUsd: 3, spawn });
+
+  assert.equal(records[0].memoryCalls, 1);
+  assert.equal(records[0].memoryBytesIn, 25);
+  assert.equal(records[0].autoLoadedBytes, 40);
+});
+
 test("parseStream sums cost and collects tool calls", () => {
   const parsed = parseStream(streamLines({ type: "system", subtype: "init" }, toolUse, success(0.42)));
 
