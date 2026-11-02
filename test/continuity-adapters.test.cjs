@@ -112,3 +112,25 @@ test("isMemoryCall recognizes each arm's memory access", async (t) => {
   assert.equal(ADAPTERS["cc-native"].isMemoryCall({ name: "Read", input: { file_path: path.join(paths.repos.relay, "src", "a.ts") } }, paths), false);
   assert.equal(ADAPTERS["cc-none"].isMemoryCall(nativeRead, paths), false);
 });
+
+test("hippocamp counts only the user CLAUDE.md as auto-loaded; wake-up files arrive through a tool call", async (t) => {
+  const paths = await fixturePaths(t);
+  await fs.mkdir(path.join(paths.lagoon, "projects", "relay"), { recursive: true });
+  await fs.writeFile(path.join(paths.lagoon, "projects", "relay", "current_state.md"), "state");
+  await fs.writeFile(path.join(paths.configDir, "CLAUDE.md"), "guidance");
+  const loaded = await ADAPTERS["cc-hippocamp"].autoLoaded(paths, "relay");
+
+  assert.deepEqual(loaded.map((entry) => path.basename(entry.file)), ["CLAUDE.md"]);
+  assert.ok((await ADAPTERS["cc-hippocamp"].exportMemory(paths, "relay")).every((entry) => !entry.autoLoaded));
+});
+
+test("hippocamp exports one entry per event and keeps project scope exact", async (t) => {
+  const paths = await fixturePaths(t);
+  const events = path.join(paths.lagoon, "projects", "relay", "events");
+  await fs.mkdir(events, { recursive: true });
+  await fs.mkdir(path.join(paths.lagoon, "projects", "relay-x"), { recursive: true });
+  await fs.writeFile(path.join(events, "2026-11-02.md"), "# Events\n\n## 10:00 one\nfirst\n\n## 11:00 two\nsecond\n");
+  const entries = await ADAPTERS["cc-hippocamp"].exportMemory(paths, "relay");
+
+  assert.deepEqual(entries.map((entry) => entry.text.trim().split("\n")[0]), ["## 10:00 one", "## 11:00 two"]);
+});

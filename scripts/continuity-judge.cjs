@@ -41,8 +41,8 @@ function transcriptDigest(toolCalls, finalText) {
   return `${cap(lines.join("\n"), 40000 - final.length)}${final}`;
 }
 
-// The same digest with nothing that names the arm: memory tools become memory_tool and sandbox paths are rewritten.
-function blindDigest(toolCalls, finalText, { adapter, paths }) {
+// Removes everything that names the arm or the product: memory tool names, sandbox paths, arm ids.
+function blindText(text, { paths }) {
   const places = [
     [paths.lagoon, "<memory>"],
     [path.join(paths.configDir, "projects"), "<memory>"],
@@ -51,15 +51,23 @@ function blindDigest(toolCalls, finalText, { adapter, paths }) {
     [paths.home, "<home>"],
     [paths.root, "<sandbox>"],
   ];
-  const scrub = (text) => places.reduce((out, [from, to]) => out.split(from).join(to), String(text)).replace(/hippocamp|lagoon|\.claude\/projects/gi, "memory");
+
+  return places
+    .reduce((out, [from, to]) => out.split(from).join(to), String(text).replace(/mcp__hippocamp__\w+/g, "memory_tool"))
+    .replace(/cc-(none|native|hippocamp|memory)/g, "arm")
+    .replace(/hippocamp|lagoon|\.claude\/projects/gi, "memory");
+}
+
+// The digest with nothing that names the arm: memory tools become memory_tool and sandbox paths are rewritten.
+function blindDigest(toolCalls, finalText, { adapter, paths }) {
   const calls = toolCalls.map((call) => ({
     ...call,
     name: adapter.isMemoryCall(call, paths) && call.name.startsWith("mcp__") ? "memory_tool" : call.name,
-    input: JSON.parse(scrub(JSON.stringify(call.input ?? {}))),
-    result: call.result === undefined ? undefined : scrub(call.result),
+    input: JSON.parse(blindText(JSON.stringify(call.input ?? {}), { paths })),
+    result: call.result === undefined ? undefined : blindText(call.result, { paths }),
   }));
 
-  return transcriptDigest(calls, scrub(finalText));
+  return transcriptDigest(calls, blindText(finalText, { paths }));
 }
 
 const TASK_PROMPT = `You grade one session of a coding agent that works on a project across many independent sessions.
@@ -183,7 +191,7 @@ Reply with JSON only: {"items":[{"id":"m1","label":"...","fact":"..."}]}`;
 
 async function judgeMemory({ facts, entries, judgeModel, complete }) {
   const factList = facts.map((fact) => `- ${fact.id}: ${fact.statement}${fact.supersededBy ? ` (replaced by ${fact.supersededBy})` : ""}`).join("\n");
-  const entryList = entries.map((entry, index) => `=== m${index + 1} ===\n${cap(entry.text, 4000)}`).join("\n");
+  const entryList = entries.map((entry, index) => `=== m${index + 1} ===\n${cap(entry.text, 8000)}`).join("\n");
   const prompt = MEMORY_PROMPT.replace("{facts}", () => factList).replace("{entries}", () => cap(entryList, 120000));
   const response = await complete(judgeModel, { messages: [{ role: "user", content: prompt }], json: true });
   const replies = new Map(parseJudgeReply(response.text).map((item) => [item.id, item]));
@@ -192,7 +200,9 @@ async function judgeMemory({ facts, entries, judgeModel, complete }) {
     return { id: `m${index + 1}`, file: entry.file, label: LABELS.includes(reply?.label) ? reply.label : "unlabeled", fact: reply?.fact || null };
   });
 
-  return { labels, quality: memoryQuality(labels, facts), prompt, reply: response.text };
+  // Reported, never silent: entries cut for length, and entries the judge left unlabeled.
+  const truncated = entries.filter((entry) => entry.text.length > 8000).length;
+  return { labels, quality: memoryQuality(labels, facts), truncated, unlabeled: labels.filter((entry) => entry.label === "unlabeled").length, prompt, reply: response.text };
 }
 
-module.exports = { CAUSES, judgeMemory, memoryQuality, attributeMisses, blindDigest, judgeProbe, parseJudgeReply, transcriptDigest };
+module.exports = { CAUSES, judgeMemory, memoryQuality, attributeMisses, blindDigest, blindText, judgeProbe, parseJudgeReply, transcriptDigest };

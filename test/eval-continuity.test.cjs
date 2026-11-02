@@ -8,6 +8,7 @@ const { loadDataset } = require("../scripts/continuity-dataset.cjs");
 const { ADAPTERS } = require("../scripts/continuity-adapters.cjs");
 const { execFileSync } = require("node:child_process");
 const {
+  assertNoInstructionFiles,
   assertSandboxIntact,
   checkManifest,
   benchRoot,
@@ -18,6 +19,7 @@ const {
   isOffer,
   judgeProbe,
   memorySnapshot,
+  needsQualityJudge,
   parseArgs,
   parseStream,
   prepareSandbox,
@@ -27,6 +29,7 @@ const {
   sandboxPaths,
   transcriptDigest,
   validationSheet,
+  writeValidationSheet,
 } = require("../scripts/eval-continuity.cjs");
 
 const DATASET_DIR = path.join(__dirname, "..", "bench", "continuity");
@@ -34,8 +37,8 @@ const DATASET_DIR = path.join(__dirname, "..", "bench", "continuity");
 // Tests never write sandboxes into the real ~/.cache.
 process.env.HIPPOCAMP_BENCH_DIR = fsSync.mkdtempSync(path.join(os.tmpdir(), "bench-root-"));
 
-test("benchRoot defaults under ~/.cache and honors HIPPOCAMP_BENCH_DIR", () => {
-  assert.equal(benchRoot({ HOME: "/h" }), "/h/.cache/hippocamp-bench");
+test("benchRoot defaults to a neutral folder outside HOME and honors HIPPOCAMP_BENCH_DIR", () => {
+  assert.equal(benchRoot({ HOME: "/h" }), "/var/tmp/agent-bench");
   assert.equal(benchRoot({ HOME: "/h", HIPPOCAMP_BENCH_DIR: "/x" }), "/x");
 });
 
@@ -44,7 +47,9 @@ test("sandboxPaths stays outside the OS temp dir and this repo", () => {
 
   assert.ok(!paths.root.startsWith(fsSync.realpathSync(os.tmpdir())), paths.root);
   assert.ok(!paths.root.startsWith(path.resolve(__dirname, "..")), paths.root);
-  assert.ok(paths.root.endsWith(path.join("r1", "cc-native")), paths.root);
+  assert.ok(!/cc-|native|hippocamp/.test(path.relative(benchRoot({ HOME: os.homedir() }), paths.root)), paths.root);
+  assert.equal(sandboxPaths("r1", "cc-native", { HOME: os.homedir() }).root, paths.root);
+  assert.notEqual(sandboxPaths("r1", "cc-hippocamp", { HOME: os.homedir() }).root, paths.root);
   assert.equal(paths.home, path.join(paths.root, "home"));
   assert.equal(paths.configDir, path.join(paths.home, ".claude"));
 });
@@ -126,7 +131,7 @@ test("parseStream sums tokens and duration across turns", () => {
 
 test("records count memory calls, memory bytes read and auto-loaded memory", async (t) => {
   const { dataset, paths, outDir } = await runnerFixture(t);
-  const adapter = { ...ADAPTERS["cc-hippocamp"], args: ADAPTERS["cc-none"].args, exportMemory: async () => [{ file: "a", text: "x".repeat(40), autoLoaded: true }, { file: "b", text: "y".repeat(99), autoLoaded: false }] };
+  const adapter = { ...ADAPTERS["cc-hippocamp"], args: ADAPTERS["cc-none"].args, autoLoaded: async () => [{ file: "a", text: "x".repeat(40), autoLoaded: true }] };
   const search = { type: "assistant", message: { content: [{ type: "tool_use", id: "s1", name: "mcp__hippocamp__search_memory", input: { query: "chunk" } }] } };
   const found = { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "s1", content: "z".repeat(25) }] } };
   const spawn = async () => ({ code: 0, stdout: streamLines(search, found, success(0.1)) });
@@ -376,6 +381,99 @@ test("checkManifest writes the first manifest and refuses a different one unless
   assert.equal(saved.versions.claude, "1");
 });
 
+test("assertNoInstructionFiles refuses a sandbox under a folder with agent instructions", async (t) => {
+  const top = await fs.mkdtemp(path.join(os.tmpdir(), "instr-"));
+  const deep = path.join(top, "a", "b");
+  t.after(() => fs.rm(top, { recursive: true, force: true }));
+  await fs.mkdir(deep, { recursive: true });
+
+  assert.doesNotThrow(() => assertNoInstructionFiles(deep));
+  for (const file of ["CLAUDE.md", "AGENTS.md", path.join(".claude", "CLAUDE.md")]) {
+    await fs.mkdir(path.dirname(path.join(top, "a", file)), { recursive: true });
+    await fs.writeFile(path.join(top, "a", file), "rules");
+    assert.throws(() => assertNoInstructionFiles(deep), new RegExp(path.basename(file)));
+    await fs.rm(path.join(top, "a", file));
+  }
+});
+
+test("an attempt that crashed in its first turn is undone, including the agent's own commits", async (t) => {
+  const { dataset, paths, outDir } = await runnerFixture(t);
+  const mem = path.join(paths.root, "mem");
+  const adapter = { ...ADAPTERS["cc-none"], memoryDirs: () => [mem] };
+  const seed = execFileSync("git", ["rev-parse", "HEAD"], { cwd: paths.repos.relay, encoding: "utf8" }).trim();
+  const crash = async (command, args, options) => {
+    await fs.writeFile(path.join(options.cwd, "crash.txt"), "x");
+    execFileSync("git", ["add", "-A"], { cwd: options.cwd });
+    execFileSync("git", ["-c", "user.name=a", "-c", "user.email=a@a", "commit", "-qm", "agent commit"], { cwd: options.cwd });
+    await fs.mkdir(mem, { recursive: true });
+    await fs.writeFile(path.join(mem, "x.md"), "partial");
+    throw new Error("killed");
+  };
+  const seen = [];
+  const observing = async (command, args, options) => {
+    seen.push({ head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: options.cwd, encoding: "utf8" }).trim(), crash: fsSync.existsSync(path.join(options.cwd, "crash.txt")), mem: fsSync.existsSync(mem) });
+    return fakeSpawn([])(command, args, options);
+  };
+
+  await assert.rejects(runTimeline({ dataset, system: "none", adapter, paths, outDir, budgetUsd: 3, spawn: crash }), /killed/);
+  const records = await runTimeline({ dataset, system: "none", adapter, paths, outDir, budgetUsd: 3, spawn: observing });
+
+  assert.deepEqual(seen[0], { head: seed, crash: false, mem: false });
+  assert.equal(records[0].retried, true);
+});
+
+test("runManifest does not depend on where the repo is checked out and ignores dotfiles", async (t) => {
+  const make = async () => {
+    const repo = await fs.mkdtemp(path.join(os.tmpdir(), "manifest-loc-"));
+    const datasetDir = path.join(repo, "bench", "continuity");
+    await fs.mkdir(datasetDir, { recursive: true });
+    await fs.mkdir(path.join(repo, "scripts"), { recursive: true });
+    await fs.writeFile(path.join(datasetDir, "facts.json"), "[]");
+    await fs.writeFile(path.join(repo, "scripts", "eval-continuity.cjs"), "// same");
+    t.after(() => fs.rm(repo, { recursive: true, force: true }));
+    return { repoRoot: repo, datasetDir, judgeModel: "m", budgetUsd: 3, versions: {} };
+  };
+  const a = await make();
+  const b = await make();
+  await fs.writeFile(path.join(b.datasetDir, ".DS_Store"), "junk");
+
+  assert.deepEqual(await runManifest(a), await runManifest(b));
+});
+
+test("checkManifest refuses an old run folder that has sessions but no manifest", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "manifest-old-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await fs.mkdir(path.join(dir, "hippocamp"));
+  await fs.writeFile(path.join(dir, "hippocamp", "A1.json"), "{}");
+
+  await assert.rejects(checkManifest(dir, "v1", { datasetHash: "d" }), /no manifest/);
+});
+
+test("memory quality is judged again when a run is extended", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "quality-"));
+  const file = path.join(dir, "memory-quality.json");
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  assert.equal(await needsQualityJudge(file, "B5"), true);
+  await fs.writeFile(file, JSON.stringify({ through: "B5" }));
+  assert.equal(await needsQualityJudge(file, "B5"), false);
+  assert.equal(await needsQualityJudge(file, "B11"), true);
+});
+
+test("writeValidationSheet never overwrites human grades and records the run", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sheet-"));
+  const file = path.join(dir, "validation.csv");
+  const sessions = new Map([["P1", probe]]);
+  const rows = [{ system: "cc-native", run: "r1", probe: "P1", item: "P1-1", fact: "f1", memory: true, pass: true, cause: null, evidence: "e" }];
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  await writeValidationSheet(file, rows, { sessions, facts: probeFacts });
+  assert.match(await fs.readFile(file, "utf8"), /^run,system,/);
+  await fs.writeFile(file, "graded by hand");
+  await writeValidationSheet(file, rows, { sessions, facts: probeFacts });
+  assert.equal(await fs.readFile(file, "utf8"), "graded by hand");
+});
+
 test("completed sessions are skipped on rerun", async (t) => {
   const { dataset, paths, outDir, calls } = await runnerFixture(t);
 
@@ -488,8 +586,8 @@ test("validationSheet lists each verdict with blank columns for a human grade", 
   const rows = [{ system: "cc-native", probe: "P1", item: "P1-1", fact: "f1", memory: true, pass: false, cause: "never-stored", evidence: 'set "size" to 10,000' }];
   const lines = validationSheet(rows, { sessions, facts: probeFacts }).trim().split("\n");
 
-  assert.equal(lines[0], "system,probe,item,memory,check,fact,judge_pass,judge_cause,evidence,human_pass,human_note");
-  assert.equal(lines[1], 'cc-native,P1,P1-1,true,Reads Postgres.,Postgres.,false,never-stored,"set ""size"" to 10,000",,');
+  assert.equal(lines[0], "run,system,probe,item,memory,check,fact,judge_pass,judge_cause,evidence,human_pass,human_note");
+  assert.equal(lines[1], ',cc-native,P1,P1-1,true,Reads Postgres.,Postgres.,false,never-stored,"set ""size"" to 10,000",,');
 });
 
 test("judge reply that is not JSON fails every item", async () => {
@@ -573,8 +671,9 @@ test("memorySnapshot labels auto-loaded files", async (t) => {
 test("an interrupted session reruns on a clean tree and is flagged retried", async (t) => {
   const { dataset, paths, outDir, calls } = await runnerFixture(t);
 
-  await fs.mkdir(path.join(outDir, "none"), { recursive: true });
-  await fs.writeFile(path.join(outDir, "none", "S1.jsonl"), "partial\n");
+  // A started session leaves its saved pre-session head; no record means it never finished.
+  await fs.mkdir(path.join(paths.root, ".pre", "S1"), { recursive: true });
+  await fs.writeFile(path.join(paths.root, ".pre", "S1", "head"), execFileSync("git", ["rev-parse", "HEAD"], { cwd: paths.repos.relay, encoding: "utf8" }));
   await fs.writeFile(path.join(paths.repos.relay, "half-done.txt"), "partial work\n");
   const records = await runTimeline({ dataset, system: "none", paths, outDir, budgetUsd: 3, limit: 1, spawn: fakeSpawn(calls) });
   const files = execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: paths.repos.relay, encoding: "utf8" });

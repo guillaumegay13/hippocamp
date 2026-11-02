@@ -169,10 +169,10 @@ function csvCell(value) {
 // One row per judged item with empty human columns, for checking the judge by hand.
 function validationSheet(rows, { sessions, facts }) {
   const factsById = new Map(facts.map((fact) => [fact.id, fact]));
-  const header = "system,probe,item,memory,check,fact,judge_pass,judge_cause,evidence,human_pass,human_note";
+  const header = "run,system,probe,item,memory,check,fact,judge_pass,judge_cause,evidence,human_pass,human_note";
   const lines = rows.map((row) => {
     const check = sessions.get(row.probe).checklist.find((entry) => entry.id === row.item).check;
-    const cells = [row.system, row.probe, row.item, row.memory, check, factsById.get(row.fact)?.statement, row.pass === null ? "n/a" : row.pass, row.cause, row.evidence, "", ""];
+    const cells = [row.run, row.system, row.probe, row.item, row.memory, check, factsById.get(row.fact)?.statement, row.pass === null ? "n/a" : row.pass, row.cause, row.evidence, "", ""];
     return cells.map(csvCell).join(",");
   });
 

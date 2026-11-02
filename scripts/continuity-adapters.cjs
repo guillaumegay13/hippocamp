@@ -74,6 +74,7 @@ const ADAPTERS = {
     args: claudeArgs,
     memoryDirs: () => [],
     exportMemory: async () => [],
+    autoLoaded: async () => [],
     isMemoryCall: () => false,
   },
   // Auto-memory lands in <CLAUDE_CONFIG_DIR>/projects/<cwd slug>/memory/*.md (checked live with
@@ -88,6 +89,9 @@ const ADAPTERS = {
       const userFile = path.join(paths.configDir, "CLAUDE.md");
       const files = [...(fsSync.existsSync(userFile) ? [userFile] : []), ...(await markdownFiles(nativeMemoryDir(paths))).filter((file) => file.includes(`${path.sep}memory${path.sep}`))];
       return entriesOf(files, (file) => file === userFile || (path.basename(file) === "MEMORY.md" && file.includes(`repos-${project}${path.sep}memory${path.sep}`)));
+    },
+    async autoLoaded(paths, project) {
+      return (await this.exportMemory(paths, project)).filter((entry) => entry.autoLoaded);
     },
     isMemoryCall: (call, paths) => touches(call, nativeMemoryDir(paths)) || touches(call, "~/.claude/projects"),
   },
@@ -122,12 +126,29 @@ const ADAPTERS = {
     env: (paths, baseEnv = process.env) => ({ ...claudeEnv(paths, baseEnv), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" }),
     args: (options) => [...claudeArgs(options), "--mcp-config", options.paths.mcpConfig],
     memoryDirs: (paths) => [paths.lagoon],
+    // One entry per event: a daily event file holds a whole day of events. Nothing in the Lagoon is
+    // auto-loaded; wake-up files reach the context through the wake_up tool call.
     async exportMemory(paths, project) {
-      return entriesOf(await markdownFiles(paths.lagoon), (file) => {
-        const relative = path.relative(paths.lagoon, file);
-        const inScope = !relative.startsWith("projects") || relative.startsWith(path.join("projects", project));
-        return inScope && AUTO_LOADED.has(path.basename(file));
-      });
+      const entries = [];
+
+      for (const file of await markdownFiles(paths.lagoon)) {
+        const parts = path.relative(paths.lagoon, file).split(path.sep);
+
+        if (parts[0] === "projects" && parts[1] !== project) {
+          continue;
+        }
+
+        const text = await fs.readFile(file, "utf8");
+        const events = parts.includes("events") ? text.split(/\n(?=## )/).filter((part) => part.startsWith("## ")) : [text];
+        events.forEach((event, index) => entries.push({ file: events.length > 1 ? `${file}#${index + 1}` : file, text: event, autoLoaded: false }));
+      }
+
+      return entries;
+    },
+    // The installer's CLAUDE.md block is in context from the start of every session.
+    async autoLoaded(paths) {
+      const file = path.join(paths.configDir, "CLAUDE.md");
+      return fsSync.existsSync(file) ? [{ file, text: await fs.readFile(file, "utf8"), autoLoaded: true }] : [];
     },
     isMemoryCall: (call, paths) => call.name.startsWith("mcp__hippocamp__") || touches(call, paths.lagoon),
   },

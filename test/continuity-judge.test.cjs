@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { ADAPTERS } = require("../scripts/continuity-adapters.cjs");
-const { attributeMisses, blindDigest, judgeMemory, judgeProbe, memoryQuality } = require("../scripts/continuity-judge.cjs");
+const { attributeMisses, blindDigest, blindText, judgeMemory, judgeProbe, memoryQuality } = require("../scripts/continuity-judge.cjs");
 
 const root = "/bench/r1/cc-hippocamp";
 const paths = {
@@ -39,6 +39,16 @@ test("blindDigest hides which arm ran", () => {
 
   assert.match(text, /memory_tool/);
   assert.match(text, /<repo>\/src\/a\.ts/);
+});
+
+test("blindText scrubs arm names, tool names and memory paths from any text, including diffs", () => {
+  const text = blindText(`+ see ${paths.lagoon}/x.md; ToolSearch select:mcp__hippocamp__wake_up; folder -a-repos-cc-native-relay; Hippocamp`, { paths });
+
+  for (const leak of ["hippocamp", "Hippocamp", "mcp__", "cc-native", "lagoon"]) {
+    assert.ok(!text.includes(leak), `${leak} leaked: ${text}`);
+  }
+
+  assert.match(text, /memory_tool/);
 });
 
 test("task judge prompt has no memory snapshot and no arm names", async () => {

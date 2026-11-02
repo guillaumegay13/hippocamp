@@ -9,7 +9,7 @@ const { execFile, spawn: spawnChild } = require("node:child_process");
 const { promisify } = require("node:util");
 const { factDistance, loadDataset, validateDataset } = require("./continuity-dataset.cjs");
 const { complete: completeModel } = require("./eval-locomo.cjs");
-const { attributeMisses, blindDigest, judgeMemory, judgeProbe, transcriptDigest } = require("./continuity-judge.cjs");
+const { attributeMisses, blindDigest, blindText, judgeMemory, judgeProbe, transcriptDigest } = require("./continuity-judge.cjs");
 const { bootstrapDiff, breakdownTable, efficiencyTable, qualityTable, summarize, validationSheet } = require("./continuity-report.cjs");
 const { ADAPTERS, ARMS, AUTO_LOADED, GIT_IDENTITY, MODEL, resolveArm } = require("./continuity-adapters.cjs");
 
@@ -22,18 +22,36 @@ const RESULTS_DIR = path.join(REPO_ROOT, ".context", "continuity");
 const SESSION_COST_RANGE = [0.3, 1.5];
 const SYSTEMS = ARMS;
 
-// Sandboxes live outside this repo, because Claude Code loads CLAUDE.md from parent folders and a
-// sandbox inside the repo would see Hippocamp's own guidance. They also stay out of the OS temp dir,
-// which macOS clears, so a run can be resumed, extended and published days later.
+// Claude Code loads CLAUDE.md (and .claude/CLAUDE.md) from every parent folder, so sandboxes live in a
+// neutral folder outside this repo and outside HOME, whose ~/.claude/CLAUDE.md would otherwise load in
+// every arm. /var/tmp survives reboots, unlike the macOS temp dir, so runs can be resumed days later.
 function benchRoot(env = process.env) {
-  return env.HIPPOCAMP_BENCH_DIR || path.join(env.HOME || os.homedir(), ".cache", "hippocamp-bench");
+  return env.HIPPOCAMP_BENCH_DIR || "/var/tmp/agent-bench";
+}
+
+const INSTRUCTION_FILES = ["CLAUDE.md", "AGENTS.md", path.join(".claude", "CLAUDE.md"), path.join(".claude", "rules")];
+
+function assertNoInstructionFiles(dir) {
+  for (let current = path.resolve(dir); ; current = path.dirname(current)) {
+    const found = INSTRUCTION_FILES.map((file) => path.join(current, file)).find((file) => fsSync.existsSync(file));
+
+    if (found) {
+      throw new Error(`Agent instructions at ${found} would load in every sandbox below it; set HIPPOCAMP_BENCH_DIR elsewhere`);
+    }
+
+    if (path.dirname(current) === current) {
+      return;
+    }
+  }
 }
 
 function sandboxPaths(runId, system, env = process.env) {
   const base = benchRoot(env);
   fsSync.mkdirSync(base, { recursive: true });
   // Resolved, because Claude Code reports its cwd and file paths through symlinks such as macOS /var -> /private/var.
-  const root = path.join(fsSync.realpathSync(base), runId, system);
+  // An opaque folder per arm: Claude Code names native memory after the working folder, and the agent and
+  // the judge both see paths, so no path may name the arm.
+  const root = path.join(fsSync.realpathSync(base), runId, `s-${crypto.createHash("sha256").update(system).digest("hex").slice(0, 10)}`);
   const home = path.join(root, "home");
 
   return {
@@ -194,7 +212,7 @@ function isOffer(finalText) {
 }
 
 // Memory the session can change, saved before it starts so an interrupted attempt leaves no trace.
-async function saveMemory(adapter, paths, id) {
+async function saveMemory(adapter, paths, id, head) {
   const saved = path.join(paths.root, ".pre", id);
   await fs.rm(saved, { recursive: true, force: true });
   await fs.mkdir(saved, { recursive: true });
@@ -206,6 +224,9 @@ async function saveMemory(adapter, paths, id) {
       await fs.writeFile(path.join(saved, `absent-${index}`), "");
     }
   }
+
+  // Written last: its presence means the save is complete and marks the session as started.
+  await fs.writeFile(path.join(saved, "head"), head);
 }
 
 async function restoreMemory(adapter, paths, id) {
@@ -252,18 +273,22 @@ async function runTimeline({ dataset, system, adapter = ADAPTERS[resolveArm(syst
     const record = { id, project: session.project, ok: true, costUsd: 0, sessionUuid: crypto.randomUUID(), fingerprint, turns: 0, offerReplied: false, before: null, after: null };
     Object.assign(record, { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, durationMs: 0, memoryCalls: 0, memoryBytesIn: 0, autoLoadedBytes: 0 });
 
-    // A transcript without a record means an interrupted attempt: drop its uncommitted work and its memory writes.
-    if (fsSync.existsSync(transcriptPath)) {
+    const savedHead = path.join(paths.root, ".pre", id, "head");
+
+    // A started session without a record was interrupted, even inside its first turn: put the repo back
+    // to the saved commit (dropping the agent's own commits too) and restore the memory.
+    if (fsSync.existsSync(savedHead)) {
       record.retried = true;
       await restoreMemory(adapter, paths, id);
-      await git(["reset", "-q", "--hard"], repo);
+      await git(["checkout", "-q", "-f", "main"], repo);
+      await git(["reset", "-q", "--hard", (await fs.readFile(savedHead, "utf8")).trim()], repo);
       await git(["clean", "-fdq"], repo);
     } else {
-      await saveMemory(adapter, paths, id);
+      // The user comes back to main; work a session left on another branch stays there.
+      await git(["checkout", "-q", "main"], repo);
+      await saveMemory(adapter, paths, id, await head(repo));
     }
 
-    // The user comes back to main; work a session left on another branch stays there.
-    await git(["checkout", "-q", "main"], repo);
     record.before = await head(repo);
 
     await fs.rm(transcriptPath, { force: true });
@@ -273,8 +298,8 @@ async function runTimeline({ dataset, system, adapter = ADAPTERS[resolveArm(syst
     }
 
     // Memory already in context when the session starts, before any tool call.
-    for (const entry of await adapter.exportMemory(paths, session.project)) {
-      record.autoLoadedBytes += entry.autoLoaded ? Buffer.byteLength(entry.text) : 0;
+    for (const entry of await adapter.autoLoaded(paths, session.project)) {
+      record.autoLoadedBytes += Buffer.byteLength(entry.text);
     }
 
     const prompts = [...session.turns];
@@ -509,11 +534,12 @@ const HARNESS_FILES = [
   "skills/hippocamp-memory/SKILL.md",
 ];
 
-async function hashFiles(files) {
+// Paths are hashed relative to the repo, so a run resumes the same from any checkout.
+async function hashFiles(files, root) {
   const hash = crypto.createHash("sha256");
 
   for (const file of [...files].sort()) {
-    hash.update(file).update("\0").update(await fs.readFile(file).catch(() => "")).update("\0");
+    hash.update(path.relative(root, file)).update("\0").update(await fs.readFile(file).catch(() => "")).update("\0");
   }
 
   return hash.digest("hex").slice(0, 16);
@@ -521,12 +547,12 @@ async function hashFiles(files) {
 
 async function runManifest({ repoRoot = REPO_ROOT, datasetDir = DATASET_DIR, judgeModel, budgetUsd, versions }) {
   const datasetFiles = (await fs.readdir(datasetDir, { recursive: true, withFileTypes: true }))
-    .filter((entry) => entry.isFile())
-    .map((entry) => path.join(entry.parentPath || entry.path, entry.name));
+    .map((entry) => path.join(entry.parentPath || entry.path, entry.name))
+    .filter((file) => fsSync.statSync(file).isFile() && !path.relative(datasetDir, file).split(path.sep).some((part) => part.startsWith(".") || part === "node_modules"));
 
   return {
-    datasetHash: await hashFiles(datasetFiles.map((file) => path.relative(repoRoot, file)).map((file) => path.join(repoRoot, file))),
-    harnessHash: await hashFiles(HARNESS_FILES.map((file) => path.join(repoRoot, file))),
+    datasetHash: await hashFiles(datasetFiles, repoRoot),
+    harnessHash: await hashFiles(HARNESS_FILES.map((file) => path.join(repoRoot, file)), repoRoot),
     model: MODEL,
     judgeModel,
     budgetUsd,
@@ -539,6 +565,13 @@ async function checkManifest(outDir, runId, manifest, { force = false } = {}) {
   const file = path.join(outDir, "manifest.json");
 
   if (!fsSync.existsSync(file)) {
+    const dirs = (await fs.readdir(outDir, { withFileTypes: true })).filter((entry) => entry.isDirectory());
+    const started = dirs.some((entry) => fsSync.readdirSync(path.join(outDir, entry.name)).some((name) => /^[A-Z]\d+\.json$/.test(name)));
+
+    if (started) {
+      throw new Error(`run ${runId} has sessions but no manifest (made by an older harness); start a new --run`);
+    }
+
     await fs.writeFile(file, `${JSON.stringify(manifest, null, 2)}\n`);
     return;
   }
@@ -556,6 +589,19 @@ async function checkManifest(outDir, runId, manifest, { force = false } = {}) {
 
   saved.changes = [...(saved.changes || []), { at: new Date().toISOString(), keys: changed, now: Object.fromEntries(changed.map((key) => [key, manifest[key]])) }];
   await fs.writeFile(file, `${JSON.stringify(saved, null, 2)}\n`);
+}
+
+// Judged again when the run was extended past the session it was last judged at.
+async function needsQualityJudge(file, through) {
+  const saved = await fs.readFile(file, "utf8").then(JSON.parse, () => null);
+  return !saved || saved.through !== through;
+}
+
+// Human grades typed into the sheet must survive later reports.
+async function writeValidationSheet(file, rows, dataset) {
+  if (!fsSync.existsSync(file)) {
+    await fs.writeFile(file, validationSheet(rows, dataset));
+  }
 }
 
 async function readJsonl(file) {
@@ -608,7 +654,7 @@ async function judgeSystem({ dataset, system, paths, outDir, records, judge, jud
     const items = await judgeProbe({
       session,
       facts: dataset.facts,
-      diff,
+      diff: blindText(diff, { paths }),
       digest: blindDigest(stream.toolCalls, stream.finalText, { adapter, paths }),
       judgeModel: judge,
       complete: recording,
@@ -685,6 +731,7 @@ async function run(options) {
   const settled = await Promise.allSettled(
     options.systems.map(async (system) => {
       const paths = sandboxPaths(options.run, system);
+      assertNoInstructionFiles(path.dirname(paths.root));
       await assertSandboxIntact(paths, path.join(outDir, system));
       await prepareSandbox(dataset, paths, system);
       const records = await runTimeline({
@@ -720,8 +767,9 @@ async function run(options) {
 
   for (const { system, paths } of perSystem) {
     const qualityPath = path.join(outDir, system, "memory-quality.json");
+    const through = timeline[timeline.length - 1];
 
-    if (fsSync.existsSync(qualityPath)) {
+    if (!(await needsQualityJudge(qualityPath, through))) {
       continue;
     }
 
@@ -735,7 +783,7 @@ async function run(options) {
     }
 
     const result = entries.length ? await judgeMemory({ facts: planted, entries, judgeModel: options.judge, complete }) : { labels: [], quality: null };
-    await fs.writeFile(qualityPath, `${JSON.stringify(result, null, 2)}\n`);
+    await fs.writeFile(qualityPath, `${JSON.stringify({ through, ...result }, null, 2)}\n`);
   }
 
   const report = await buildReport([options.run], dataset);
@@ -799,7 +847,8 @@ async function buildReport(runIds, dataset) {
       return `- ${a} vs ${b}: ${diff >= 0 ? "+" : ""}${Math.round(diff * 100)} points (95% CI ${Math.round(low * 100)} to ${Math.round(high * 100)})`;
     });
 
-  await fs.writeFile(path.join(RESULTS_DIR, runIds[0], "validation.csv"), validationSheet(rows, dataset));
+  const sheet = runIds.length === 1 ? path.join(RESULTS_DIR, runIds[0], "validation.csv") : path.join(RESULTS_DIR, `validation-${runIds.join("+")}.csv`);
+  await writeValidationSheet(sheet, rows, dataset);
 
   return [
     `# Work continuity: ${runIds.join(", ")}`,
@@ -836,6 +885,7 @@ async function main() {
 }
 
 module.exports = {
+  assertNoInstructionFiles,
   assertSandboxIntact,
   benchRoot,
   SYSTEMS,
@@ -847,6 +897,7 @@ module.exports = {
   isOffer,
   judgeProbe,
   memorySnapshot,
+  needsQualityJudge,
   parseArgs,
   parseStream,
   prepareSandbox,
@@ -859,6 +910,7 @@ module.exports = {
   summarize,
   transcriptDigest,
   validationSheet,
+  writeValidationSheet,
 };
 
 if (require.main === module) {
