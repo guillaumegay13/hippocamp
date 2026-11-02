@@ -16,6 +16,7 @@ const {
   claudeEnv,
   commitMessage,
   completeViaClaude,
+  factsAsOf,
   isOffer,
   judgeProbe,
   memorySnapshot,
@@ -472,6 +473,21 @@ test("writeValidationSheet never overwrites human grades and records the run", a
   await fs.writeFile(file, "graded by hand");
   await writeValidationSheet(file, rows, { sessions, facts: probeFacts });
   assert.equal(await fs.readFile(file, "utf8"), "graded by hand");
+});
+
+test("factsAsOf keeps facts planted so far and drops replacements that have not happened yet", () => {
+  const facts = [
+    { id: "redis", plantedIn: "A2", supersededBy: "postgres" },
+    { id: "postgres", plantedIn: "A4", supersededBy: null },
+    { id: "old", plantedIn: "A1", supersededBy: "new" },
+    { id: "new", plantedIn: "A2", supersededBy: null },
+  ];
+
+  assert.deepEqual(factsAsOf(facts, ["A1", "A2", "B1"]), [
+    { id: "redis", plantedIn: "A2", supersededBy: null },
+    { id: "old", plantedIn: "A1", supersededBy: "new" },
+    { id: "new", plantedIn: "A2", supersededBy: null },
+  ]);
 });
 
 test("completed sessions are skipped on rerun", async (t) => {

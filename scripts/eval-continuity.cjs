@@ -591,6 +591,13 @@ async function checkManifest(outDir, runId, manifest, { force = false } = {}) {
   await fs.writeFile(file, `${JSON.stringify(saved, null, 2)}\n`);
 }
 
+// The facts as they stand at the end of a (possibly partial) timeline: a replacement planted later does not count yet.
+function factsAsOf(facts, timeline) {
+  const planted = facts.filter((fact) => timeline.includes(fact.plantedIn));
+  const ids = new Set(planted.map((fact) => fact.id));
+  return planted.map((fact) => ({ ...fact, supersededBy: ids.has(fact.supersededBy) ? fact.supersededBy : null }));
+}
+
 // Judged again when the run was extended past the session it was last judged at.
 async function needsQualityJudge(file, through) {
   const saved = await fs.readFile(file, "utf8").then(JSON.parse, () => null);
@@ -763,7 +770,7 @@ async function run(options) {
   }
 
   // What each memory holds at the end of the run, judged blind against the facts planted so far.
-  const planted = dataset.facts.filter((fact) => timeline.includes(fact.plantedIn));
+  const planted = factsAsOf(dataset.facts, timeline);
 
   for (const { system, paths } of perSystem) {
     const qualityPath = path.join(outDir, system, "memory-quality.json");
@@ -894,6 +901,7 @@ module.exports = {
   claudeEnv,
   commitMessage,
   completeViaClaude,
+  factsAsOf,
   isOffer,
   judgeProbe,
   memorySnapshot,
