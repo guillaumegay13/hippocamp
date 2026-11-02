@@ -9,7 +9,8 @@ const { execFile, spawn: spawnChild } = require("node:child_process");
 const { promisify } = require("node:util");
 const { factDistance, loadDataset, validateDataset } = require("./continuity-dataset.cjs");
 const { complete: completeModel } = require("./eval-locomo.cjs");
-const { CAUSES, attributeMisses, blindDigest, judgeMemory, judgeProbe, transcriptDigest } = require("./continuity-judge.cjs");
+const { attributeMisses, blindDigest, judgeMemory, judgeProbe, transcriptDigest } = require("./continuity-judge.cjs");
+const { bootstrapDiff, breakdownTable, efficiencyTable, qualityTable, summarize, validationSheet } = require("./continuity-report.cjs");
 const { ADAPTERS, ARMS, AUTO_LOADED, GIT_IDENTITY, MODEL, resolveArm } = require("./continuity-adapters.cjs");
 
 const execFileAsync = promisify(execFile);
@@ -394,62 +395,6 @@ async function probeDiff(repo, before, after) {
   return cap(stdout, 60000);
 }
 
-const KINDS = ["state", "decision", "constraint", "asset", "done", "preference"];
-const BANDS = [
-  ["1-2", (distance) => distance <= 2],
-  ["3-5", (distance) => distance >= 3 && distance <= 5],
-  ["6+", (distance) => distance >= 6],
-];
-
-// N/A items (pass === null) count in neither direction.
-function passRate(rows) {
-  const graded = rows.filter((row) => row.pass !== null);
-  return graded.length ? `${Math.round((100 * graded.filter((row) => row.pass).length) / graded.length)}%` : "-";
-}
-
-// rows: judged checklist items tagged with system, kind and distance. records: session records tagged with system.
-function summarize(rows, records) {
-  const header = ["System", "Pass", "Memory-only", ...KINDS, ...BANDS.map(([label]) => label), ...CAUSES, "N/A", "Agent $", "Failed sessions"];
-  const lines = [`| ${header.join(" | ")} |`, `|${header.map(() => "---").join("|")}|`];
-
-  for (const system of SYSTEMS.filter((name) => rows.some((row) => row.system === name))) {
-    const mine = rows.filter((row) => row.system === system);
-    const sessions = records.filter((record) => record.system === system);
-    const cells = [
-      system,
-      passRate(mine),
-      passRate(mine.filter((row) => row.memory)),
-      ...KINDS.map((kind) => passRate(mine.filter((row) => row.kind === kind))),
-      ...BANDS.map(([, inBand]) => passRate(mine.filter((row) => inBand(row.distance)))),
-      ...CAUSES.map((cause) => String(mine.filter((row) => row.cause === cause).length)),
-      String(mine.filter((row) => row.pass === null).length),
-      `$${sessions.reduce((sum, record) => sum + record.costUsd, 0).toFixed(2)}`,
-      String(sessions.filter((record) => !record.ok).length),
-    ];
-    lines.push(`| ${cells.join(" | ")} |`);
-  }
-
-  return lines.join("\n");
-}
-
-function csvCell(value) {
-  const text = value === null || value === undefined ? "" : String(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-// One row per judged item with empty human columns, for checking the judge by hand.
-function validationSheet(rows, { sessions, facts }) {
-  const factsById = new Map(facts.map((fact) => [fact.id, fact]));
-  const header = "system,probe,item,memory,check,fact,judge_pass,judge_cause,evidence,human_pass,human_note";
-  const lines = rows.map((row) => {
-    const check = sessions.get(row.probe).checklist.find((entry) => entry.id === row.item).check;
-    const cells = [row.system, row.probe, row.item, row.memory, check, factsById.get(row.fact)?.statement, row.pass === null ? "n/a" : row.pass, row.cause, row.evidence, "", ""];
-    return cells.map(csvCell).join(",");
-  });
-
-  return `${[header, ...lines].join("\n")}\n`;
-}
-
 function printHelp() {
   console.log(`Hippocamp work continuity eval
 
@@ -494,6 +439,7 @@ function parseArgs(argv) {
     judge: MODEL,
     dryRun: false,
     forceManifest: false,
+    report: null,
     help: false,
   };
 
@@ -510,6 +456,8 @@ function parseArgs(argv) {
 
     if (arg === "--help" || arg === "-h") {
       options.help = true;
+    } else if (arg === "--report") {
+      options.report = next().split(",").filter(Boolean);
     } else if (arg === "--force-manifest") {
       options.forceManifest = true;
     } else if (arg === "--dry-run") {
@@ -784,14 +732,82 @@ async function run(options) {
     await fs.writeFile(qualityPath, `${JSON.stringify(result, null, 2)}\n`);
   }
 
-  const rows = (await readJsonl(judgedPath)).filter((row) => options.systems.includes(row.system) && timeline.includes(row.probe));
-  const records = perSystem.flatMap(({ system, records }) => records.map((record) => ({ ...record, system })));
-  const report = `# Work continuity run ${options.run}\n\n${summarize(rows, records)}\n`;
-
+  const report = await buildReport([options.run], dataset);
   await fs.writeFile(path.join(outDir, "report.md"), report);
-  await fs.writeFile(path.join(outDir, "validation.csv"), validationSheet(rows, dataset));
   console.log(`\n${report}`);
   console.log(`Results: ${outDir}`);
+}
+
+// Judged rows, session records and memory quality of one finished (or partial) run, tagged with its id.
+async function loadRun(runId) {
+  const outDir = path.join(RESULTS_DIR, runId);
+  // Runs from before the adapters used the names none, native and hippocamp.
+  const arm = (name) => {
+    try {
+      return resolveArm(name);
+    } catch {
+      return name;
+    }
+  };
+  const rows = (await readJsonl(path.join(outDir, "judged.jsonl"))).map((row) => ({ ...row, system: arm(row.system), run: runId }));
+  const records = [];
+  const qualities = {};
+
+  for (const entry of await fs.readdir(outDir, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const dir = path.join(outDir, entry.name);
+
+    for (const file of (await fs.readdir(dir)).filter((name) => /^[A-Z]\d+\.json$/.test(name))) {
+      records.push({ ...JSON.parse(await fs.readFile(path.join(dir, file), "utf8")), system: arm(entry.name), run: runId });
+    }
+
+    const quality = path.join(dir, "memory-quality.json");
+    if (fsSync.existsSync(quality)) {
+      qualities[arm(entry.name)] = JSON.parse(await fs.readFile(quality, "utf8")).quality;
+    }
+  }
+
+  return { rows, records, qualities };
+}
+
+async function buildReport(runIds, dataset) {
+  const loaded = await Promise.all(runIds.map(loadRun));
+  const rows = loaded.flatMap((run) => run.rows);
+  const records = loaded.flatMap((run) => run.records);
+  const qualities = {};
+
+  for (const run of loaded) {
+    for (const [system, quality] of Object.entries(run.qualities)) {
+      qualities[system] = [...(qualities[system] || []), quality];
+    }
+  }
+
+  const pairs = [["cc-hippocamp", "cc-native"], ...ARMS.filter((arm) => arm !== "cc-none").map((arm) => [arm, "cc-none"])];
+  const intervals = pairs
+    .filter(([a, b]) => rows.some((row) => row.system === a) && rows.some((row) => row.system === b))
+    .map(([a, b]) => {
+      const { diff, low, high } = bootstrapDiff(rows.filter((row) => row.system === a), rows.filter((row) => row.system === b));
+      return `- ${a} vs ${b}: ${diff >= 0 ? "+" : ""}${Math.round(diff * 100)} points (95% CI ${Math.round(low * 100)} to ${Math.round(high * 100)})`;
+    });
+
+  await fs.writeFile(path.join(RESULTS_DIR, runIds[0], "validation.csv"), validationSheet(rows, dataset));
+
+  return [
+    `# Work continuity: ${runIds.join(", ")}`,
+    "## Outcome",
+    summarize(rows, records),
+    "## By kind and distance",
+    breakdownTable(rows),
+    "## Efficiency",
+    efficiencyTable(records, rows),
+    "## Memory quality",
+    Object.keys(qualities).length ? qualityTable(qualities) : "(not measured in these runs)",
+    "## Differences (bootstrap over probes)",
+    intervals.length ? intervals.join("\n") : "(needs two arms)",
+  ].join("\n\n") + "\n";
 }
 
 async function main() {
@@ -799,6 +815,14 @@ async function main() {
 
   if (options.help) {
     printHelp();
+    return;
+  }
+
+  if (options.report) {
+    const report = await buildReport(options.report, await loadDataset(DATASET_DIR));
+    const file = path.join(RESULTS_DIR, `report-${options.report.join("+")}.md`);
+    await fs.writeFile(file, report);
+    console.log(`${report}\nReport: ${file}`);
     return;
   }
 

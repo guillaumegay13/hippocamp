@@ -25,7 +25,6 @@ const {
   runManifest,
   runTimeline,
   sandboxPaths,
-  summarize,
   transcriptDigest,
   validationSheet,
 } = require("../scripts/eval-continuity.cjs");
@@ -500,27 +499,6 @@ test("judge reply that is not JSON fails every item", async () => {
   assert.deepEqual(items.map((item) => item.cause), ["judge-missing", "judge-missing"]);
 });
 
-test("summarize buckets by kind and distance", () => {
-  const rows = [
-    { system: "cc-hippocamp", kind: "decision", distance: 2, pass: true, cause: null },
-    { system: "cc-hippocamp", kind: "state", distance: 7, pass: false, cause: "not-recalled" },
-    { system: "cc-none", kind: "decision", distance: 4, pass: false, cause: "never-stored" },
-  ];
-  const records = [
-    { system: "cc-hippocamp", ok: true, costUsd: 1.25 },
-    { system: "cc-hippocamp", ok: false, costUsd: 0.5 },
-    { system: "cc-none", ok: true, costUsd: 1 },
-  ];
-  const table = summarize(rows, records);
-  const hippocampRow = table.split("\n").find((line) => line.startsWith("| cc-hippocamp |"));
-  const noneRow = table.split("\n").find((line) => line.startsWith("| cc-none |"));
-
-  assert.ok(hippocampRow.startsWith("| cc-hippocamp | 50% |"), hippocampRow);
-  assert.ok(hippocampRow.includes("| $1.75 | 1 |"), hippocampRow);
-  assert.ok(noneRow.startsWith("| cc-none | 0% |"), noneRow);
-  assert.ok(table.split("\n")[0].includes("| 1-2 | 3-5 | 6+ |"));
-});
-
 test("runTimeline snapshots memory before each probe session runs", async (t) => {
   const { dataset, paths, outDir, calls } = await runnerFixture(t);
   dataset.sessions.get("S2").kind = "probe";
@@ -558,21 +536,6 @@ test("judge n/a items stay out of the pass rate and leak items are framed as mus
     { item: "P1-1", pass: null, evidence: "" },
     { item: "P1-2", pass: false, evidence: "" },
   ]);
-
-  const table = summarize(
-    [
-      { system: "cc-hippocamp", kind: "decision", distance: 2, pass: null, cause: null, memory: true },
-      { system: "cc-hippocamp", kind: "decision", distance: 2, pass: true, cause: null, memory: true },
-      { system: "cc-hippocamp", kind: "state", distance: 2, pass: false, cause: "ignored", memory: false },
-    ],
-    [],
-  );
-  const header = table.split("\n")[0].split(" | ");
-  const row = table.split("\n").find((line) => line.startsWith("| cc-hippocamp |")).split(" | ");
-
-  assert.equal(row[1], "50%");
-  assert.equal(row[header.indexOf("Memory-only")], "100%");
-  assert.equal(row[header.indexOf("N/A")], "1");
 });
 
 test("parseStream attaches tool results and the digest shows memory results", () => {
