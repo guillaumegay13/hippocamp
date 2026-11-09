@@ -1084,7 +1084,10 @@ async function readMemoryFile({ scope, path: relativePath, projectRoot }) {
 async function writeMemoryFile({ scope, path: relativePath, content, projectRoot, sync = true }) {
   const target = resolveScopedPath(scope, relativePath, projectRoot);
 
-  if (target.path === "events" || target.path.startsWith("events/")) {
+  // Event logs are append-only in every scope, including a project's log reached from the global root.
+  const fromGlobal = path.relative(getGlobalRoot(), target.absolutePath).split(path.sep);
+
+  if (target.path === "events" || target.path.startsWith("events/") || fromGlobal[0] === "events" || (fromGlobal[0] === "projects" && fromGlobal[2] === "events")) {
     throw new Error("events/ is append-only. Use append_event with a title and keywords instead.");
   }
 
@@ -1273,7 +1276,8 @@ async function collectEventDocuments({ scope, eventFiles }) {
       index = null;
     }
 
-    const markdownName = typeof index?.path === "string" ? index.path : indexName.replace(/\.index\.json$/, ".md");
+    // The log always sits next to its index; a path field inside the index is never trusted.
+    const markdownName = indexName.replace(/\.index\.json$/, ".md");
 
     if (!index || !Array.isArray(index.events)) {
       continue;
