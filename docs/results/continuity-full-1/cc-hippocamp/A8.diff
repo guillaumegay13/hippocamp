@@ -1,0 +1,229 @@
+diff --git a/README.md b/README.md
+index 4327475..db5154b 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@ If the target returns a 5xx, the delivery is retried (up to 5 attempts, exponent
+ 
+ Admin API (enabled only when `ADMIN_TOKEN` is set; send `Authorization: Bearer $ADMIN_TOKEN`):
+ 
+-- `GET /admin/deliveries` lists deliveries, newest first
++- `GET /admin/deliveries` lists deliveries, newest first, paginated by cursor: `?limit=` (1-200, default 50) and `?cursor=` (pass the previous response's `nextCursor`; it is `null` on the last page)
+ - `GET /admin/deliveries/:id` returns one delivery
+ - `GET /admin/deliveries/:id/attempts` returns its attempt history, oldest first (timestamps in epoch ms)
+ 
+diff --git a/src/routes/admin.ts b/src/routes/admin.ts
+index 91542a1..e96a8db 100644
+--- a/src/routes/admin.ts
++++ b/src/routes/admin.ts
+@@ -1,6 +1,6 @@
+ import { timingSafeEqual } from "node:crypto";
+ import { headerValue } from "../lib/signature";
+-import { Attempt, Delivery, DeliveryStatus, Store } from "../store";
++import { Attempt, Delivery, DeliveryStatus, ListCursor, Store } from "../store";
+ 
+ export type AdminResult = { status: number; body: Record<string, unknown> };
+ 
+@@ -49,6 +49,33 @@ export function toAttemptSummary(attempt: Attempt): AttemptSummary {
+   };
+ }
+ 
++export const DEFAULT_PAGE_SIZE = 50;
++export const MAX_PAGE_SIZE = 200;
++
++// Cursors are opaque to clients: base64url of the last returned delivery's (receivedAt, id).
++export function encodeCursor(cursor: ListCursor): string {
++  return Buffer.from(JSON.stringify([cursor.receivedAt, cursor.id])).toString("base64url");
++}
++
++export function decodeCursor(raw: string): ListCursor | undefined {
++  try {
++    const value: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
++    if (!Array.isArray(value) || value.length !== 2) return undefined;
++    const [receivedAt, id] = value;
++    if (!Number.isSafeInteger(receivedAt) || typeof id !== "string" || id === "") return undefined;
++    return { receivedAt, id };
++  } catch {
++    return undefined;
++  }
++}
++
++function parseLimit(raw: string | null): number | undefined {
++  if (raw === null) return DEFAULT_PAGE_SIZE;
++  if (!/^\d+$/.test(raw)) return undefined;
++  const limit = Number(raw);
++  return limit >= 1 && limit <= MAX_PAGE_SIZE ? limit : undefined;
++}
++
+ function authorized(token: string | undefined, header: string | undefined): boolean {
+   if (!token || !header?.startsWith("Bearer ")) return false;
+   const given = Buffer.from(header.slice("Bearer ".length));
+@@ -56,15 +83,19 @@ function authorized(token: string | undefined, header: string | undefined): bool
+   return given.length === expected.length && timingSafeEqual(given, expected);
+ }
+ 
++// `url` is the request URL path plus optional query string.
++// GET /admin/deliveries is paginated: `?limit=` (1-200, default 50) and `?cursor=` (the previous page's
++// nextCursor). nextCursor is null on the last page.
+ // Handles GET /admin/deliveries, GET /admin/deliveries/:id and GET /admin/deliveries/:id/attempts. Returns undefined for paths it doesn't own.
+ // Requires `Authorization: Bearer <token>`; with no token configured the admin API is disabled.
+ export async function handleAdmin(
+   method: string | undefined,
+-  path: string,
++  url: string,
+   headers: Record<string, string | string[] | undefined>,
+   store: Store,
+   token: string | undefined,
+ ): Promise<AdminResult | undefined> {
++  const [path, query = ""] = url.split("?", 2);
+   const match = path.match(/^\/admin\/deliveries(?:\/([^/]+)(\/attempts)?)?\/?$/);
+   if (!match) return undefined;
+ 
+@@ -73,8 +104,19 @@ export async function handleAdmin(
+   if (method !== "GET") return { status: 405, body: { error: "method not allowed" } };
+ 
+   if (match[1] === undefined) {
+-    const deliveries = (await store.list()).sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime());
+-    return { status: 200, body: { deliveries: deliveries.map(toSummary) } };
++    const params = new URLSearchParams(query);
++    const limit = parseLimit(params.get("limit"));
++    if (limit === undefined) return { status: 400, body: { error: `limit must be an integer from 1 to ${MAX_PAGE_SIZE}` } };
++    const rawCursor = params.get("cursor");
++    const after = rawCursor === null ? undefined : decodeCursor(rawCursor);
++    if (rawCursor !== null && !after) return { status: 400, body: { error: "invalid cursor" } };
++
++    // Fetch one extra row to learn whether another page exists without a separate count.
++    const rows = await store.listPage(limit + 1, after);
++    const page = rows.slice(0, limit);
++    const last = page[page.length - 1];
++    const nextCursor = rows.length > limit && last ? encodeCursor({ receivedAt: last.receivedAt.getTime(), id: last.id }) : null;
++    return { status: 200, body: { deliveries: page.map(toSummary), nextCursor } };
+   }
+ 
+   const delivery = await store.get(match[1]);
+diff --git a/src/server.ts b/src/server.ts
+index d2e4c80..10b14da 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -21,7 +21,7 @@ const server = createServer(async (req, res) => {
+     chunks.push(chunk as Buffer);
+   }
+ 
+-  const admin = await handleAdmin(req.method, (req.url ?? "").split("?")[0], req.headers, store, adminToken);
++  const admin = await handleAdmin(req.method, req.url ?? "", req.headers, store, adminToken);
+ 
+   if (admin) {
+     res.writeHead(admin.status, { "content-type": "application/json" }).end(JSON.stringify(admin.body));
+diff --git a/src/store.ts b/src/store.ts
+index e59b88b..846e360 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -22,10 +22,27 @@ export type Attempt = {
+   error?: string; // set when no response arrived
+ };
+ 
++// Position in the newest-first delivery order. id breaks ties between deliveries received in the same ms.
++export type ListCursor = { receivedAt: number; id: string }; // receivedAt in epoch ms
++
++// Newest first: receivedAt descending, then id descending.
++function newestFirst(a: Delivery, b: Delivery): number {
++  const byTime = b.receivedAt.getTime() - a.receivedAt.getTime();
++  return byTime !== 0 ? byTime : a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
++}
++
++function isAfter(delivery: Delivery, cursor: ListCursor): boolean {
++  const t = delivery.receivedAt.getTime();
++  return t < cursor.receivedAt || (t === cursor.receivedAt && delivery.id < cursor.id);
++}
++
+ export interface Store {
+   save(delivery: Delivery): Promise<void>;
+   get(id: string): Promise<Delivery | undefined>;
+   list(): Promise<Delivery[]>;
++  // Keyset page in newest-first order (receivedAt desc, id desc), strictly after `after` when given.
++  // Stable under concurrent inserts: new deliveries sort before any cursor already handed out.
++  listPage(limit: number, after?: ListCursor): Promise<Delivery[]>;
+   recordAttempt(deliveryId: string, attempt: Attempt): Promise<void>;
+   // Oldest first.
+   attempts(deliveryId: string): Promise<Attempt[]>;
+@@ -48,6 +65,14 @@ export class MemoryStore implements Store {
+     return [...this.deliveries.values()].map((delivery) => ({ ...delivery }));
+   }
+ 
++  async listPage(limit: number, after?: ListCursor): Promise<Delivery[]> {
++    return [...this.deliveries.values()]
++      .filter((delivery) => !after || isAfter(delivery, after))
++      .sort(newestFirst)
++      .slice(0, limit)
++      .map((delivery) => ({ ...delivery }));
++  }
++
+   async recordAttempt(deliveryId: string, attempt: Attempt): Promise<void> {
+     const log = this.attemptLog.get(deliveryId) ?? [];
+     log.push({ ...attempt });
+diff --git a/test/admin.test.ts b/test/admin.test.ts
+index 618f752..be77928 100644
+--- a/test/admin.test.ts
++++ b/test/admin.test.ts
+@@ -95,3 +95,62 @@ test("attempts for an unknown delivery is a 404, and the route needs the token",
+   assert.equal((await handleAdmin("POST", "/admin/deliveries/d1/attempts", auth, store, TOKEN))?.status, 405);
+   assert.equal(await handleAdmin("GET", "/admin/deliveries/d1/other", auth, store, TOKEN), undefined);
+ });
++
++async function page(store: MemoryStore, query: string) {
++  const result = await handleAdmin("GET", `/admin/deliveries${query}`, auth, store, TOKEN);
++  assert.equal(result?.status, 200);
++  return { ids: (result!.body.deliveries as Array<{ id: string }>).map((d) => d.id), nextCursor: result!.body.nextCursor as string | null };
++}
++
++test("lists are a single page with a null cursor when everything fits", async () => {
++  assert.deepEqual(await page(await seeded(), ""), { ids: ["d2", "d1"], nextCursor: null });
++});
++
++test("walks pages with a cursor, breaking receivedAt ties by id", async () => {
++  const store = new MemoryStore();
++  // d-b, d-c and d-d share a millisecond, so the cursor must carry the id to split them.
++  for (const [id, at] of [["d-a", 1_000], ["d-b", 2_000], ["d-c", 2_000], ["d-d", 2_000], ["d-e", 3_000]] as const) {
++    await store.save(delivery(id, at));
++  }
++
++  const first = await page(store, "?limit=2");
++  assert.deepEqual(first.ids, ["d-e", "d-d"]);
++  const second = await page(store, `?limit=2&cursor=${first.nextCursor}`);
++  assert.deepEqual(second.ids, ["d-c", "d-b"]);
++  const third = await page(store, `?limit=2&cursor=${second.nextCursor}`);
++  assert.deepEqual(third, { ids: ["d-a"], nextCursor: null });
++});
++
++test("deliveries inserted while paging don't shift or repeat later pages", async () => {
++  const store = new MemoryStore();
++  for (let i = 1; i <= 4; i++) await store.save(delivery(`d${i}`, i * 1_000));
++
++  const first = await page(store, "?limit=2");
++  assert.deepEqual(first.ids, ["d4", "d3"]);
++  await store.save(delivery("d5", 5_000));
++  await store.save(delivery("d6", 6_000));
++  assert.deepEqual(await page(store, `?limit=2&cursor=${first.nextCursor}`), { ids: ["d2", "d1"], nextCursor: null });
++});
++
++test("an exact final page has a null cursor", async () => {
++  assert.deepEqual(await page(await seeded(), "?limit=2"), { ids: ["d2", "d1"], nextCursor: null });
++});
++
++test("defaults to 50 per page", async () => {
++  const store = new MemoryStore();
++  for (let i = 0; i < 51; i++) await store.save(delivery(`d${i}`, i));
++  const first = await page(store, "");
++  assert.equal(first.ids.length, 50);
++  assert.deepEqual(await page(store, `?cursor=${first.nextCursor}`), { ids: ["d0"], nextCursor: null });
++});
++
++test("bad limit or cursor is a 400", async () => {
++  const store = await seeded();
++  for (const query of ["?limit=0", "?limit=201", "?limit=abc", "?limit=1.5", "?limit=", "?cursor=nope", "?cursor=", `?cursor=${Buffer.from('{"x":1}').toString("base64url")}`]) {
++    assert.equal((await handleAdmin("GET", `/admin/deliveries${query}`, auth, store, TOKEN))?.status, 400, query);
++  }
++});
++
++test("query strings don't affect routing of single-delivery paths", async () => {
++  assert.equal((await handleAdmin("GET", "/admin/deliveries/d1?x=1", auth, await seeded(), TOKEN))?.status, 200);
++});

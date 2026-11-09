@@ -1,0 +1,233 @@
+diff --git a/README.md b/README.md
+index 6b906eb..20e1523 100644
+--- a/README.md
++++ b/README.md
+@@ -12,7 +12,7 @@ By default the signature is read from `X-Signature`. Set `"provider": "acme"` on
+ 
+ If the target returns a 5xx, the delivery is put on a retry queue in a Postgres `deliveries` table (`DATABASE_URL`, default `postgres://localhost:5432/relay`; the table is created on startup) and retried with exponential backoff (200 ms, 400 ms, 800 ms, ...), up to 5 attempts in total. A source can set a slower starting delay with `"retry": { "baseDelayMs": 5000 }` (5 s, 10 s, 20 s, 40 s); it's read when each retry runs, so changing it also affects retries already queued. A background worker in the server process runs the retries, so a restart doesn't lose pending ones.
+ 
+-Admin API: `GET /admin/deliveries` and `GET /admin/deliveries/:id` return delivery metadata (id, source, target, status, attempts, `receivedAt` in epoch ms). `GET /admin/deliveries/:id/attempts` returns the attempt history, oldest first (`attempt`, `at` in epoch ms, `ok`, `statusCode` or `null` on a network error, and `error` when there was one). Payload bodies are never returned.
++Admin API: `GET /admin/deliveries` and `GET /admin/deliveries/:id` return delivery metadata (id, source, target, status, attempts, `receivedAt` in epoch ms). `GET /admin/deliveries/:id/attempts` returns the attempt history, oldest first (`attempt`, `at` in epoch ms, `ok`, `statusCode` or `null` on a network error, and `error` when there was one). Payload bodies are never returned. `GET /admin/deliveries` is cursor-paginated, oldest first (by `receivedAt`, then `id`): pass `?limit=` (1-200, default 50) and `?cursor=` set to the previous response's `nextCursor`, which is `null` on the last page. A bad `limit` or `cursor` returns 400.
+ 
+ ```sh
+ npm install
+diff --git a/src/routes/admin.ts b/src/routes/admin.ts
+index 16b9d96..52d1238 100644
+--- a/src/routes/admin.ts
++++ b/src/routes/admin.ts
+@@ -1,4 +1,4 @@
+-import { Attempt, Delivery, Store } from "../store";
++import { Attempt, Delivery, ListAfter, Store } from "../store";
+ 
+ export type AdminResult = { status: number; body: unknown };
+ 
+@@ -25,9 +25,50 @@ export function toSummary(delivery: Delivery): DeliverySummary {
+   };
+ }
+ 
+-export async function listDeliveries(store: Store): Promise<AdminResult> {
+-  const deliveries = await store.list();
+-  return { status: 200, body: { deliveries: deliveries.map(toSummary) } };
++export const DEFAULT_PAGE_SIZE = 50;
++export const MAX_PAGE_SIZE = 200;
++
++// Cursors are opaque to clients: base64url JSON of the last row's (receivedAt, id) keyset.
++export function encodeCursor(after: ListAfter): string {
++  return Buffer.from(JSON.stringify([after.receivedAt, after.id])).toString("base64url");
++}
++
++export function decodeCursor(cursor: string): ListAfter | undefined {
++  try {
++    const value: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
++    if (Array.isArray(value) && value.length === 2 && Number.isSafeInteger(value[0]) && typeof value[1] === "string") {
++      return { receivedAt: value[0], id: value[1] };
++    }
++  } catch {
++    // fall through
++  }
++  return undefined;
++}
++
++export type ListQuery = { cursor?: string | null; limit?: string | null };
++
++// Cursor-based (keyset) pagination, ordered by receivedAt then id, oldest first. Unlike offsets,
++// rows inserted while a client is paging never cause skips or duplicates.
++export async function listDeliveries(store: Store, query: ListQuery = {}): Promise<AdminResult> {
++  let limit = DEFAULT_PAGE_SIZE;
++  if (query.limit != null) {
++    limit = Number(query.limit);
++    if (!/^\d+$/.test(query.limit) || limit < 1 || limit > MAX_PAGE_SIZE) {
++      return { status: 400, body: { error: `limit must be an integer from 1 to ${MAX_PAGE_SIZE}` } };
++    }
++  }
++  let after: ListAfter | undefined;
++  if (query.cursor != null) {
++    after = decodeCursor(query.cursor);
++    if (!after) return { status: 400, body: { error: "invalid cursor" } };
++  }
++
++  // Fetch one extra row to learn whether another page exists.
++  const rows = await store.list({ after, limit: limit + 1 });
++  const page = rows.slice(0, limit);
++  const last = page[page.length - 1];
++  const nextCursor = rows.length > limit ? encodeCursor({ receivedAt: last.receivedAt.getTime(), id: last.id }) : null;
++  return { status: 200, body: { deliveries: page.map(toSummary), nextCursor } };
+ }
+ 
+ export async function getDelivery(id: string, store: Store): Promise<AdminResult> {
+diff --git a/src/server.ts b/src/server.ts
+index e95f2b8..39eeb2b 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -21,12 +21,15 @@ const server = createServer(async (req, res) => {
+   }
+ 
+   if (req.method === "GET") {
+-    const path = req.url?.split("?")[0];
+-    const one = path?.match(/^\/admin\/deliveries\/([^/]+)$/);
+-    const attempts = path?.match(/^\/admin\/deliveries\/([^/]+)\/attempts$/);
++    const url = req.url ?? "";
++    const q = url.indexOf("?");
++    const path = q === -1 ? url : url.slice(0, q);
++    const params = new URLSearchParams(q === -1 ? "" : url.slice(q + 1));
++    const one = path.match(/^\/admin\/deliveries\/([^/]+)$/);
++    const attempts = path.match(/^\/admin\/deliveries\/([^/]+)\/attempts$/);
+     const result =
+       path === "/admin/deliveries"
+-        ? await listDeliveries(store)
++        ? await listDeliveries(store, { cursor: params.get("cursor"), limit: params.get("limit") })
+         : one
+           ? await getDelivery(decodeURIComponent(one[1]), store)
+           : attempts
+diff --git a/src/store.ts b/src/store.ts
+index 64a05a1..fc1d669 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -19,10 +19,15 @@ export type Attempt = {
+   error?: string;
+ };
+ 
++// Keyset position for paging: rows strictly after (receivedAt, id) in ascending order.
++export type ListAfter = { receivedAt: number; id: string };
++export type ListOptions = { after?: ListAfter; limit?: number };
++
+ export interface Store {
+   save(delivery: Delivery): Promise<void>;
+   get(id: string): Promise<Delivery | undefined>;
+-  list(): Promise<Delivery[]>;
++  // Deliveries ordered by (receivedAt, id) ascending.
++  list(options?: ListOptions): Promise<Delivery[]>;
+   addAttempt(id: string, attempt: Attempt): Promise<void>;
+   // Attempts for a delivery, oldest first.
+   attempts(id: string): Promise<Attempt[]>;
+@@ -41,8 +46,12 @@ export class MemoryStore implements Store {
+     return delivery && { ...delivery };
+   }
+ 
+-  async list(): Promise<Delivery[]> {
+-    return [...this.deliveries.values()].map((delivery) => ({ ...delivery }));
++  async list(options: ListOptions = {}): Promise<Delivery[]> {
++    const { after, limit } = options;
++    const rows = [...this.deliveries.values()]
++      .sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime() || compareIds(a.id, b.id))
++      .filter((d) => !after || d.receivedAt.getTime() > after.receivedAt || (d.receivedAt.getTime() === after.receivedAt && compareIds(d.id, after.id) > 0));
++    return (limit === undefined ? rows : rows.slice(0, limit)).map((delivery) => ({ ...delivery }));
+   }
+ 
+   async addAttempt(id: string, attempt: Attempt): Promise<void> {
+@@ -53,3 +62,7 @@ export class MemoryStore implements Store {
+     return (this.history.get(id) ?? []).map((attempt) => ({ ...attempt }));
+   }
+ }
++
++function compareIds(a: string, b: string): number {
++  return a < b ? -1 : a > b ? 1 : 0;
++}
+diff --git a/test/admin.test.ts b/test/admin.test.ts
+index e064906..ed061c7 100644
+--- a/test/admin.test.ts
++++ b/test/admin.test.ts
+@@ -2,7 +2,7 @@ import test from "node:test";
+ import assert from "node:assert/strict";
+ import { deliver } from "../src/deliver";
+ import { MemoryRetryQueue } from "../src/queue";
+-import { getDelivery, getDeliveryAttempts, listDeliveries } from "../src/routes/admin";
++import { encodeCursor, getDelivery, getDeliveryAttempts, listDeliveries } from "../src/routes/admin";
+ import { Delivery, MemoryStore } from "../src/store";
+ 
+ const secretBody = JSON.stringify({ email: "jane@example.com" });
+@@ -24,10 +24,74 @@ test("GET /admin/deliveries lists deliveries without payload bodies", async () =
+   assert.equal(result.status, 200);
+   assert.deepEqual(result.body, {
+     deliveries: ["d1", "d2"].map((id) => ({ id, source: "github", target: "http://client.test/in", status: "failed", attempts: 5, receivedAt: 1700000000000 })),
++    nextCursor: null,
+   });
+   assert.ok(!JSON.stringify(result.body).includes("jane@example.com"));
+ });
+ 
++type Page = { deliveries: Array<{ id: string; receivedAt: number }>; nextCursor: string | null };
++
++async function page(store: MemoryStore, query: { cursor?: string | null; limit?: string }) {
++  const result = await listDeliveries(store, query);
++  assert.equal(result.status, 200);
++  return result.body as Page;
++}
++
++test("GET /admin/deliveries pages by cursor in (receivedAt, id) order", async () => {
++  const store = new MemoryStore();
++  // Inserted out of order; d-b and d-c share a receivedAt so id breaks the tie.
++  await store.save({ ...delivery("d-c"), receivedAt: new Date(2000) });
++  await store.save({ ...delivery("d-a"), receivedAt: new Date(1000) });
++  await store.save({ ...delivery("d-d"), receivedAt: new Date(3000) });
++  await store.save({ ...delivery("d-b"), receivedAt: new Date(2000) });
++
++  const first = await page(store, { limit: "2" });
++  assert.deepEqual(first.deliveries.map((d) => d.id), ["d-a", "d-b"]);
++  assert.equal(typeof first.nextCursor, "string");
++
++  const second = await page(store, { cursor: first.nextCursor, limit: "2" });
++  assert.deepEqual(second.deliveries.map((d) => d.id), ["d-c", "d-d"]);
++  assert.equal(second.nextCursor, null);
++  assert.ok(!JSON.stringify([first, second]).includes("jane@example.com"));
++});
++
++test("GET /admin/deliveries cursor neither skips nor duplicates when rows are inserted mid-paging", async () => {
++  const store = new MemoryStore();
++  for (const [id, at] of [["d1", 1000], ["d2", 2000], ["d3", 3000]] as const) await store.save({ ...delivery(id), receivedAt: new Date(at) });
++
++  const first = await page(store, { limit: "2" });
++  // An older row (would shift an offset) and a newer row arrive between page requests.
++  await store.save({ ...delivery("d0"), receivedAt: new Date(500) });
++  await store.save({ ...delivery("d4"), receivedAt: new Date(4000) });
++  const second = await page(store, { cursor: first.nextCursor, limit: "2" });
++
++  assert.deepEqual(first.deliveries.map((d) => d.id), ["d1", "d2"]);
++  assert.deepEqual(second.deliveries.map((d) => d.id), ["d3", "d4"]);
++  assert.equal(second.nextCursor, null);
++});
++
++test("GET /admin/deliveries defaults to 50 per page", async () => {
++  const store = new MemoryStore();
++  for (let i = 0; i < 51; i++) await store.save({ ...delivery(`d${String(i).padStart(2, "0")}`), receivedAt: new Date(i) });
++
++  const first = await page(store, {});
++  assert.equal(first.deliveries.length, 50);
++  const second = await page(store, { cursor: first.nextCursor });
++  assert.deepEqual(second.deliveries.map((d) => d.id), ["d50"]);
++  assert.equal(second.nextCursor, null);
++});
++
++test("GET /admin/deliveries rejects a bad limit or cursor with 400", async () => {
++  const store = await seeded();
++  for (const limit of ["0", "201", "-1", "1.5", "abc", ""]) {
++    assert.equal((await listDeliveries(store, { limit })).status, 400, `limit=${limit}`);
++  }
++  for (const cursor of ["not-a-cursor", Buffer.from('{"x":1}').toString("base64url"), ""]) {
++    assert.equal((await listDeliveries(store, { cursor })).status, 400, `cursor=${cursor}`);
++  }
++  assert.equal((await listDeliveries(store, { limit: "200", cursor: encodeCursor({ receivedAt: 0, id: "" }) })).status, 200);
++});
++
+ test("GET /admin/deliveries/:id returns one delivery without its body", async () => {
+   const result = await getDelivery("d1", await seeded());
+ 

@@ -1,0 +1,133 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1e7135b..7f5566c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,7 @@
+ 
+ ## Unreleased
+ 
++- vendor_a: when an order appears more than once in a file, the last row (the correction) is now loaded instead of the first. The row is posted at the position of its last occurrence. Other vendors still keep the first row.
+ - Added vendor_c reader (`orderNumber`, `productCode`, `totalPrice`, `orderedAt` with UTC offset). Loading vendor_c to the warehouse is blocked until finance confirms whether `totalPrice` includes VAT.
+ - Faster loads of large files: vendor_a/vendor_b timestamp parsing and row hashing take roughly 40% less CPU per row. Output and `row_hash` values are unchanged.
+ - Loads reuse one warehouse connection for all chunks instead of opening a new HTTPS connection per 2,000 rows. If a proxy is configured, requests still go through urllib.
+diff --git a/ingest/load.py b/ingest/load.py
+index f783eaf..05aed90 100644
+--- a/ingest/load.py
++++ b/ingest/load.py
+@@ -2,7 +2,7 @@ import hashlib
+ import json
+ from itertools import islice
+ 
+-from ingest.reader import check_loadable, read
++from ingest.reader import VENDORS, check_loadable, read
+ 
+ CHUNK_SIZE = 2_000
+ 
+@@ -30,6 +30,22 @@ def dedupe(rows):
+         yield {**row, "row_hash": row_hash(row)}
+ 
+ 
++def dedupe_keep_last(read_rows):
++    """Yield the last occurrence of each (vendor, order_id), in file order.
++
++    A later row for the same order is a correction and replaces the earlier
++    one. `read_rows` is called twice (two passes over the file): the first
++    pass records, per key, the position of its last row; the second yields
++    only those rows. As in `dedupe`, only keys are kept in memory.
++    """
++    last = {}
++    for index, row in enumerate(read_rows()):
++        last[(row["vendor"], row["order_id"])] = index
++    for index, row in enumerate(read_rows()):
++        if last.get((row["vendor"], row["order_id"])) == index:
++            yield {**row, "row_hash": row_hash(row)}
++
++
+ def chunked(rows, size):
+     iterator = iter(rows)
+     while chunk := list(islice(iterator, size)):
+@@ -43,8 +59,12 @@ def load_file(vendor, path, client, chunk_size=CHUNK_SIZE):
+     (see `Vendor.hold`) are refused before anything is read or posted.
+     """
+     check_loadable(vendor)
++    if VENDORS[vendor].keep == "last":
++        rows = dedupe_keep_last(lambda: read(vendor, path))
++    else:
++        rows = dedupe(read(vendor, path))
+     count = 0
+-    for chunk in chunked(dedupe(read(vendor, path)), chunk_size):
++    for chunk in chunked(rows, chunk_size):
+         client.post_rows(chunk)
+         count += len(chunk)
+     return count
+diff --git a/ingest/reader.py b/ingest/reader.py
+index 309f877..898fa14 100644
+--- a/ingest/reader.py
++++ b/ingest/reader.py
+@@ -26,18 +26,25 @@ class Vendor:
+     # If set, rows can be read but must not be posted to the warehouse; the
+     # string says why. `load_file` refuses to load a held vendor.
+     hold: str = ""
++    # Which row wins when an order_id appears more than once in a file:
++    # "first", or "last" when the vendor appends corrected rows later in the file.
++    keep: str = "first"
+ 
+     def __post_init__(self):
++        if self.keep not in ("first", "last"):
++            raise ValueError(f"keep must be 'first' or 'last', got {self.keep!r}")
+         missing = set(FIELDS) - set(self.columns)
+         if missing:
+             raise ValueError(f"vendor mapping is missing fields: {sorted(missing)}")
+ 
+ 
+ VENDORS = {
+-    # `Created` is Paris wall-clock time with no offset.
++    # `Created` is Paris wall-clock time with no offset. Corrected orders are
++    # re-sent later in the file under the same Order ID, so the last row wins.
+     "vendor_a": Vendor(
+         columns={"order_id": "Order ID", "sku": "SKU", "amount": "Amount", "created_at": "Created"},
+         parse_created_at=lambda value: local_to_utc_iso(value, PARIS),
++        keep="last",
+     ),
+     # Exported as Latin-1 (decoded via the cp1252 fallback). `date_commande` is French day-first (DD/MM/YYYY HH:MM)
+     # Paris wall-clock time with no offset. `article` is a product name, not a code.
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index 9149bb4..f9d753f 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -110,6 +110,35 @@ class LoadTest(unittest.TestCase):
+         order_ids = [row["order_id"] for row in client.requests[0]]
+         self.assertEqual(len(order_ids), len(set(order_ids)))
+ 
++    def test_vendor_a_correction_replaces_original_row(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            path = os.path.join(tmp, "vendor_a.csv")
++            with open(path, "w", encoding="utf-8") as handle:
++                handle.write(
++                    "Order ID,SKU,Amount,Created\n"
++                    "A-1,SKU-RED-S,10.00,2025-03-04 14:00:00\n"
++                    "A-2,SKU-BLU-L,20.00,2025-03-04 15:00:00\n"
++                    "A-1,SKU-RED-M,12.50,2025-03-04 14:00:00\n"
++                )
++            client = FakeClient()
++            self.assertEqual(load_file("vendor_a", path, client), 2)
++        rows = client.requests[0]
++        self.assertEqual([row["order_id"] for row in rows], ["A-2", "A-1"])
++        self.assertEqual((rows[1]["sku"], rows[1]["amount"]), ("SKU-RED-M", 12.5))
++
++    def test_vendor_b_keeps_first_row(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            path = os.path.join(tmp, "vendor_b.csv")
++            with open(path, "w", encoding="utf-8") as handle:
++                handle.write(
++                    "ref,article,montant,date_commande\n"
++                    "B-1,Chaise,10.00,04/03/2025 14:00\n"
++                    "B-1,Table,99.00,04/03/2025 14:00\n"
++                )
++            client = FakeClient()
++            self.assertEqual(load_file("vendor_b", path, client), 1)
++        self.assertEqual(client.requests[0][0]["sku"], "Chaise")
++
+     def test_rows_are_posted_in_chunks(self):
+         client = FakeClient()
+         count = load_file("vendor_a", os.path.join(FIXTURES, "vendor_a.csv"), client, chunk_size=5)

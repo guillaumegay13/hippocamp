@@ -1,0 +1,322 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index ecda881..1e7135b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -3,3 +3,6 @@
+ ## Unreleased
+ 
+ - Added vendor_c reader (`orderNumber`, `productCode`, `totalPrice`, `orderedAt` with UTC offset). Loading vendor_c to the warehouse is blocked until finance confirms whether `totalPrice` includes VAT.
++- Faster loads of large files: vendor_a/vendor_b timestamp parsing and row hashing take roughly 40% less CPU per row. Output and `row_hash` values are unchanged.
++- Loads reuse one warehouse connection for all chunks instead of opening a new HTTPS connection per 2,000 rows. If a proxy is configured, requests still go through urllib.
++- A redirect (3xx) from the warehouse now fails the load. Before, urllib followed it as a GET without the rows, so the chunk could be lost silently. Warehouse errors are now raised as `RuntimeError("warehouse returned <status>")` instead of `urllib.error.HTTPError`.
+diff --git a/ingest/cli.py b/ingest/cli.py
+index b8d24f9..23cf25a 100644
+--- a/ingest/cli.py
++++ b/ingest/cli.py
+@@ -9,7 +9,8 @@ def main(argv):
+     if len(argv) != 2:
+         print("usage: python3 -m ingest.cli <vendor> <path>", file=sys.stderr)
+         return 2
+-    count = load_file(argv[0], argv[1], Client(os.environ["WAREHOUSE_URL"]))
++    with Client(os.environ["WAREHOUSE_URL"]) as client:
++        count = load_file(argv[0], argv[1], client)
+     print(f"loaded {count} rows")
+     return 0
+ 
+diff --git a/ingest/load.py b/ingest/load.py
+index 879f48d..f783eaf 100644
+--- a/ingest/load.py
++++ b/ingest/load.py
+@@ -6,9 +6,14 @@ from ingest.reader import check_loadable, read
+ 
+ CHUNK_SIZE = 2_000
+ 
++# Same output as json.dumps(row, sort_keys=True), without building a new
++# encoder for every row. Hashes must not change: they identify rows already
++# in the warehouse.
++_HASH_ENCODER = json.JSONEncoder(sort_keys=True)
++
+ 
+ def row_hash(row):
+-    return hashlib.sha256(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()
++    return hashlib.sha256(_HASH_ENCODER.encode(row).encode("utf-8")).hexdigest()
+ 
+ 
+ def dedupe(rows):
+diff --git a/ingest/timestamps.py b/ingest/timestamps.py
+index a11af4e..3b449e0 100644
+--- a/ingest/timestamps.py
++++ b/ingest/timestamps.py
+@@ -2,11 +2,39 @@
+ 
+ Conversion back to local time belongs in reporting, never in ingest.
+ """
+-from datetime import datetime, timezone
++import re
++from datetime import datetime, timedelta, timezone
++from functools import lru_cache
+ from zoneinfo import ZoneInfo
+ 
+ PARIS = ZoneInfo("Europe/Paris")
+ 
++# Fast paths for the strptime formats vendors use: strptime is by far the most
++# expensive step of a load. Each regex only matches the canonical zero-padded
++# form; anything else (or any format not listed) falls back to strptime, so the
++# accepted inputs and the results are unchanged.
++_FAST_FORMATS = {
++    "%Y-%m-%d %H:%M:%S": re.compile(
++        r"(?P<Y>[0-9]{4})-(?P<m>[0-9]{2})-(?P<d>[0-9]{2}) (?P<H>[0-9]{2}):(?P<M>[0-9]{2}):(?P<S>[0-9]{2})"
++    ),
++    "%d/%m/%Y %H:%M": re.compile(
++        r"(?P<d>[0-9]{2})/(?P<m>[0-9]{2})/(?P<Y>[0-9]{4}) (?P<H>[0-9]{2}):(?P<M>[0-9]{2})"
++    ),
++}
++
++
++def _parse_naive(value, fmt):
++    pattern = _FAST_FORMATS.get(fmt)
++    match = pattern.fullmatch(value) if pattern else None
++    if match is None:
++        return datetime.strptime(value, fmt)
++    g = match.groupdict()
++    try:
++        return datetime(int(g["Y"]), int(g["m"]), int(g["d"]), int(g["H"]), int(g["M"]), int(g.get("S") or 0))
++    except ValueError:
++        # Out-of-range field (month 13, Feb 30, hour 24): let strptime raise its usual error.
++        return datetime.strptime(value, fmt)
++
+ 
+ def to_utc_iso(dt):
+     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+@@ -19,7 +47,14 @@ def local_to_utc_iso(value, tz, fmt="%Y-%m-%d %H:%M:%S"):
+     are rejected. Times repeated by a fall-back change are ambiguous; the
+     earlier (summer-time) instant is used.
+     """
+-    naive = datetime.strptime(value, fmt)
++    naive = _parse_naive(value, fmt)
++    offset = _hour_offset(tz, naive.replace(minute=0, second=0, microsecond=0))
++    if offset is None:
++        return _local_to_utc_iso_slow(value, naive, tz)
++    return (naive - offset).strftime("%Y-%m-%dT%H:%M:%SZ")
++
++
++def _local_to_utc_iso_slow(value, naive, tz):
+     local = naive.replace(tzinfo=tz)
+     # A time inside the spring-forward gap does not survive a round trip through UTC.
+     if local.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None) != naive:
+@@ -27,6 +62,23 @@ def local_to_utc_iso(value, tz, fmt="%Y-%m-%d %H:%M:%S"):
+     return to_utc_iso(local)
+ 
+ 
++@lru_cache(maxsize=8192)
++def _hour_offset(tz, hour_start):
++    """UTC offset shared by every wall-clock time in this local hour, or None.
++
++    None means the hour needs the per-value path: it is (partly) skipped by a
++    DST change, or the offset changes partway through it. Zones that change
++    offset on the hour (Europe/Paris does) get one computation per hour.
++    """
++    offsets = set()
++    for naive in (hour_start, hour_start + timedelta(minutes=59, seconds=59)):
++        local = naive.replace(tzinfo=tz)
++        if local.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None) != naive:
++            return None
++        offsets.add(local.utcoffset())
++    return offsets.pop() if len(offsets) == 1 else None
++
++
+ def offset_to_utc_iso(value):
+     """Convert an ISO-8601 string that carries its own UTC offset to UTC ISO-8601.
+ 
+diff --git a/ingest/warehouse.py b/ingest/warehouse.py
+index 4824930..fd1d1bf 100644
+--- a/ingest/warehouse.py
++++ b/ingest/warehouse.py
+@@ -1,14 +1,69 @@
++import http.client
+ import json
+ import urllib.request
++from urllib.parse import urlsplit
+ 
+ 
+ class Client:
+-    def __init__(self, url):
++    """Posts row chunks to the warehouse HTTP API.
++
++    One HTTP(S) connection is kept open and reused for every chunk of a load,
++    so a big file pays for the TCP/TLS handshake once instead of once per chunk.
++    If the server closes the connection, the next chunk opens a new one. When
++    a proxy is configured for the URL (HTTP(S)_PROXY), requests go through
++    urllib instead, which handles the proxy.
++
++    Failed posts are not retried: a POST whose response was lost may still
++    have been stored, and posting it again could duplicate rows.
++    """
++
++    def __init__(self, url, timeout=30):
+         self.url = url
++        self.timeout = timeout
++        parts = urlsplit(url)
++        if parts.scheme not in ("http", "https") or not parts.hostname:
++            raise ValueError(f"WAREHOUSE_URL must be an http(s) URL, got {url!r}")
++        self._parts = parts
++        self._path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
++        proxies = urllib.request.getproxies()
++        self._use_proxy = parts.scheme in proxies and not urllib.request.proxy_bypass(parts.hostname)
++        self._conn = None
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, *exc):
++        self.close()
++
++    def close(self):
++        if self._conn is not None:
++            self._conn.close()
++            self._conn = None
+ 
+     def post_rows(self, rows):
+         body = json.dumps({"rows": rows}).encode("utf-8")
+-        request = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+-        with urllib.request.urlopen(request, timeout=30) as response:
+-            if response.status >= 300:
+-                raise RuntimeError(f"warehouse returned {response.status}")
++        headers = {"Content-Type": "application/json"}
++        if self._use_proxy:
++            request = urllib.request.Request(self.url, data=body, headers=headers, method="POST")
++            with urllib.request.urlopen(request, timeout=self.timeout) as response:
++                status = response.status
++        else:
++            status = self._post_direct(body, headers)
++        if status >= 300:
++            raise RuntimeError(f"warehouse returned {status}")
++
++    def _post_direct(self, body, headers):
++        if self._conn is None:
++            cls = http.client.HTTPSConnection if self._parts.scheme == "https" else http.client.HTTPConnection
++            self._conn = cls(self._parts.hostname, self._parts.port, timeout=self.timeout)
++        try:
++            self._conn.request("POST", self._path, body=body, headers=headers)
++            response = self._conn.getresponse()
++            # The body must be fully read before the connection can be reused.
++            response.read()
++        except BaseException:
++            self.close()
++            raise
++        if response.will_close:
++            self.close()
++        return response.status
+diff --git a/tests/test_warehouse.py b/tests/test_warehouse.py
+new file mode 100644
+index 0000000..6fa66e8
+--- /dev/null
++++ b/tests/test_warehouse.py
+@@ -0,0 +1,107 @@
++import json
++import os
++import threading
++import unittest
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from unittest import mock
++
++from ingest.load import load_file
++from ingest.warehouse import Client
++
++FIXTURES = os.path.join(os.path.dirname(__file__), "..", "fixtures")
++
++
++class Warehouse:
++    """Local fake warehouse that records rows and counts TCP connections."""
++
++    def __init__(self, protocol="HTTP/1.1", status=200, close_every=0):
++        self.rows = []
++        self.connections = 0
++        self.posts = 0
++        warehouse = self
++
++        class Handler(BaseHTTPRequestHandler):
++            protocol_version = protocol
++
++            def setup(self):
++                warehouse.connections += 1
++                super().setup()
++
++            def do_POST(self):
++                body = self.rfile.read(int(self.headers["Content-Length"]))
++                warehouse.rows.extend(json.loads(body)["rows"])
++                warehouse.posts += 1
++                self.send_response(status)
++                self.send_header("Content-Length", "2")
++                if close_every and warehouse.posts % close_every == 0:
++                    self.send_header("Connection", "close")
++                self.end_headers()
++                self.wfile.write(b"ok")
++
++            def log_message(self, *args):
++                pass
++
++        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
++        self.url = f"http://127.0.0.1:{self.server.server_port}/rows"
++
++    def __enter__(self):
++        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
++        return self
++
++    def __exit__(self, *exc):
++        self.server.shutdown()
++        self.server.server_close()
++
++
++class ClientTest(unittest.TestCase):
++    def setUp(self):
++        # Keep a proxy configured on the test machine from routing these requests.
++        patcher = mock.patch("urllib.request.getproxies", return_value={})
++        patcher.start()
++        self.addCleanup(patcher.stop)
++
++    def load(self, warehouse, chunk_size=3):
++        with Client(warehouse.url) as client:
++            return load_file("vendor_a", os.path.join(FIXTURES, "vendor_a.csv"), client, chunk_size=chunk_size)
++
++    def test_chunks_reuse_one_connection(self):
++        with Warehouse() as warehouse:
++            count = self.load(warehouse)
++        self.assertEqual(count, len(warehouse.rows))
++        self.assertGreater(warehouse.posts, 1)
++        self.assertEqual(warehouse.connections, 1)
++
++    def test_reconnects_when_server_closes_connection(self):
++        with Warehouse(close_every=2) as warehouse:
++            count = self.load(warehouse)
++        self.assertEqual(count, len(warehouse.rows))
++        self.assertEqual(warehouse.connections, (warehouse.posts + 1) // 2)
++
++    def test_http_1_0_server_gets_a_connection_per_post(self):
++        with Warehouse(protocol="HTTP/1.0") as warehouse:
++            count = self.load(warehouse)
++        self.assertEqual(count, len(warehouse.rows))
++        self.assertEqual(warehouse.connections, warehouse.posts)
++
++    def test_error_status_fails_the_load(self):
++        for status in (302, 500):
++            with self.subTest(status=status), Warehouse(status=status) as warehouse:
++                with self.assertRaisesRegex(RuntimeError, f"warehouse returned {status}"):
++                    self.load(warehouse)
++                self.assertEqual(warehouse.posts, 1)
++
++    def test_rejects_non_http_url(self):
++        with self.assertRaises(ValueError):
++            Client("warehouse.prod.example/rows")
++
++    def test_configured_proxy_goes_through_urllib(self):
++        with mock.patch("urllib.request.getproxies", return_value={"http": "http://proxy.invalid:3128"}), \
++             mock.patch("urllib.request.proxy_bypass", return_value=False), \
++             mock.patch("urllib.request.urlopen") as urlopen:
++            urlopen.return_value.__enter__.return_value.status = 200
++            Client("http://warehouse.example/rows").post_rows([{"order_id": "A-1"}])
++        self.assertEqual(urlopen.call_count, 1)
++
++
++if __name__ == "__main__":
++    unittest.main()

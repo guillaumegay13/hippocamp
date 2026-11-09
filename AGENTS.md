@@ -29,6 +29,13 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - `scripts/eval-lagoon.cjs`: read-only retrieval check against real Lagoon cases in `<Lagoon root>/evals/retrieval-cases.json`.
 - `scripts/eval-qa.cjs`: LongMemEval-S answer-accuracy check (reader and grader models) for Hippocamp snippets against the labeled answer sessions.
 - `scripts/eval-retrieval.cjs`: retrieval-only LongMemEval-S check for `searchMemory` against a BM25 reference.
+- `scripts/eval-continuity.cjs`: work continuity benchmark runner and CLI: real headless Claude Code or Codex through successive sessions per arm (`cc-none`, `cc-native`, `cc-hippocamp`, `codex-native`, `codex-hippocamp`) in isolated sandboxes, with a frozen run manifest and `--report`.
+- `scripts/continuity-adapters.cjs`: one adapter per benchmark arm, each installed the way a developer has it (Hippocamp through its real `install-claude` or `install-codex` installer).
+- `scripts/continuity-judge.cjs`: blind task judge, miss attribution, and the memory-quality judge.
+- `scripts/continuity-report.cjs`: outcome, efficiency and memory-quality tables, pooled over runs, with a probe-level bootstrap.
+- `scripts/continuity-dataset.cjs`: loader and validator for the continuity dataset, including the retrieval-hint check on prompts.
+- `scripts/eval-locomo.cjs`: LoCoMo answer-accuracy check with the MemoryTax protocol; its `complete` model client is shared with the continuity judge.
+- `bench/continuity/`: synthetic continuity dataset: two seed repos, session tickets, planted facts and the run timeline.
 - `scripts/install-common.cjs`: shared installer helpers: the MCP launch command and Lagoon repo preparation.
 - `scripts/install-claude.cjs`: one-step installer for Claude Code MCP setup and user-level `CLAUDE.md` guidance.
 - `scripts/install-codex.cjs`: one-step installer for the Hippocamp skill and MCP server in Codex.
@@ -79,6 +86,7 @@ When changing code, use the smallest verification that proves the change:
 - Run `npm run dream -- --help` when changing Dream CLI arguments.
 - Run `npm run eval:retrieval -- --limit 100` when changing search ranking or snippets; report Recall@5 against the BM25 row and snippet evidence. Also run `npm run eval:lagoon` when a Lagoon is available.
 - Run `npm run eval:qa -- --limit 3 --dry-run` when changing `scripts/eval-qa.cjs`; a full run calls paid models, so run it only when asked.
+- Run `npm test` and `npm run eval:continuity -- --dry-run` when changing the continuity benchmark or its dataset; a real run spawns paid Claude Code sessions, so run it only when asked.
 
 ## Notes For Future Agents
 

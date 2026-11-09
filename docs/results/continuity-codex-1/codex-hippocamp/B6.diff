@@ -1,0 +1,113 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 03f91ac..0e8d301 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,5 +2,8 @@
+ 
+ ## Unreleased
+ 
++- Add `vendor_c` CSV support with column normalization, UTC timestamps, and
++  the shared streaming and deduplication behavior.
++
+ - Update README usage to document the CLI arguments, required warehouse endpoint,
+   success output, and argument-error behavior; include the local smoke check.
+diff --git a/README.md b/README.md
+index 9a25716..3caaa4f 100644
+--- a/README.md
++++ b/README.md
+@@ -5,13 +5,18 @@ Reads vendor order exports (CSV), normalizes the columns, drops duplicate orders
+ The loader streams CSV rows and posts batches of at most 2,000 rows.
+ Deduplication keeps the first occurrence across the entire file; its set of order keys grows with the number of unique orders.
+ 
+-Supported vendors: `vendor_a`, `vendor_b`.
++Supported vendors: `vendor_a`, `vendor_b`, `vendor_c`.
+ 
+ Column mappings live in `VENDORS` in `ingest/reader.py`. To add a vendor,
+ add a `VendorConfig` with normalized field names mapped to CSV headers,
+ the file encoding (default UTF-8), and an optional `strptime` date format.
+ All vendors use the shared streaming reader.
+ 
++`vendor_c` exports use UTF-8 with `orderNumber`, `productCode`, `totalPrice`,
++and `orderedAt` columns. ISO-8601 timestamps retain their explicit offsets
++when converting to UTC: `2025-06-01T09:15:00+02:00` becomes
++`2025-06-01T07:15:00Z`.
++
+ `vendor_b` exports use Latin-1 encoding and `%d/%m/%Y %H:%M` timestamps
+ in Europe/Paris. For example, `04/03/2025 10:05` becomes
+ `2025-03-04T09:05:00Z`.
+@@ -28,7 +33,7 @@ only in reports; no reporting layer is included in this repository.
+ ## Usage
+ 
+ Run from the repository root with exactly two positional arguments: the vendor
+-(`vendor_a` or `vendor_b`) and the path to its CSV export. Set `WAREHOUSE_URL`
++(`vendor_a`, `vendor_b`, or `vendor_c`) and the path to its CSV export. Set `WAREHOUSE_URL`
+ to the warehouse endpoint that accepts row uploads.
+ 
+ ```sh
+diff --git a/ingest/reader.py b/ingest/reader.py
+index 6f2db4c..d6d09e3 100644
+--- a/ingest/reader.py
++++ b/ingest/reader.py
+@@ -35,6 +35,10 @@ class VendorConfig:
+ 
+ # Map normalized field names to CSV headers. Add vendors here; the reader is shared.
+ VENDORS = {
++    "vendor_c": VendorConfig(columns={
++        "order_id": "orderNumber", "sku": "productCode",
++        "amount": "totalPrice", "created_at": "orderedAt",
++    }),
+     "vendor_a": VendorConfig(columns={
+         "order_id": "Order ID", "sku": "SKU", "amount": "Amount", "created_at": "Created",
+     }),
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index 0f33867..2b64473 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -40,12 +40,21 @@ class ReaderTest(unittest.TestCase):
+             "order_id": "orderNumber", "sku": "productCode",
+             "amount": "totalPrice", "created_at": "orderedAt",
+         })
+-        with patch.dict(VENDORS, {"vendor_c": config}):
+-            rows = read("vendor_c", os.path.join(FIXTURES, "vendor_c.csv"))
++        with patch.dict(VENDORS, {"vendor_test": config}):
++            rows = read("vendor_test", os.path.join(FIXTURES, "vendor_c.csv"))
++        self.assertEqual(rows[0], {
++            "vendor": "vendor_test", "order_id": "C3000", "sku": "PC-0",
++            "amount": 11.0, "created_at": "2025-06-01T07:15:00Z",
++        })
++
++    def test_vendor_c_columns_and_explicit_offsets_are_normalized(self):
++        rows = read("vendor_c", os.path.join(FIXTURES, "vendor_c.csv"))
++        self.assertEqual(len(rows), 10)
+         self.assertEqual(rows[0], {
+             "vendor": "vendor_c", "order_id": "C3000", "sku": "PC-0",
+             "amount": 11.0, "created_at": "2025-06-01T07:15:00Z",
+         })
++        self.assertEqual(rows[-1]["created_at"], "2025-06-05T16:15:00Z")
+ 
+     def test_timestamps_are_normalized_to_utc(self):
+         cases = {
+@@ -73,6 +82,23 @@ class ReaderTest(unittest.TestCase):
+ 
+ 
+ class LoadTest(unittest.TestCase):
++    def test_vendor_c_loads_and_keeps_first_duplicate(self):
++        with open(os.path.join(FIXTURES, "vendor_c.csv"), encoding="utf-8") as source:
++            sample = source.read()
++        with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as handle:
++            handle.write(sample)
++            handle.write("C3000,duplicate,999.00,2025-06-02T09:15:00+02:00\n")
++            handle.flush()
++            client = FakeClient()
++            self.assertEqual(load_file("vendor_c", handle.name, client), 10)
++        self.assertEqual(len(client.requests), 1)
++        rows = client.requests[0]
++        self.assertEqual([row["order_id"] for row in rows],
++                         [f"C{3000 + index}" for index in range(10)])
++        self.assertEqual(rows[0]["sku"], "PC-0")
++        self.assertEqual(rows[0]["created_at"], "2025-06-01T07:15:00Z")
++        self.assertTrue(all(len(row["row_hash"]) == 64 for row in rows))
++
+     def test_batch_boundaries_and_cross_batch_duplicates(self):
+         for size, expected_sizes in [(0, []), (2_000, [2_000]),
+                                      (4_001, [2_000, 2_000, 1])]:

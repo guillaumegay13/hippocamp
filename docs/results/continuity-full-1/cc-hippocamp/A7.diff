@@ -1,0 +1,125 @@
+diff --git a/DEPLOY.md b/DEPLOY.md
+new file mode 100644
+index 0000000..09e5fd0
+--- /dev/null
++++ b/DEPLOY.md
+@@ -0,0 +1,23 @@
++# Deploy notes: retry queue moved from Redis to Postgres
++
++Pending retries now live in the Postgres `deliveries` table. Redis is no longer used.
++
++## Before deploying
++
++- Give relay a Postgres database. Set `DATABASE_URL`, or the standard `PG*` env vars (`PGHOST`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, ...).
++- The relay role needs `CREATE` on the schema for the first start. On startup relay runs `CREATE TABLE IF NOT EXISTS deliveries` and `CREATE INDEX IF NOT EXISTS deliveries_due_at_idx`. If the table is created ahead of time, keep that partial index on `due_at`. Without it, the claim query does a full scan.
++- `REDIS_URL` is no longer read, so it can be removed.
++
++## Deploying
++
++- If Postgres is unreachable at startup, relay exits with `relay failed to start` instead of running without a queue.
++- Retries still queued in Redis are not moved over automatically. They have to be backfilled into `deliveries` (prod: ops ran this backfill on 2026-11-04).
++- Running several instances is safe. Workers claim rows with `FOR UPDATE SKIP LOCKED` and a 30s lease. Delivery is at-least-once: if an instance dies mid-attempt, the row becomes due again after the lease and is retried. Clients can deduplicate on the `x-relay-delivery` header.
++
++## Rollback
++
++- Older builds read retries from Redis only. Any retries still pending in `deliveries` will not be picked up after a rollback, so drain or copy them back first.
++
++## Still not persistent
++
++- Delivery records and attempt history (what the admin API shows) are still in memory and are lost on restart. Only pending retries survive.
+diff --git a/README.md b/README.md
+index c6fa834..4327475 100644
+--- a/README.md
++++ b/README.md
+@@ -18,6 +18,12 @@ Sources are configured with the `SOURCES` env var, a JSON object:
+ { "github": { "secret": "dev-secret", "target": "http://localhost:4000/in" } }
+ ```
+ 
++A source can set `provider` to choose how its signature is checked. The default is `generic`: hex HMAC-SHA256 in `X-Signature`. With `acme`, it is hex HMAC-SHA256 of the raw body in `X-Acme-Signature`. An unknown provider stops startup.
++
++```json
++{ "acme": { "secret": "...", "target": "https://client.example/in", "provider": "acme" } }
++```
++
+ A source can slow down its retries with an optional `retry` object. The delay starts at `baseDelayMs` (default 100), doubles on each retry and is capped at `maxDelayMs` (default: no cap). Invalid values stop startup.
+ 
+ ```json
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index 1a56b6d..b75c036 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -1,15 +1,34 @@
+ import { randomUUID } from "node:crypto";
+ import { deliver, RetryDelays, Send } from "../deliver";
+-import { headerValue, verifyHmac } from "../lib/signature";
++import { headerValue, HmacOptions, verifyHmac } from "../lib/signature";
+ import { RetryQueue } from "../queue";
+ import { Delivery, Store } from "../store";
+ 
+-export type SourceConfig = { secret: string; target: string; retry?: RetryDelays };
++// How each provider signs its webhooks: which header carries the signature and how the HMAC is encoded.
++export type Provider = { header: string } & HmacOptions;
++
++export const PROVIDERS = {
++  // Default for sources that don't name a provider.
++  generic: { header: "x-signature", algorithm: "sha256", encoding: "hex" },
++  // Acme: HMAC-SHA256 of the raw body, hex digest, no prefix, in X-Acme-Signature.
++  acme: { header: "x-acme-signature", algorithm: "sha256", encoding: "hex" },
++} satisfies Record<string, Provider>;
++
++export type ProviderName = keyof typeof PROVIDERS;
++
++export type SourceConfig = { secret: string; target: string; provider?: ProviderName; retry?: RetryDelays };
+ export type Sources = Record<string, SourceConfig>;
+ 
+-// Rejects bad retry settings at startup instead of on the first failed delivery.
++function providerFor(config: SourceConfig): Provider {
++  return PROVIDERS[config.provider ?? "generic"];
++}
++
++// Rejects unknown providers and bad retry settings at startup instead of on the first failed delivery.
+ export function validateSources(sources: Sources): Sources {
+   for (const [name, config] of Object.entries(sources)) {
++    if (config.provider !== undefined && !Object.hasOwn(PROVIDERS, config.provider)) {
++      throw new Error(`source "${name}": unknown provider "${config.provider}" (known: ${Object.keys(PROVIDERS).join(", ")})`);
++    }
+     const retry = config.retry ?? {};
+     for (const key of ["baseDelayMs", "maxDelayMs"] as const) {
+       const value = retry[key];
+@@ -46,7 +65,8 @@ export async function handleWebhook(
+     return { status: 404, body: { error: "unknown source" } };
+   }
+ 
+-  if (!verifyHmac(config.secret, rawBody, headerValue(headers, "x-signature"))) {
++  const { header, ...hmac } = providerFor(config);
++  if (!verifyHmac(config.secret, rawBody, headerValue(headers, header), hmac)) {
+     return { status: 401, body: { error: "bad signature" } };
+   }
+ 
+diff --git a/test/deliver.test.ts b/test/deliver.test.ts
+index 902e90e..edba29b 100644
+--- a/test/deliver.test.ts
++++ b/test/deliver.test.ts
+@@ -199,3 +199,22 @@ test("a successful first try records one delivered attempt", async () => {
+   const { store } = await run(send);
+   assert.deepEqual(await store.attempts("d1"), [{ attempt: 1, startedAt: 1_000, durationMs: 0, statusCode: 200, outcome: "delivered" }]);
+ });
++
++test("acme webhooks are verified with X-Acme-Signature", async () => {
++  const acme = { acme: { secret: "s3cret", target: "http://client.test/in", provider: "acme" as const } };
++  const body = JSON.stringify({ event: "order.created" });
++  const ok = async () => ({ ok: true, status: 200 });
++
++  const accepted = await handleWebhook("acme", body, { "x-acme-signature": sign(body) }, acme, new MemoryStore(), new MemoryRetryQueue(), ok);
++  assert.equal(accepted.status, 202);
++
++  // The generic header isn't accepted for an acme source, and a wrong signature is rejected.
++  const wrongHeader = await handleWebhook("acme", body, { "x-signature": sign(body) }, acme, new MemoryStore(), new MemoryRetryQueue(), ok);
++  assert.equal(wrongHeader.status, 401);
++  const wrongSig = await handleWebhook("acme", body, { "x-acme-signature": sign("{}") }, acme, new MemoryStore(), new MemoryRetryQueue(), ok);
++  assert.equal(wrongSig.status, 401);
++});
++
++test("an unknown provider stops startup", () => {
++  assert.throws(() => validateSources({ x: { secret: "s", target: "http://t", provider: "nope" as never } }), /unknown provider "nope"/);
++});

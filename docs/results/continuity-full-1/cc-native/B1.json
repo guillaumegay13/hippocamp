@@ -1,0 +1,22 @@
+{
+  "id": "B1",
+  "project": "ingest",
+  "ok": true,
+  "costUsd": 0.16387840000000004,
+  "sessionUuid": "446ef93a-ae87-424a-b506-2ae66e783f2e",
+  "fingerprint": "a8e5a0a93f708325",
+  "turns": 1,
+  "offerReplied": false,
+  "before": "a25508e801440f6648123ab087e682785bc459af",
+  "after": "6eeedab2c85f107dc53f28bebace0d6f86e4c902",
+  "tokens": {
+    "input": 10,
+    "output": 2912,
+    "cacheRead": 89992,
+    "cacheWrite": 10950
+  },
+  "durationMs": 36665,
+  "memoryCalls": 0,
+  "memoryBytesIn": 0,
+  "autoLoadedBytes": 0
+}

@@ -273,7 +273,11 @@ async function main() {
   printHints(lagoon);
 }
 
-main().catch((error) => {
-  console.error("Failed to install Hippocamp into Claude Code:", error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("Failed to install Hippocamp into Claude Code:", error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { buildClaudeManagedBlock, ensureClaudeInstructionsInstalled, ensureClaudeSkillInstalled };

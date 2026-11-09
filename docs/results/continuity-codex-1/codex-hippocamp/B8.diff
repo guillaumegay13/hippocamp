@@ -1,0 +1,112 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 126d3fd..d11e4ae 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,9 @@
+ 
+ ## Unreleased
+ 
++- Enforce the warehouse's 4,000,000-byte request limit for wide rows while
++  preserving upload order. Reject individual rows that cannot fit a request.
++
+ - Speed up large imports with faster Paris timestamp normalization, a bounded
+   per-file timestamp cache, and reusable hash serialization. Preserve row hashes,
+   first-occurrence ordering, DST validation, and sequential 2,000-row uploads.
+diff --git a/README.md b/README.md
+index f1f39cc..d2b8a25 100644
+--- a/README.md
++++ b/README.md
+@@ -3,6 +3,9 @@
+ Reads vendor order exports (CSV), normalizes the columns, drops duplicate orders and posts the rows to the warehouse HTTP API at `WAREHOUSE_URL`.
+ 
+ The loader streams CSV rows and posts batches of at most 2,000 rows.
++Uploads split further as needed to keep each encoded JSON request at or below
++the warehouse's 4,000,000-byte limit. A single row that exceeds this limit raises
++`ValueError`; earlier requests may already have been uploaded.
+ Timestamp normalization uses a per-file cache of at most 4,096 values to speed up
+ exports with repeated timestamps without retaining all timestamps in memory.
+ Deduplication keeps the first occurrence across the entire file; its set of order keys grows with the number of unique orders.
+diff --git a/ingest/warehouse.py b/ingest/warehouse.py
+index 4824930..8e72da1 100644
+--- a/ingest/warehouse.py
++++ b/ingest/warehouse.py
+@@ -1,13 +1,39 @@
+ import json
+ import urllib.request
+ 
++MAX_REQUEST_BYTES = 4_000_000
++
++
++def iter_request_bodies(rows):
++    """Split rows using the exact encoded JSON size, preserving their order."""
++    prefix, suffix = b'{"rows": [', b']}'
++    overhead = len(prefix) + len(suffix)
++    parts = []
++    size = overhead
++    for row in rows:
++        encoded = json.dumps(row).encode("utf-8")
++        if overhead + len(encoded) > MAX_REQUEST_BYTES:
++            raise ValueError("one warehouse row exceeds the 4 MB request limit")
++        extra = len(encoded) + (2 if parts else 0)
++        if size + extra > MAX_REQUEST_BYTES:
++            yield prefix + b', '.join(parts) + suffix
++            parts = []
++            size = overhead
++        size += len(encoded) + (2 if parts else 0)
++        parts.append(encoded)
++    if parts:
++        yield prefix + b', '.join(parts) + suffix
++
+ 
+ class Client:
+     def __init__(self, url):
+         self.url = url
+ 
+     def post_rows(self, rows):
+-        body = json.dumps({"rows": rows}).encode("utf-8")
++        for body in iter_request_bodies(rows):
++            self._post_body(body)
++
++    def _post_body(self, body):
+         request = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+         with urllib.request.urlopen(request, timeout=30) as response:
+             if response.status >= 300:
+diff --git a/tests/test_warehouse.py b/tests/test_warehouse.py
+new file mode 100644
+index 0000000..bf157d8
+--- /dev/null
++++ b/tests/test_warehouse.py
+@@ -0,0 +1,33 @@
++import json
++import unittest
++from unittest.mock import MagicMock, patch
++
++from ingest.warehouse import Client, MAX_REQUEST_BYTES, iter_request_bodies
++
++
++class WarehouseTest(unittest.TestCase):
++    def test_wide_rows_split_on_actual_wire_size_and_keep_order(self):
++        rows = [{"order_id": str(i), "sku": 'é"\\' * 1000} for i in range(1000)]
++        response = MagicMock()
++        response.__enter__.return_value.status = 200
++        with patch("ingest.warehouse.urllib.request.urlopen", return_value=response) as post:
++            Client("http://localhost/rows").post_rows(rows)
++        bodies = [call.args[0].data for call in post.call_args_list]
++        self.assertGreater(len(bodies), 1)
++        self.assertTrue(all(len(body) <= MAX_REQUEST_BYTES for body in bodies))
++        self.assertEqual([row for body in bodies for row in json.loads(body)["rows"]], rows)
++
++    def test_exact_limit_fits_and_one_more_byte_is_rejected(self):
++        empty_size = len(json.dumps({"rows": [{"sku": ""}]}).encode("utf-8"))
++        row = {"sku": "x" * (MAX_REQUEST_BYTES - empty_size)}
++        self.assertEqual(len(list(iter_request_bodies([row]))[0]), MAX_REQUEST_BYTES)
++        row["sku"] += "x"
++        with patch("ingest.warehouse.urllib.request.urlopen") as post:
++            with self.assertRaisesRegex(ValueError, "one warehouse row exceeds"):
++                Client("http://localhost/rows").post_rows([row])
++        post.assert_not_called()
++
++    def test_empty_input_sends_no_request(self):
++        with patch("ingest.warehouse.urllib.request.urlopen") as post:
++            Client("http://localhost/rows").post_rows([])
++        post.assert_not_called()

@@ -1,0 +1,166 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index aa3dd8b..1735ac3 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -3,3 +3,4 @@
+ ## Unreleased
+ - Faster large imports: quicker timestamp parsing and row hashing, a persistent warehouse connection, and the next chunk is parsed while the previous one is posting. Posted rows are unchanged.
+ - vendor_b imports now accept UTF-8 exports (with or without a BOM) as well as Windows-1252; the encoding is detected per file.
++- When an order appears more than once in a file (e.g. vendor_a re-sending a corrected order), the latest row now wins instead of the first. The kept row is posted at the position of its last occurrence.
+diff --git a/ingest/load.py b/ingest/load.py
+index 0b75e4e..2ebc3b3 100644
+--- a/ingest/load.py
++++ b/ingest/load.py
+@@ -4,7 +4,7 @@ import queue
+ import threading
+ from itertools import islice
+ 
+-from ingest.reader import read
++from ingest.reader import get_vendor
+ 
+ CHUNK_SIZE = 2_000
+ 
+@@ -16,17 +16,21 @@ def row_hash(row):
+     return hashlib.sha256(_hash_encoder.encode(row).encode("utf-8")).hexdigest()
+ 
+ 
+-def dedupe(rows):
+-    """Yield the first occurrence of each (vendor, order_id), in file order.
++def last_positions(order_ids):
++    """Map each order_id to the index of its last row in the file."""
++    return {order_id: index for index, order_id in enumerate(order_ids)}
+ 
+-    Streams rows; only the seen keys are held in memory.
++
++def dedupe(rows, last):
++    """Yield only the last occurrence of each order_id, in file order.
++
++    Vendors re-send corrected orders later in the same file, so the latest row wins.
++    `last` comes from `last_positions` over the same file; `rows` is still streamed,
++    so only the keys are held in memory.
+     """
+-    seen = set()
+-    for row in rows:
+-        key = (row["vendor"], row["order_id"])
+-        if key in seen:
++    for index, row in enumerate(rows):
++        if last.get(row["order_id"]) != index:
+             continue
+-        seen.add(key)
+         row["row_hash"] = row_hash(row)
+         yield row
+ 
+@@ -44,12 +48,18 @@ _DONE = object()
+ 
+ 
+ def load_file(vendor, path, client, chunk_size=CHUNK_SIZE):
+-    """Post deduped rows to the warehouse in chunks of at most chunk_size rows.
++    """Post deduped rows (latest row per order wins) to the warehouse in chunks of at most chunk_size rows.
+ 
+     The next chunk is parsed while the previous one is being posted. Only one post
+     is in flight at a time, and chunks are posted in file order. If a post fails,
+     reading stops and the error is re-raised; nothing after the failed chunk is posted.
+     """
++    spec = get_vendor(vendor)
++    encoding = spec.detect_encoding(path)
++    # First pass reads only order IDs to find each order's latest row.
++    last = last_positions(spec.order_ids(path, encoding))
++    rows = dedupe(spec.read(path, encoding), last)
++
+     pending = queue.Queue(maxsize=1)
+     failure = []
+     posted = [0]
+@@ -70,7 +80,7 @@ def load_file(vendor, path, client, chunk_size=CHUNK_SIZE):
+     worker = threading.Thread(target=poster, name="ingest-poster", daemon=True)
+     worker.start()
+     try:
+-        for chunk in chunked(dedupe(read(vendor, path)), chunk_size):
++        for chunk in chunked(rows, chunk_size):
+             if failure:
+                 break
+             pending.put(chunk)
+diff --git a/ingest/reader.py b/ingest/reader.py
+index 738f59f..0b4a61c 100644
+--- a/ingest/reader.py
++++ b/ingest/reader.py
+@@ -49,19 +49,28 @@ class Vendor:
+             return encoding
+         raise ValueError(f"{self.name}: {path} is not valid {' or '.join(self.encodings)}")
+ 
+-    def read(self, path):
+-        """Stream an export as normalized order rows."""
+-        with open(path, newline="", encoding=self.detect_encoding(path)) as handle:
++    def _records(self, path, encoding=None):
++        with open(path, newline="", encoding=encoding or self.detect_encoding(path)) as handle:
+             reader = csv.DictReader(handle)
+             missing = {source for source, _ in self.columns.values()} - set(reader.fieldnames or ())
+             if missing:
+                 raise ValueError(f"{self.name}: {path} is missing columns {sorted(missing)}")
+-            for record in reader:
+-                row = {"vendor": self.name}
+-                for field in FIELDS:
+-                    source, parse = self.columns[field]
+-                    row[field] = parse(record[source].strip())
+-                yield row
++            yield from reader
++
++    def order_ids(self, path, encoding=None):
++        """Stream just the normalized order_id of each row, in file order (cheap pass)."""
++        source, parse = self.columns["order_id"]
++        for record in self._records(path, encoding):
++            yield parse(record[source].strip())
++
++    def read(self, path, encoding=None):
++        """Stream an export as normalized order rows."""
++        for record in self._records(path, encoding):
++            row = {"vendor": self.name}
++            for field in FIELDS:
++                source, parse = self.columns[field]
++                row[field] = parse(record[source].strip())
++            yield row
+ 
+ 
+ VENDORS = {
+@@ -96,7 +105,11 @@ VENDORS = {
+ }
+ 
+ 
+-def read(vendor, path):
++def get_vendor(vendor):
+     if vendor not in VENDORS:
+         raise ValueError(f"unknown vendor: {vendor}")
+-    return VENDORS[vendor].read(path)
++    return VENDORS[vendor]
++
++
++def read(vendor, path):
++    return get_vendor(vendor).read(path)
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index e40f245..fe41862 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -203,6 +203,24 @@ class LoadTest(unittest.TestCase):
+         order_ids = [row["order_id"] for row in client.requests[0]]
+         self.assertEqual(len(order_ids), len(set(order_ids)))
+ 
++    def test_latest_row_for_an_order_wins(self):
++        import tempfile
++        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as handle:
++            handle.write(
++                "Order ID,SKU,Amount,Created\n"
++                "A-1,SKU-OLD,10.00,2025-03-04 10:00:00\n"
++                "A-2,SKU-X,5.00,2025-03-04 11:00:00\n"
++                "A-1,SKU-MID,11.00,2025-03-04 10:00:00\n"
++                "A-3,SKU-Y,6.00,2025-03-04 12:00:00\n"
++                "A-1,SKU-NEW,12.00,2025-03-04 10:00:00\n"
++            )
++        self.addCleanup(os.unlink, handle.name)
++        client = FakeClient()
++        self.assertEqual(load_file("vendor_a", handle.name, client), 3)
++        rows = client.requests[0]
++        self.assertEqual([r["order_id"] for r in rows], ["A-2", "A-3", "A-1"])
++        self.assertEqual((rows[2]["sku"], rows[2]["amount"]), ("SKU-NEW", 12.0))
++
+     def test_rows_are_posted_in_chunks(self):
+         client = FakeClient()
+         count = load_file("vendor_a", os.path.join(FIXTURES, "vendor_a.csv"), client, chunk_size=5)

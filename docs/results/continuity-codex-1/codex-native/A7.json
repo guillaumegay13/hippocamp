@@ -1,0 +1,22 @@
+{
+  "id": "A7",
+  "project": "relay",
+  "ok": true,
+  "costUsd": 0,
+  "sessionUuid": "01a1bf63-a9cd-7d23-b39e-5cb5048a9366",
+  "fingerprint": "d3b9a644928b4c1d",
+  "turns": 1,
+  "offerReplied": false,
+  "before": "119b0060fea232ee9b2ea427655911b70ad7b1d8",
+  "after": "72956076d647662b0f3bbf3a247789e9cd010a6a",
+  "tokens": {
+    "input": 42792,
+    "output": 4269,
+    "cacheRead": 254720,
+    "cacheWrite": 0
+  },
+  "durationMs": 120101,
+  "memoryCalls": 1,
+  "memoryBytesIn": 0,
+  "autoLoadedBytes": 677
+}

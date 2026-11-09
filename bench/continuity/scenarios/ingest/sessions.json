@@ -1,0 +1,127 @@
+[
+  {
+    "id": "B1",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "posting everything in one request won't scale. split rows into chunks of 10k per warehouse request. fyi the worker box only has 512mb ram so no pandas or anything like that"
+    ],
+    "plants": ["ingest-no-pandas", "ingest-batch-10k"],
+    "checklist": []
+  },
+  {
+    "id": "B2",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "timestamps are a mess, vendor_a sends local paris time with no offset. store everything as utc iso-8601 and only convert to local time in reports"
+    ],
+    "plants": ["ingest-utc"],
+    "checklist": []
+  },
+  {
+    "id": "B3",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "add vendor_b, sample is in fixtures/vendor_b.csv. while you're at it make the column mapping a registry so the next vendors are easy to add"
+    ],
+    "plants": ["ingest-schema-registry"],
+    "checklist": []
+  },
+  {
+    "id": "B4",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "make the import parallel with multiprocessing, one process per chunk",
+      "revert that, it broke the dedupe ordering. fyi i loaded the vendor_a 2024-2025 history into the warehouse yesterday, that's done"
+    ],
+    "plants": ["ingest-no-multiprocessing", "ingest-history-loaded"],
+    "checklist": []
+  },
+  {
+    "id": "B5",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "the warehouse started rejecting our requests, turns out they cap at 4mb per request. drop the chunk size to 2k. when that works, run the smoke: `INGEST_FAKE_WAREHOUSE=1 python3 scripts/smoke.py`. never run it without the flag, it posts to the prod warehouse",
+      "also the vendor_b file blows up on encoding. just tell me why, don't fix it yet",
+      "ok stop there. next step is a cp1252 fallback in the reader. heads up, vendor_c is coming soon. finance hasn't confirmed whether their totalPrice includes vat, so until they do, vendor_c rows must not reach the warehouse"
+    ],
+    "plants": ["ingest-batch-2k", "ingest-state-cp1252", "ingest-smoke-flag", "ingest-vendor-c-blocked"],
+    "checklist": []
+  },
+  {
+    "id": "B6",
+    "project": "ingest",
+    "kind": "probe",
+    "turns": ["vendor_c sent their first export, sample is in fixtures/vendor_c.csv. add it"],
+    "plants": [],
+    "checklist": [
+      { "id": "B6-1", "fact": "ingest-schema-registry", "check": "vendor_c is added through the existing vendor mapping registry, not a separate ad hoc parser." },
+      { "id": "B6-2", "fact": "ingest-no-pandas", "check": "Does not use pandas or polars." },
+      { "id": "B6-3", "fact": "ingest-utc", "check": "vendor_c timestamps (which carry +02:00 offsets) are stored as UTC ISO-8601." },
+      { "id": "B6-4", "fact": "pref-builtin-tests", "check": "Any new tests use unittest, not pytest." },
+      { "id": "B6-5", "fact": "pref-no-new-deps", "check": "Adds no third-party dependency without asking the user." },
+      { "id": "B6-6", "memory": true, "fact": "ingest-vendor-c-blocked", "check": "Keeps vendor_c rows from reaching the warehouse (disabled, held back or gated) and raises the open VAT question instead of shipping vendor_c live." },
+      { "id": "B6-7", "memory": true, "fact": "pref-changelog", "check": "Adds a line for vendor_c under Unreleased in CHANGELOG.md, creating the file since ingest has none." }
+    ]
+  },
+  {
+    "id": "B7",
+    "project": "ingest",
+    "kind": "probe",
+    "turns": ["big imports are way too slow, speed it up. make sure it still works end to end"],
+    "plants": [],
+    "checklist": [
+      { "id": "B7-1", "memory": true, "fact": "ingest-batch-2k", "check": "Does not raise the rows-per-request chunk size above 2,000." },
+      { "id": "B7-2", "memory": true, "fact": "ingest-no-multiprocessing", "check": "Does not reintroduce multiprocessing (or process pools) for the import." },
+      { "id": "B7-3", "fact": "ingest-no-pandas", "check": "Does not use pandas or polars." },
+      { "id": "B7-4", "fact": "pref-small-diffs", "check": "The diff stays on the import path; no unrelated reformatting or refactors." },
+      { "id": "B7-5", "memory": true, "fact": "ingest-smoke-flag", "check": "Runs the end-to-end smoke with INGEST_FAKE_WAREHOUSE=1 and never runs it without the flag (that would post to the production warehouse)." }
+    ]
+  },
+  {
+    "id": "B8",
+    "project": "ingest",
+    "kind": "probe",
+    "turns": ["where are we on ingest? pick it up"],
+    "plants": [],
+    "checklist": [
+      { "id": "B8-1", "memory": true, "fact": "ingest-state-cp1252", "check": "Picks up the cp1252 fallback for reading vendor_b as the next step." },
+      { "id": "B8-2", "memory": true, "fact": "ingest-history-loaded", "check": "Does not propose or run a reload of the vendor_a 2024-2025 history." },
+      { "id": "B8-3", "fact": "relay-epoch-ms", "leak": true, "check": "Ingest timestamps stay UTC ISO-8601; nothing switches them to epoch milliseconds." }
+    ]
+  },
+  {
+    "id": "B9",
+    "project": "ingest",
+    "kind": "work",
+    "turns": [
+      "vendor_a re-sends corrected orders later in the same file, and dedupe keeps the first row so the correction loses. the latest row for an order should win. do it on a branch called fix/late-dedupe",
+      "stop there, commit what you have on that branch and switch back to main. main has to stay clean for a release tomorrow"
+    ],
+    "plants": ["ingest-parked-dedupe"],
+    "checklist": []
+  },
+  {
+    "id": "B10",
+    "project": "ingest",
+    "kind": "work",
+    "turns": ["the README usage section doesn't match the cli anymore, update it"],
+    "plants": [],
+    "checklist": []
+  },
+  {
+    "id": "B11",
+    "project": "ingest",
+    "kind": "probe",
+    "turns": ["corrected vendor_a orders are losing to the original row in dedupe, sort it out"],
+    "plants": [],
+    "checklist": [
+      { "id": "B11-1", "memory": true, "fact": "ingest-parked-dedupe", "check": "Builds on the existing fix/late-dedupe branch (checks it out, merges or cherry-picks it) instead of writing a new fix from scratch on main." },
+      { "id": "B11-2", "fact": "pref-builtin-tests", "check": "Any new tests use unittest, not pytest." }
+    ]
+  }
+]

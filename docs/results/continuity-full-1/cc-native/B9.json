@@ -1,0 +1,22 @@
+{
+  "id": "B9",
+  "project": "ingest",
+  "ok": true,
+  "costUsd": 0.3960988,
+  "sessionUuid": "e11da4d0-39ec-4f1b-9f38-37fd9f63d931",
+  "fingerprint": "16ac68cd90745770",
+  "turns": 2,
+  "offerReplied": false,
+  "before": "667908aa44654c9bb57cb4ddce1f6019946e8902",
+  "after": "f1c110392fb925617bde13fb95d6a5a5a15fc7df",
+  "tokens": {
+    "input": 16,
+    "output": 3153,
+    "cacheRead": 174431,
+    "cacheWrite": 13920
+  },
+  "durationMs": 51583,
+  "memoryCalls": 0,
+  "memoryBytesIn": 0,
+  "autoLoadedBytes": 421
+}

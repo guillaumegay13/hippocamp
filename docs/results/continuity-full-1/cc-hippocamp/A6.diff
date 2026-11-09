@@ -1,0 +1,229 @@
+diff --git a/README.md b/README.md
+index a370fd9..c6fa834 100644
+--- a/README.md
++++ b/README.md
+@@ -18,6 +18,14 @@ Sources are configured with the `SOURCES` env var, a JSON object:
+ { "github": { "secret": "dev-secret", "target": "http://localhost:4000/in" } }
+ ```
+ 
++A source can slow down its retries with an optional `retry` object. The delay starts at `baseDelayMs` (default 100), doubles on each retry and is capped at `maxDelayMs` (default: no cap). Invalid values stop startup.
++
++```json
++{ "acme": { "secret": "...", "target": "https://acme.example/in", "retry": { "baseDelayMs": 60000, "maxDelayMs": 600000 } } }
++```
++
++Delays are looked up by source when each retry is scheduled, so a config change affects retries already in the queue from their next attempt on.
++
+ ```sh
+ npm install
+ npm test                                 # uses an in-memory queue; no Postgres needed
+diff --git a/src/deliver.ts b/src/deliver.ts
+index 44466ea..fede29c 100644
+--- a/src/deliver.ts
++++ b/src/deliver.ts
+@@ -3,24 +3,36 @@ import { Delivery, Store } from "./store";
+ 
+ export type Send = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{ ok: boolean; status: number }>;
+ 
++// Per-endpoint retry timing. The delay doubles each retry, starting at baseDelayMs, capped at maxDelayMs.
++export type RetryDelays = {
++  baseDelayMs?: number;
++  maxDelayMs?: number;
++};
++
+ export type RetryOptions = {
+   // Total attempts, including the first one.
+   maxAttempts?: number;
+-  // Delay before retry number `retry` (1-based), in milliseconds.
++  // Delay before retry number `retry` (1-based), in milliseconds. Overrides `delaysFor` when set.
+   backoff?: (retry: number) => number;
++  // Looks up the retry timing for a delivery's endpoint; undefined means the defaults.
++  delaysFor?: (delivery: Delivery) => RetryDelays | undefined;
+   now?: () => number;
+ };
+ 
+ export const MAX_ATTEMPTS = 5;
++export const DEFAULT_BASE_DELAY_MS = 100;
+ 
+-// 100ms, 200ms, 400ms, 800ms: at most ~1.5s of waiting across 5 attempts (plus worker poll latency).
+-const defaultBackoff = (retry: number) => 100 * 2 ** (retry - 1);
++// With the defaults: 100ms, 200ms, 400ms, 800ms, at most ~1.5s of waiting across 5 attempts (plus worker poll latency).
++export function backoffDelay(retry: number, delays: RetryDelays = {}): number {
++  const delay = (delays.baseDelayMs ?? DEFAULT_BASE_DELAY_MS) * 2 ** (retry - 1);
++  return Math.min(delay, delays.maxDelayMs ?? Infinity);
++}
+ 
+ // Makes one attempt to forward a delivery. A 5xx with attempts left is put on the retry queue and the
+ // delivery stays "pending"; anything else is final and is removed from the queue.
+ export async function deliver(delivery: Delivery, store: Store, queue: RetryQueue, send: Send = fetch, options: RetryOptions = {}): Promise<Delivery> {
+   const maxAttempts = options.maxAttempts ?? MAX_ATTEMPTS;
+-  const backoff = options.backoff ?? defaultBackoff;
++  const backoff = options.backoff ?? ((retry: number) => backoffDelay(retry, options.delaysFor?.(delivery)));
+   const now = options.now ?? Date.now;
+ 
+   const attempts = delivery.attempts + 1;
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index e76b3fa..1a56b6d 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -1,12 +1,34 @@
+ import { randomUUID } from "node:crypto";
+-import { deliver, Send } from "../deliver";
++import { deliver, RetryDelays, Send } from "../deliver";
+ import { headerValue, verifyHmac } from "../lib/signature";
+ import { RetryQueue } from "../queue";
+ import { Delivery, Store } from "../store";
+ 
+-export type SourceConfig = { secret: string; target: string };
++export type SourceConfig = { secret: string; target: string; retry?: RetryDelays };
+ export type Sources = Record<string, SourceConfig>;
+ 
++// Rejects bad retry settings at startup instead of on the first failed delivery.
++export function validateSources(sources: Sources): Sources {
++  for (const [name, config] of Object.entries(sources)) {
++    const retry = config.retry ?? {};
++    for (const key of ["baseDelayMs", "maxDelayMs"] as const) {
++      const value = retry[key];
++      if (value !== undefined && !(typeof value === "number" && Number.isFinite(value) && value > 0)) {
++        throw new Error(`source "${name}": retry.${key} must be a positive number of milliseconds`);
++      }
++    }
++    if (retry.baseDelayMs !== undefined && retry.maxDelayMs !== undefined && retry.maxDelayMs < retry.baseDelayMs) {
++      throw new Error(`source "${name}": retry.maxDelayMs must be >= retry.baseDelayMs`);
++    }
++  }
++  return sources;
++}
++
++// Retry timing is looked up from the delivery's source, so the worker uses the current config for queued retries.
++export function retryDelaysFor(sources: Sources): (delivery: Delivery) => RetryDelays | undefined {
++  return (delivery) => sources[delivery.source]?.retry;
++}
++
+ export type WebhookResult = { status: number; body: Record<string, unknown> };
+ 
+ export async function handleWebhook(
+@@ -39,6 +61,6 @@ export async function handleWebhook(
+   };
+ 
+   await store.save(delivery);
+-  const result = await deliver(delivery, store, queue, send);
++  const result = await deliver(delivery, store, queue, send, { delaysFor: retryDelaysFor(sources) });
+   return { status: 202, body: { id: result.id, status: result.status } };
+ }
+diff --git a/src/server.ts b/src/server.ts
+index c775d3d..d2e4c80 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -3,10 +3,10 @@ import { Pool } from "pg";
+ import { startRetryWorker } from "./deliver";
+ import { PostgresRetryQueue } from "./queue";
+ import { handleAdmin } from "./routes/admin";
+-import { handleWebhook, Sources } from "./routes/webhooks";
++import { handleWebhook, retryDelaysFor, Sources, validateSources } from "./routes/webhooks";
+ import { MemoryStore } from "./store";
+ 
+-const sources: Sources = JSON.parse(process.env.SOURCES || "{}");
++const sources: Sources = validateSources(JSON.parse(process.env.SOURCES || "{}"));
+ const store = new MemoryStore();
+ // pg reads PG* env vars when DATABASE_URL is unset.
+ const pool = new Pool(process.env.DATABASE_URL ? { connectionString: process.env.DATABASE_URL } : {});
+@@ -41,7 +41,7 @@ const server = createServer(async (req, res) => {
+ 
+ async function main() {
+   await queue.migrate();
+-  const stopWorker = startRetryWorker(queue, store);
++  const stopWorker = startRetryWorker(queue, store, fetch, { delaysFor: retryDelaysFor(sources) });
+ 
+   server.listen(port, () => console.log(`relay listening on ${port}`));
+ 
+diff --git a/test/deliver.test.ts b/test/deliver.test.ts
+index 2c0092b..902e90e 100644
+--- a/test/deliver.test.ts
++++ b/test/deliver.test.ts
+@@ -1,9 +1,9 @@
+ import test from "node:test";
+ import assert from "node:assert/strict";
+ import { createHmac } from "node:crypto";
+-import { deliver, processRetries } from "../src/deliver";
++import { deliver, processRetries, RetryOptions } from "../src/deliver";
+ import { MemoryRetryQueue } from "../src/queue";
+-import { handleWebhook } from "../src/routes/webhooks";
++import { handleWebhook, validateSources } from "../src/routes/webhooks";
+ import { Delivery, MemoryStore } from "../src/store";
+ 
+ const sources = { github: { secret: "s3cret", target: "http://client.test/in" } };
+@@ -28,7 +28,7 @@ function responses(...statuses: Array<number | Error>) {
+ }
+ 
+ // Runs the first attempt, then drives the retry worker with a fake clock until the queue drains.
+-async function run(send: Parameters<typeof deliver>[3], onSchedule?: (delay: number) => void) {
++async function run(send: Parameters<typeof deliver>[3], onSchedule?: (delay: number) => void, options: RetryOptions = {}) {
+   const store = new MemoryStore();
+   const queue = new MemoryRetryQueue();
+   let clock = 1_000;
+@@ -40,10 +40,10 @@ async function run(send: Parameters<typeof deliver>[3], onSchedule?: (delay: num
+     await schedule(delivery, dueAt);
+   };
+ 
+-  await deliver(pending(), store, queue, send, { now });
++  await deliver(pending(), store, queue, send, { ...options, now });
+   while (queue.size() > 0) {
+-    clock += 10_000;
+-    await processRetries(queue, store, send, { now });
++    clock += 10_000_000;
++    await processRetries(queue, store, send, { ...options, now });
+   }
+ 
+   return { store, queue, result: (await store.get("d1"))! };
+@@ -114,6 +114,41 @@ test("deliver backs off exponentially between retries", async () => {
+   assert.deepEqual(delays, [100, 200, 400, 800]);
+ });
+ 
++test("retry delays can be slowed down per endpoint", async () => {
++  const delays: number[] = [];
++  const { send } = responses(500);
++  const delaysFor = (delivery: Delivery) => (delivery.source === "github" ? { baseDelayMs: 60_000, maxDelayMs: 300_000 } : undefined);
++  await run(send, (delay) => delays.push(delay), { delaysFor });
++
++  assert.deepEqual(delays, [60_000, 120_000, 240_000, 300_000]);
++});
++
++test("endpoints without retry settings keep the default delays", async () => {
++  const delays: number[] = [];
++  const { send } = responses(500);
++  await run(send, (delay) => delays.push(delay), { delaysFor: () => undefined });
++
++  assert.deepEqual(delays, [100, 200, 400, 800]);
++});
++
++test("webhook uses its source's retry delays for the first retry", async () => {
++  const queue = new MemoryRetryQueue();
++  const slow = { github: { ...sources.github, retry: { baseDelayMs: 5_000 } } };
++  const before = Date.now();
++  await handleWebhook("github", "{}", { "x-signature": sign("{}") }, slow, new MemoryStore(), queue, async () => ({ ok: false, status: 503 }));
++
++  assert.equal((await queue.claim(before + 4_000, 1000, 10)).length, 0);
++  assert.equal((await queue.claim(Date.now() + 5_000, 1000, 10)).length, 1);
++});
++
++test("invalid retry settings are rejected", () => {
++  const base = { secret: "s", target: "http://x" };
++  assert.throws(() => validateSources({ a: { ...base, retry: { baseDelayMs: 0 } } }), /baseDelayMs/);
++  assert.throws(() => validateSources({ a: { ...base, retry: { maxDelayMs: "60s" as unknown as number } } }), /maxDelayMs/);
++  assert.throws(() => validateSources({ a: { ...base, retry: { baseDelayMs: 1000, maxDelayMs: 500 } } }), /maxDelayMs/);
++  assert.doesNotThrow(() => validateSources({ a: { ...base, retry: { baseDelayMs: 1000, maxDelayMs: 60_000 } }, b: base }));
++});
++
+ test("a claimed retry that is never finished becomes due again after its lease", async () => {
+   const queue = new MemoryRetryQueue();
+   await queue.schedule({ ...pending(), attempts: 1 }, 0);
+@@ -155,7 +190,7 @@ test("each attempt is recorded with its status code, outcome and next retry time
+ 
+   assert.deepEqual(attempts, [
+     { attempt: 1, startedAt: 1_000, durationMs: 0, statusCode: 503, outcome: "retrying", nextAttemptAt: 1_100 },
+-    { attempt: 2, startedAt: 11_000, durationMs: 0, statusCode: null, outcome: "failed", error: "connect ECONNREFUSED" },
++    { attempt: 2, startedAt: 10_001_000, durationMs: 0, statusCode: null, outcome: "failed", error: "connect ECONNREFUSED" },
+   ]);
+ });
+ 

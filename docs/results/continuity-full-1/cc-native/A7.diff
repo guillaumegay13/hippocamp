@@ -1,0 +1,126 @@
+diff --git a/DEPLOY.md b/DEPLOY.md
+new file mode 100644
+index 0000000..f5ec24e
+--- /dev/null
++++ b/DEPLOY.md
+@@ -0,0 +1,32 @@
++# Deploy notes: Redis → Postgres retry queue
++
++Retries no longer use Redis. They live in a Postgres `deliveries` table (`id`, `due_at` in epoch ms, `job` JSON), polled by a worker inside the server process.
++
++## Before deploying
++
++- Set `DATABASE_URL` on every relay instance. Without it the server falls back to `postgres://localhost:5432/relay`.
++- The relay's DB user needs `CREATE` on the schema (only for the first start) plus `SELECT/INSERT/UPDATE/DELETE` on `deliveries`.
++- Prod already has the `deliveries` table with rows backfilled from Redis (2026-11-04). Check that the index exists:
++  ```sql
++  SELECT indexname FROM pg_indexes WHERE tablename = 'deliveries';
++  ```
++  If `deliveries_due_at_idx` is missing, create it **before** deploying, without blocking writes:
++  ```sql
++  CREATE INDEX CONCURRENTLY IF NOT EXISTS deliveries_due_at_idx ON deliveries (due_at);
++  ```
++  Otherwise startup runs a plain `CREATE INDEX`, which locks the table for writes while it builds.
++
++## Deploying
++
++- On startup the server runs `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`. If that fails the process exits with `failed to create deliveries table`.
++- Running several instances is safe: claims use `FOR UPDATE SKIP LOCKED`, and a claimed retry is hidden for 30 s (lease). If an instance dies mid-retry, another picks it up after the lease expires.
++- Redis is no longer read. Anything still in Redis that wasn't backfilled will not be retried.
++
++## After deploying
++
++- Watch the logs for `retry worker:` errors.
++- Pending retries: `SELECT count(*) FROM deliveries;`. Overdue ones: `SELECT count(*) FROM deliveries WHERE due_at < extract(epoch FROM now()) * 1000;`. That number should stay near zero.
++
++## Rollback
++
++Rolling back to the Redis build drops any retries queued in Postgres since the deploy. Drain the table first, or accept losing them.
+diff --git a/README.md b/README.md
+index 4443320..6b906eb 100644
+--- a/README.md
++++ b/README.md
+@@ -8,6 +8,8 @@ Sources are configured with the `SOURCES` env var, a JSON object:
+ { "github": { "secret": "dev-secret", "target": "http://localhost:4000/in" } }
+ ```
+ 
++By default the signature is read from `X-Signature`. Set `"provider": "acme"` on a source to read it from `X-Acme-Signature` instead (hex HMAC-SHA256 of the raw body).
++
+ If the target returns a 5xx, the delivery is put on a retry queue in a Postgres `deliveries` table (`DATABASE_URL`, default `postgres://localhost:5432/relay`; the table is created on startup) and retried with exponential backoff (200 ms, 400 ms, 800 ms, ...), up to 5 attempts in total. A source can set a slower starting delay with `"retry": { "baseDelayMs": 5000 }` (5 s, 10 s, 20 s, 40 s); it's read when each retry runs, so changing it also affects retries already queued. A background worker in the server process runs the retries, so a restart doesn't lose pending ones.
+ 
+ Admin API: `GET /admin/deliveries` and `GET /admin/deliveries/:id` return delivery metadata (id, source, target, status, attempts, `receivedAt` in epoch ms). `GET /admin/deliveries/:id/attempts` returns the attempt history, oldest first (`attempt`, `at` in epoch ms, `ok`, `statusCode` or `null` on a network error, and `error` when there was one). Payload bodies are never returned.
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index d8d708a..a78732e 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -4,9 +4,17 @@ import { headerValue, verifyHmac } from "../lib/hmac";
+ import { RetryQueue } from "../queue";
+ import { Delivery, Store } from "../store";
+ 
++// How each provider signs its webhooks. A source without a `provider` uses the generic X-Signature header.
++// All of these are a hex HMAC-SHA256 of the raw body.
++export const PROVIDERS = {
++  acme: { header: "x-acme-signature" },
++} as const;
++const DEFAULT_SIGNATURE_HEADER = "x-signature";
++
+ export type SourceConfig = {
+   secret: string;
+   target: string;
++  provider?: keyof typeof PROVIDERS;
+   // Optional per-source retry policy; falls back to the defaults in deliver.ts.
+   retry?: { baseDelayMs?: number };
+ };
+@@ -29,7 +37,9 @@ export async function handleWebhook(
+     return { status: 404, body: { error: "unknown source" } };
+   }
+ 
+-  if (!verifyHmac(config.secret, rawBody, headerValue(headers, "x-signature"))) {
++  const signatureHeader = config.provider ? PROVIDERS[config.provider].header : DEFAULT_SIGNATURE_HEADER;
++
++  if (!verifyHmac(config.secret, rawBody, headerValue(headers, signatureHeader))) {
+     return { status: 401, body: { error: "bad signature" } };
+   }
+ 
+@@ -49,9 +59,12 @@ export async function handleWebhook(
+   return { status: 202, body: { id: result.id, status: result.status } };
+ }
+ 
+-// Throws if a source's retry settings are unusable (e.g. a negative or non-numeric delay).
++// Throws if a source's provider is unknown or its retry settings are unusable (e.g. a negative or non-numeric delay).
+ export function validateSources(sources: Sources): void {
+   for (const [name, config] of Object.entries(sources)) {
++    if (config.provider !== undefined && !Object.hasOwn(PROVIDERS, config.provider)) {
++      throw new Error(`source "${name}": unknown provider "${config.provider}"`);
++    }
+     const baseDelayMs = config.retry?.baseDelayMs;
+     if (baseDelayMs !== undefined && !(typeof baseDelayMs === "number" && Number.isFinite(baseDelayMs) && baseDelayMs > 0)) {
+       throw new Error(`source "${name}": retry.baseDelayMs must be a positive number of milliseconds`);
+diff --git a/test/deliver.test.ts b/test/deliver.test.ts
+index 47fd53c..8068feb 100644
+--- a/test/deliver.test.ts
++++ b/test/deliver.test.ts
+@@ -179,3 +179,23 @@ test("validateSources rejects a bad retry.baseDelayMs", () => {
+   assert.throws(() => validateSources({ a: { secret: "s", target: "t", retry: { baseDelayMs: "5000" as any } } }));
+   validateSources({ a: { secret: "s", target: "t" }, b: { secret: "s", target: "t", retry: { baseDelayMs: 5000 } } });
+ });
++
++test("an acme source is verified with X-Acme-Signature", async () => {
++  const acme = { acme: { secret: "s3cret", target: "http://client.test/in", provider: "acme" as const } };
++  const body = '{"event":"ping"}';
++  const ok = async () => ({ ok: true, status: 200 });
++
++  const accepted = await handleWebhook("acme", body, { "x-acme-signature": sign(body) }, acme, new MemoryStore(), new MemoryRetryQueue(), ok);
++  assert.equal(accepted.status, 202);
++
++  const generic = await handleWebhook("acme", body, { "x-signature": sign(body) }, acme, new MemoryStore(), new MemoryRetryQueue(), ok);
++  assert.equal(generic.status, 401);
++
++  const tampered = await handleWebhook("acme", body + " ", { "x-acme-signature": sign(body) }, acme, new MemoryStore(), new MemoryRetryQueue(), ok);
++  assert.equal(tampered.status, 401);
++});
++
++test("validateSources rejects an unknown provider", () => {
++  assert.throws(() => validateSources({ a: { secret: "s", target: "t", provider: "nope" as any } }), /unknown provider/);
++  validateSources({ a: { secret: "s", target: "t", provider: "acme" } });
++});

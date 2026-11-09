@@ -1,0 +1,183 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+new file mode 100644
+index 0000000..ecda881
+--- /dev/null
++++ b/CHANGELOG.md
+@@ -0,0 +1,5 @@
++# Changelog
++
++## Unreleased
++
++- Added vendor_c reader (`orderNumber`, `productCode`, `totalPrice`, `orderedAt` with UTC offset). Loading vendor_c to the warehouse is blocked until finance confirms whether `totalPrice` includes VAT.
+diff --git a/README.md b/README.md
+index 7895af0..21a8a77 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ Reads vendor order exports (CSV), normalizes the columns, drops duplicate orders and posts the rows to the warehouse HTTP API at `WAREHOUSE_URL`.
+ 
+-Supported vendors: `vendor_a`, `vendor_b`. To add a vendor, add an entry to `VENDORS` in `ingest/reader.py` (column mapping, file encoding, timestamp conversion).
++Supported vendors: `vendor_a`, `vendor_b`, `vendor_c` (read-only for now: loading is blocked until finance confirms whether `totalPrice` includes VAT). To add a vendor, add an entry to `VENDORS` in `ingest/reader.py` (column mapping, file encoding, timestamp conversion).
+ 
+ ```sh
+ python3 -m unittest
+@@ -11,4 +11,4 @@ WAREHOUSE_URL=http://localhost:8080/rows python3 -m ingest.cli vendor_a fixtures
+ 
+ ## Timestamps
+ 
+-All timestamps are stored as UTC ISO-8601 (`2025-03-04T13:22:10Z`). Readers convert each vendor's format on the way in (vendor_a and vendor_b send Paris wall-clock time with no offset; vendor_b's dates are day-first). Convert to local time only in reports.
++All timestamps are stored as UTC ISO-8601 (`2025-03-04T13:22:10Z`). Readers convert each vendor's format on the way in (vendor_a and vendor_b send Paris wall-clock time with no offset; vendor_b's dates are day-first; vendor_c sends ISO-8601 with an explicit offset). Convert to local time only in reports.
+diff --git a/ingest/load.py b/ingest/load.py
+index ef0723d..879f48d 100644
+--- a/ingest/load.py
++++ b/ingest/load.py
+@@ -2,7 +2,7 @@ import hashlib
+ import json
+ from itertools import islice
+ 
+-from ingest.reader import read
++from ingest.reader import check_loadable, read
+ 
+ CHUNK_SIZE = 2_000
+ 
+@@ -34,8 +34,10 @@ def chunked(rows, size):
+ def load_file(vendor, path, client, chunk_size=CHUNK_SIZE):
+     """Stream the file and post deduped rows in chunks of `chunk_size`.
+ 
+-    At most one chunk of rows is held in memory at a time.
++    At most one chunk of rows is held in memory at a time. Vendors on hold
++    (see `Vendor.hold`) are refused before anything is read or posted.
+     """
++    check_loadable(vendor)
+     count = 0
+     for chunk in chunked(dedupe(read(vendor, path)), chunk_size):
+         client.post_rows(chunk)
+diff --git a/ingest/reader.py b/ingest/reader.py
+index 7ddb79c..309f877 100644
+--- a/ingest/reader.py
++++ b/ingest/reader.py
+@@ -9,7 +9,7 @@ import csv
+ from dataclasses import dataclass
+ from typing import Callable
+ 
+-from ingest.timestamps import PARIS, local_to_utc_iso
++from ingest.timestamps import PARIS, local_to_utc_iso, offset_to_utc_iso
+ 
+ # Normalized fields every vendor must provide (besides "vendor", which is added here).
+ FIELDS = ("order_id", "sku", "amount", "created_at")
+@@ -23,6 +23,9 @@ class Vendor:
+     parse_created_at: Callable[[str], str]
+     # Encodings to try, in order; the first that decodes the whole file wins.
+     encodings: tuple = ("utf-8", "cp1252")
++    # If set, rows can be read but must not be posted to the warehouse; the
++    # string says why. `load_file` refuses to load a held vendor.
++    hold: str = ""
+ 
+     def __post_init__(self):
+         missing = set(FIELDS) - set(self.columns)
+@@ -42,6 +45,12 @@ VENDORS = {
+         columns={"order_id": "ref", "sku": "article", "amount": "montant", "created_at": "date_commande"},
+         parse_created_at=lambda value: local_to_utc_iso(value, PARIS, fmt="%d/%m/%Y %H:%M"),
+     ),
++    # `orderedAt` is ISO-8601 with an explicit UTC offset.
++    "vendor_c": Vendor(
++        columns={"order_id": "orderNumber", "sku": "productCode", "amount": "totalPrice", "created_at": "orderedAt"},
++        parse_created_at=offset_to_utc_iso,
++        hold="finance has not confirmed whether totalPrice includes VAT",
++    ),
+ }
+ 
+ 
+@@ -84,6 +93,14 @@ def read_vendor(name, spec, path):
+             }
+ 
+ 
++def check_loadable(vendor):
++    """Raise if `vendor` is unknown or its rows are held back from the warehouse."""
++    if vendor not in VENDORS:
++        raise ValueError(f"unknown vendor: {vendor}")
++    if VENDORS[vendor].hold:
++        raise RuntimeError(f"{vendor} is not cleared for loading: {VENDORS[vendor].hold}")
++
++
+ def read(vendor, path):
+     """Return an iterator of normalized rows. Unknown vendors fail immediately."""
+     if vendor not in VENDORS:
+diff --git a/ingest/timestamps.py b/ingest/timestamps.py
+index 2954b13..a11af4e 100644
+--- a/ingest/timestamps.py
++++ b/ingest/timestamps.py
+@@ -25,3 +25,14 @@ def local_to_utc_iso(value, tz, fmt="%Y-%m-%d %H:%M:%S"):
+     if local.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None) != naive:
+         raise ValueError(f"{value!r} does not exist in {tz.key} (skipped by DST change)")
+     return to_utc_iso(local)
++
++
++def offset_to_utc_iso(value):
++    """Convert an ISO-8601 string that carries its own UTC offset to UTC ISO-8601.
++
++    Strings without an offset are rejected rather than guessed at.
++    """
++    dt = datetime.fromisoformat(value)
++    if dt.tzinfo is None:
++        raise ValueError(f"{value!r} has no UTC offset")
++    return to_utc_iso(dt)
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index 40e07d5..9149bb4 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -4,7 +4,7 @@ import unittest
+ 
+ from ingest.load import load_file
+ from ingest.reader import detect_encoding, read
+-from ingest.timestamps import PARIS, local_to_utc_iso
++from ingest.timestamps import PARIS, local_to_utc_iso, offset_to_utc_iso
+ 
+ FIXTURES = os.path.join(os.path.dirname(__file__), "..", "fixtures")
+ 
+@@ -34,6 +34,16 @@ class ReaderTest(unittest.TestCase):
+         # 04/03/2025 is 4 March (day-first), Paris winter time (UTC+1).
+         self.assertEqual(rows[0]["created_at"], "2025-03-04T09:05:00Z")
+ 
++    def test_vendor_c_columns_are_normalized(self):
++        rows = list(read("vendor_c", os.path.join(FIXTURES, "vendor_c.csv")))
++        self.assertEqual(len(rows), 10)
++        self.assertEqual(rows[0]["vendor"], "vendor_c")
++        self.assertEqual(rows[0]["order_id"], "C3000")
++        self.assertEqual(rows[0]["sku"], "PC-0")
++        self.assertEqual(rows[0]["amount"], 11.0)
++        # 09:15 at +02:00 is 07:15 UTC.
++        self.assertEqual(rows[0]["created_at"], "2025-06-01T07:15:00Z")
++
+     def test_wrong_file_for_vendor_is_rejected(self):
+         with self.assertRaises(ValueError):
+             list(read("vendor_b", os.path.join(FIXTURES, "vendor_a.csv")))
+@@ -81,6 +91,13 @@ class TimestampTest(unittest.TestCase):
+         with self.assertRaises(ValueError):
+             local_to_utc_iso("2025-03-30 02:30:00", PARIS)
+ 
++    def test_offset_timestamp_is_converted_to_utc(self):
++        self.assertEqual(offset_to_utc_iso("2025-01-15T09:00:00+01:00"), "2025-01-15T08:00:00Z")
++
++    def test_offset_timestamp_without_offset_is_rejected(self):
++        with self.assertRaises(ValueError):
++            offset_to_utc_iso("2025-01-15T09:00:00")
++
+     def test_ambiguous_fall_back_time_uses_earlier_instant(self):
+         self.assertEqual(local_to_utc_iso("2025-10-26 02:30:00", PARIS), "2025-10-26T00:30:00Z")
+ 
+@@ -106,6 +123,13 @@ class LoadTest(unittest.TestCase):
+         self.assertEqual(load_file("vendor_a", os.path.join(FIXTURES, "vendor_a.csv"), client, chunk_size=10_000), 19)
+         self.assertEqual(len(client.requests), 1)
+ 
++    def test_held_vendor_is_never_posted(self):
++        # vendor_c is on hold until finance confirms whether totalPrice includes VAT.
++        client = FakeClient()
++        with self.assertRaises(RuntimeError):
++            load_file("vendor_c", os.path.join(FIXTURES, "vendor_c.csv"), client)
++        self.assertEqual(client.requests, [])
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
