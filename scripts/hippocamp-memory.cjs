@@ -509,7 +509,9 @@ async function pullMemory() {
     return { pulled: false, reason: "no_upstream" };
   }
 
-  const result = await runGit(["pull", "--ff-only", "--quiet"], repoRoot, { timeout: 10000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  // Never prompt: saved credentials (credential helpers, SSH agent) still work; anything that would ask fails fast.
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes" };
+  const result = await runGit(["pull", "--ff-only", "--quiet"], repoRoot, { timeout: 10000, env });
   return result.ok ? { pulled: true } : { pulled: false, reason: "pull_failed", error: result.stderr };
 }
 
