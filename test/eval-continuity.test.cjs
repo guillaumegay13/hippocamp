@@ -21,6 +21,7 @@ const {
   isOffer,
   judgeProbe,
   memorySnapshot,
+  finalMemory,
   needsQualityJudge,
   parseArgs,
   parseStream,
@@ -768,4 +769,21 @@ test("completeViaClaude sends the prompt on stdin with no tools and reads the re
   assert.equal(seen.options.env.HOME, sandboxPaths("t", "judge").home);
   assert.equal(response.text, '{"items":[]}');
   assert.equal(response.costUsd, 0.2);
+});
+
+test("finalMemory exports every project once, so the quality judge sees all of an arm's memory", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "final-memory-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const paths = { root, home: path.join(root, "h"), configDir: path.join(root, "h", ".claude"), lagoon: path.join(root, "lagoon"), repos: { relay: path.join(root, "r"), ingest: path.join(root, "i") } };
+
+  for (const project of ["relay", "ingest"]) {
+    await fs.mkdir(path.join(paths.lagoon, "projects", project, "events"), { recursive: true });
+    await fs.writeFile(path.join(paths.lagoon, "projects", project, "events", "2026-11-09.md"), `# Events\n\n## 10:00 ${project} fact\nx\n`);
+  }
+
+  await fs.writeFile(path.join(paths.lagoon, "identity.md"), "global\n");
+  const entries = await finalMemory(ADAPTERS["cc-hippocamp"], paths);
+  const heads = entries.map((entry) => entry.text.trim().split("\n")[0]).sort();
+
+  assert.deepEqual(heads, ["## 10:00 ingest fact", "## 10:00 relay fact", "global"]);
 });

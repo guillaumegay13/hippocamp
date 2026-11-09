@@ -7,5 +7,16 @@
   "versions": {
     "claude": "2.1.319 (Claude Code)",
     "codex": "codex-cli 0.159.2 gpt-6.1-sol"
-  }
+  },
+  "changes": [
+    {
+      "at": "2026-11-09T12:56:14.126Z",
+      "keys": [
+        "harnessHash"
+      ],
+      "now": {
+        "harnessHash": "20702a4e4f71685e"
+      }
+    }
+  ]
 }

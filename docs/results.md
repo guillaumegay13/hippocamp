@@ -43,7 +43,7 @@ The same reader reaches 90% with the correct sessions, so the remaining gap is r
 
 Does memory carry real engineering work from one coding session to the next? `npm run eval:continuity` runs real headless Claude Code (`claude-opus-5-5`, Claude Code 2.1.318 to 2.1.319) through 21 sessions over two small synthetic projects (a TypeScript webhook relay and a Python ingest job). Early sessions plant facts the way work does: a rejected library, a pinned Node version, a blocked vendor, a parked branch, a user preference. Later sessions give tickets that only go well if the agent remembers them. The prompts never say "remember" or point at memory.
 
-In short: the same Hippocamp server, plugged unchanged into Claude Code or Codex, keeps up with each one's own memory (100% vs 96% in Claude Code, 86% vs 86% in Codex), with fewer than 5 points of difference and one run per arm. In Codex, whose built-in memory stored almost nothing, Hippocamp's memory covered 35% of the planted facts against 4%.
+In short: the same Hippocamp server, plugged unchanged into Claude Code or Codex, keeps up with each one's own memory (100% vs 96% in Claude Code, 86% vs 86% in Codex), with fewer than 5 points of difference and one run per arm. In Codex, whose built-in memory stored almost nothing, Hippocamp's memory covered 57% of the planted facts against 4%.
 
 Each arm is installed the way a developer has it, in its own sandbox home: Claude Code defaults with native auto-memory, or Hippocamp through its real installer (`install-claude`) with auto-memory off. A blind judge (Opus, arm names and memory paths scrubbed) grades 28 checks against the diff and the tool calls. A check is n/a when the session wrote no code it applies to.
 
@@ -56,11 +56,11 @@ Run `full-1`, one run per arm:
 | Tokens per session, median | 179k | 224k |
 | Time per session, median | 62 s | 73 s |
 | Agent cost per run, API price | $8.84 | $9.19 |
-| Memory entries at the end | 8 | 15 |
-| Planted facts covered by memory | 22% | 30% |
-| Memory entries that are useful (precision) | 88% | 80% |
+| Memory entries at the end | 8 | 27 |
+| Planted facts covered by memory | 22% | 57% |
+| Memory entries that are useful (precision) | 88% | 81% |
 
-What it shows: Hippocamp, plugged into Claude Code as a plain MCP server, does as well as Claude Code's own memory, at about the same cost (+4% dollars, +25% tokens per session). Native memory's one miss was a parked `fix/late-dedupe` branch it no longer knew about, so it rewrote the fix from scratch. Hippocamp's 8 n/a checks come mostly from one session where it correctly held a blocked vendor back and wrote no code; native also held the vendor back, but with gated code the checks could grade.
+What it shows: Hippocamp, plugged into Claude Code as a plain MCP server, does as well as Claude Code's own memory, at about the same cost (+4% dollars, +25% tokens per session). Native memory's one miss was a parked `fix/late-dedupe` branch it no longer knew about, so it rewrote the fix from scratch. Hippocamp's 8 n/a checks come mostly from one session where it correctly held a blocked vendor back and wrote no code; native also held the vendor back, but with gated code the checks could grade. A check is only counted when the session did work it applies to, so the two arms are scored on different numbers of checks (20 vs 26); this favors an arm that holds work back.
 
 What it does not show: that Hippocamp is better. The difference is one check, from one run per arm (bootstrap 95% interval over probes: +4 points, 0 to +16). There is no no-memory run, so the "needing memory" label comes from the dataset, not from a measured baseline. An earlier development run (27 / 27 vs 24 / 27) is not used: its cases were added after a tie and its harness was unfair to native memory.
 
@@ -77,15 +77,19 @@ Run `codex-1` repeats the 21 sessions in Codex (`codex exec`, codex-cli 0.159.2,
 | Tokens per session, median | 166k | 238k |
 | Time per session, median | 63 s | 82 s |
 | Memory calls per session | 1.0 | 4.9 |
-| Memory entries at the end | 4 | 17 |
-| Planted facts covered by memory | 4% | 35% |
-| Memory entries that are useful (precision) | 25% | 76% |
+| Memory entries at the end | 4 | 31 |
+| Planted facts covered by memory | 4% | 57% |
+| Memory entries that are useful (precision) | 25% | 61% |
 
-What it shows: the same Hippocamp server, with no Codex-specific code, works in Codex as it does in Claude Code. Codex called `wake_up`, `search_memory` and `append_event` on its own, and the memory it built covers about as many planted facts as in Claude Code (35% vs 30%). The two Codex arms tie on checks (bootstrap: 0 points, -14 to +14).
+What it shows: the same Hippocamp server, with no Codex-specific code, works in Codex as it does in Claude Code. Codex called `wake_up`, `search_memory` and `append_event` on its own, and the memory it built covers as many planted facts as in Claude Code (57% in both). The two Codex arms tie on checks (bootstrap: 0 points, -14 to +14).
 
-Codex's own memory stored almost nothing in this run: its background summaries never produced a memory from a past session, and the one real entry is a changelog preference the agent wrote as a note. The other three entries are Codex's empty templates, which the judge counts as noise. Codex still passed most checks without it, from the repository itself (code, commit messages, notes it wrote in the repo); that is why the score does not drop more. Hippocamp's misses include one stale next step and one fact it never saved (a blocked vendor).
+Codex's own memory stored almost nothing in this run: its background summaries never produced a memory from a past session, and the one real entry is a changelog preference the agent wrote as a note. The other three entries are Codex's empty templates, which the judge counts as noise. The harness turns Codex memory on but does not wait for or confirm its background step between sessions, so this arm measures Codex memory as it behaved here, not a verified working pipeline. Hippocamp's Codex memory also holds more duplicates (5) and stale entries (4) than in Claude Code, so its precision is lower (61%). Codex still passed most checks without it, from the repository itself (code, commit messages, notes it wrote in the repo); that is why the score does not drop more. Hippocamp's misses include one stale next step and one fact it never saved (a blocked vendor).
 
 Codex reports no dollar cost, so this run has token and time numbers only.
+
+### How memory quality is scored
+
+At the end of each run, a judge labels every memory entry, across both projects, as a current fact, a stale fact, other useful context, noise or a duplicate. Coverage is the share of planted facts with at least one current entry. Each entry is credited with one fact at most, so a native memory file that lists several facts in one entry gets credit for one of them: coverage favors memories that store one fact per entry, like Hippocamp's events, and the native coverage figures are a lower bound. A first version of this report judged only one project of Hippocamp's memory and gave it 30% (Claude Code) and 35% (Codex); this was fixed and re-judged without re-running any session.
 
 The run data is in [results/continuity-codex-1](results/continuity-codex-1/).
 

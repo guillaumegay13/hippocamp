@@ -59,7 +59,7 @@ Reproducible with the scripts in this repo.
 
 **Work continuity** tests memory on real engineering work, not chat questions. A real Claude Code or Codex agent works through 21 coding sessions on two small projects. Early sessions establish facts, such as a rejected library, a pinned Node version, a blocked vendor, a parked branch or a user preference. Later tickets only go well if the agent remembers them, and the prompts never mention memory. A blind judge grades 28 checks from the diff and the tool calls. Each arm is installed the way a developer has it.
 
-The same Hippocamp server, plugged into either agent with no changes, keeps up with that agent's own memory. In Codex, whose built-in memory stored almost nothing, Hippocamp's memory covered 35% of the planted facts against 4%. Hippocamp uses about 25–45% more tokens per session. This is one run per arm, so the differences are within noise. Every grade, diff and judge prompt is published in [docs/results](docs/results/).
+The same Hippocamp server, plugged into either agent with no changes, keeps up with that agent's own memory. In Codex, whose built-in memory stored almost nothing, Hippocamp's memory covered 57% of the planted facts against 4%. Hippocamp uses about 25–45% more tokens per session. This is one run per arm, so the differences are within noise. Every grade, diff and judge prompt is published in [docs/results](docs/results/).
 
 Full tables, method, and limits: [docs/results.md](docs/results.md).
 
