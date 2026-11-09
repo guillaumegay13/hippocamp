@@ -228,8 +228,25 @@ function resolveScopedPath(scope, relativePath, projectRoot) {
   return {
     root,
     path: normalizedPath,
-    absolutePath,
+    absolutePath: assertRealPathInLagoon(absolutePath),
   };
+}
+
+// The lexical check above cannot see symlinks: a link inside the Lagoon may point anywhere.
+// Resolve the real location (of the longest existing part, for files not created yet) and
+// require it to stay inside the real Lagoon root, which may itself be a symlink.
+function isRealPathInLagoon(absolutePath) {
+  const lagoon = realpathExisting(getGlobalRoot());
+  const real = realpathExisting(absolutePath);
+  return real === lagoon || real.startsWith(`${lagoon}${path.sep}`);
+}
+
+function assertRealPathInLagoon(absolutePath) {
+  if (!isRealPathInLagoon(absolutePath)) {
+    throw new Error("path escapes the memory root through a symbolic link.");
+  }
+
+  return absolutePath;
 }
 
 function assertPathInScope(scopeRoot, targetPath) {
@@ -1289,7 +1306,8 @@ async function listEventFiles(root) {
     };
   }
 
-  const entries = await fs.readdir(eventsDir, { withFileTypes: true });
+  // A linked events folder that leads outside the Lagoon is not memory.
+  const entries = isRealPathInLagoon(eventsDir) ? await fs.readdir(eventsDir, { withFileTypes: true }) : [];
   const files = entries
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
@@ -1322,7 +1340,8 @@ async function collectEventDocuments({ scope, eventFiles }) {
       continue;
     }
 
-    const content = await readFileIfExists(path.join(eventFiles.eventsDir, markdownName));
+    const markdownPath = path.join(eventFiles.eventsDir, markdownName);
+    const content = isRealPathInLagoon(markdownPath) ? await readFileIfExists(markdownPath) : null;
     const blocks = new Map();
 
     for (const block of parseEventBlocks(content || "")) {
@@ -1675,7 +1694,8 @@ async function wakeUp({ projectRoot } = {}) {
   const missing = [];
 
   for (const relativePath of DEFAULT_GLOBAL_FILES) {
-    const file = await readMemoryFile({ scope: "global", path: relativePath, projectRoot });
+    // A wake-up file that links outside the Lagoon is reported missing rather than loaded.
+    const file = await readMemoryFile({ scope: "global", path: relativePath, projectRoot }).catch(() => ({ found: false }));
 
     if (!file.found) {
       missing.push(`global:${relativePath}`);
@@ -1689,7 +1709,8 @@ async function wakeUp({ projectRoot } = {}) {
   }
 
   for (const relativePath of projectSlug ? DEFAULT_PROJECT_FILES : []) {
-    const file = await readMemoryFile({ scope: "project", path: relativePath, projectRoot });
+    // A wake-up file that links outside the Lagoon is reported missing rather than loaded.
+    const file = await readMemoryFile({ scope: "project", path: relativePath, projectRoot }).catch(() => ({ found: false }));
 
     if (!file.found) {
       missing.push(`project:${relativePath}`);
@@ -1745,6 +1766,7 @@ async function wakeUp({ projectRoot } = {}) {
 }
 
 module.exports = {
+  assertRealPathInLagoon,
   getGlobalRepoRoot,
   getGlobalRoot,
   getProjectRoot,

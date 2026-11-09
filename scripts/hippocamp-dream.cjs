@@ -227,7 +227,8 @@ async function getProjectReport(slug) {
   const files = {};
 
   for (const name of CURATED_FILES) {
-    const absolutePath = path.join(projectMemoryRoot, name);
+    // A summary file that links outside the Lagoon is never read, sent to a model, or replaced.
+    const absolutePath = memory.assertRealPathInLagoon(path.join(projectMemoryRoot, name));
     files[name] = {
       absolutePath,
       bytes: await statSize(absolutePath),
