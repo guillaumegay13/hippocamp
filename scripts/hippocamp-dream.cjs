@@ -640,13 +640,36 @@ function validateDreamStructure(output) {
 
 // Compaction must never lose unfinished work silently: every open thread that disappears has to
 // be declared closed or merged, with a reason, or the whole result is refused and nothing is written.
+const normalizeThread = (text) => text.toLowerCase().replace(/\s+/g, " ").replace(/[.;:,\s]+$/, "").trim();
+
+// A closure counts only when it quotes a distinct original thread that no longer appears as is,
+// so a closure for a kept thread, or the same closure twice, cannot cover a different dropped thread.
+function countValidClosures(beforeThreads, keptThreads, closedThreads) {
+  const kept = new Set(keptThreads.map(normalizeThread));
+  const available = beforeThreads.map(normalizeThread).filter((thread) => !kept.has(thread));
+  let count = 0;
+
+  for (const closure of closedThreads) {
+    const quoted = normalizeThread(closure.thread);
+    const index = available.findIndex((thread) => thread === quoted || (quoted.length >= 30 && (thread.startsWith(quoted) || quoted.startsWith(thread))));
+
+    if (index >= 0) {
+      available.splice(index, 1);
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
 function assertOpenThreadsAccounted(beforeThreads, output) {
-  const kept = extractOpenThreads(output.openThreads).length;
-  const missing = beforeThreads.length - kept - output.closedThreads.length;
+  const keptThreads = extractOpenThreads(output.openThreads);
+  const closed = countValidClosures(beforeThreads, keptThreads, output.closedThreads);
+  const missing = beforeThreads.length - keptThreads.length - closed;
 
   if (missing > 0) {
     throw new Error(
-      `Dream dropped ${missing} open thread(s) without declaring them closed (${beforeThreads.length} before, ${kept} kept, ${output.closedThreads.length} closed); nothing was written.`,
+      `Dream dropped ${missing} open thread(s) without declaring them closed (${beforeThreads.length} before, ${keptThreads.length} kept, ${closed} valid closures); nothing was written.`,
     );
   }
 }
@@ -746,7 +769,7 @@ function toPublicReport(result) {
     afterWakeUpChars: result.afterWakeUpChars,
     beforeBytes: result.beforeBytes,
     changed: result.changed,
-    closedThreads: result.closedThreads,
+    closedThreads: result.closedThreads || [],
     compactionPasses: result.compactionPasses,
     context: {
       evidenceBudgetChars: result.threadEvidence.evidenceBudgetChars,
