@@ -70,7 +70,7 @@ Typical agent flow:
 4. Use `append_event` for meaningful milestones, with a title and 1-8 concise keywords.
 5. Update curated files like `current_state.md` and `open_threads.md` before finishing.
 
-Writes sync by default. If sync fails or is skipped, call `sync_memory`.
+Writes sync by default. If sync fails or is skipped, call `sync_memory`. `wake_up` and a `sync_memory` with nothing to send first pull what other machines pushed (fast-forward only, without credential prompts; when the remote cannot be reached, the pull gives up after 10 seconds and the agent continues with local memory), so a second machine starts from current memory. Sync only commits when the Lagoon is the top of its own Git repository; a Lagoon folder inside another repository, such as a code checkout, is never committed or pushed.
 
 Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar is rebuildable. Search ranks indexed events and curated files with BM25 and typo tolerance ([MiniSearch](https://github.com/lucaong/minisearch)), weighting keywords above titles and titles above bodies. It returns small coherent evidence blocks from indexed events; an event found only by its keywords or title returns its first paragraphs. If no indexed result is strong enough, it returns no event result instead of scanning whole event logs.
 

@@ -438,9 +438,9 @@ async function ensureParentDirectory(filePath) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
 }
 
-async function runGit(args, cwd) {
+async function runGit(args, cwd, options = {}) {
   try {
-    const result = await execFileAsync("git", args, { cwd });
+    const result = await execFileAsync("git", args, { cwd, ...options });
     return {
       ok: true,
       stdout: result.stdout.trim(),
@@ -477,17 +477,54 @@ function realpathExisting(targetPath) {
   }
 }
 
-async function syncMemory({ scope, projectRoot, paths, message }) {
+// The Lagoon's own repository, or null: a repository that only encloses the Lagoon (a code
+// checkout, a home-directory repo) must never receive memory commits or pushes.
+async function getLagoonRepo() {
   const repoCandidate = getGlobalRepoRoot();
   const repoRoot = await getGitRepoRoot(repoCandidate);
-  const scopeRoot = getScopeRoot(scope, projectRoot);
 
   if (!repoRoot) {
+    return { repoCandidate, reason: "not_git_repo" };
+  }
+
+  if (realpathExisting(repoRoot) !== realpathExisting(repoCandidate)) {
+    return { repoCandidate, repoRoot, reason: "lagoon_not_repo_root" };
+  }
+
+  return { repoCandidate, repoRoot };
+}
+
+// Brings in memory pushed from other machines. Fast-forward only: local commits that have not
+// been pushed yet are reconciled by the push path, never here. Offline or slow remotes are skipped.
+async function pullMemory() {
+  const { repoRoot, reason } = await getLagoonRepo();
+
+  if (!repoRoot) {
+    return { pulled: false, reason };
+  }
+
+  const upstream = await runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repoRoot);
+
+  if (!upstream.ok) {
+    return { pulled: false, reason: "no_upstream" };
+  }
+
+  // Never prompt: saved credentials (credential helpers, SSH agent) still work; anything that would ask fails fast.
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes" };
+  const result = await runGit(["pull", "--ff-only", "--quiet"], repoRoot, { timeout: 10000, env });
+  return result.ok ? { pulled: true } : { pulled: false, reason: "pull_failed", error: result.stderr };
+}
+
+async function syncMemory({ scope, projectRoot, paths, message }) {
+  const { repoCandidate, repoRoot, reason } = await getLagoonRepo();
+  const scopeRoot = getScopeRoot(scope, projectRoot);
+
+  if (reason) {
     return {
       attempted: false,
       skipped: true,
-      reason: "not_git_repo",
-      repoRoot: repoCandidate,
+      reason,
+      repoRoot: repoRoot || repoCandidate,
     };
   }
 
@@ -530,11 +567,13 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
     const aheadResult = await runGit(["rev-list", "--count", "@{u}..HEAD"], repoRoot);
 
     if (!aheadResult.ok || aheadResult.stdout === "0") {
+      // Nothing to send: an explicit sync still brings in what other machines pushed.
       return {
         attempted: true,
         skipped: true,
         reason: "no_changes_to_commit",
         repoRoot,
+        pull: await pullMemory(),
       };
     }
 
@@ -1626,6 +1665,7 @@ async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5
 }
 
 async function wakeUp({ projectRoot } = {}) {
+  const pull = await pullMemory();
   const globalRoot = getScopeRoot("global", projectRoot);
   const resolvedProjectRoot = getProjectRoot(projectRoot);
   const projectSlug = getProjectSlug(projectRoot);
@@ -1699,6 +1739,7 @@ async function wakeUp({ projectRoot } = {}) {
     missing,
     globalFiles: globalFiles.map((file) => file.path),
     projectFiles: projectFiles.map((file) => file.path),
+    pull,
     text: `${sections.join("\n").trim()}\n`,
   };
 }
