@@ -20,6 +20,7 @@ docs/superpowers/
 
 # README media loads from GitHub; keep it out of the npm package.
 assets/brand/hippocamp-demo.gif
+assets/brand/lagoon-graph.jpg
 
 # Benchmark data is for development runs only.
 bench/
