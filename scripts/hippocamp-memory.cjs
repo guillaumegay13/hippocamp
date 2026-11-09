@@ -1700,8 +1700,57 @@ async function searchMemory({ query, scope = "both", projectRoot, maxResults = 5
   };
 }
 
-async function wakeUp({ projectRoot } = {}) {
-  const pull = await pullMemory();
+const PACKAGE_VERSION = require("../package.json").version;
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function isNewerVersion(candidate, current) {
+  const parts = (version) => String(version).split("-")[0].split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const [a, b] = [parts(candidate), parts(current)];
+
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    if ((a[index] || 0) !== (b[index] || 0)) {
+      return (a[index] || 0) > (b[index] || 0);
+    }
+  }
+
+  return false;
+}
+
+// Asks npm for the latest version at most once a day, outside the Lagoon, with a short timeout.
+// It only reports: upgrading stays a user decision. Off under the Node test runner and with
+// HIPPOCAMP_NO_UPDATE_CHECK=1. Any failure means no notice.
+async function checkForUpdate({
+  enabled = !process.env.HIPPOCAMP_NO_UPDATE_CHECK && !process.env.NODE_TEST_CONTEXT,
+  currentVersion = PACKAGE_VERSION,
+  cachePath = path.join(os.homedir(), ".hippocamp", "update-check.json"),
+  fetchImpl = globalThis.fetch,
+  now = Date.now(),
+} = {}) {
+  if (!enabled || typeof fetchImpl !== "function") {
+    return null;
+  }
+
+  const cached = await readJsonFileIfExists(cachePath).catch(() => null);
+  let latest = cached?.latest || null;
+
+  if (!cached || !(now - cached.checkedAt < UPDATE_CHECK_INTERVAL_MS)) {
+    try {
+      const response = await fetchImpl("https://registry.npmjs.org/hippocamp/latest", { signal: AbortSignal.timeout(2000) });
+      latest = response.ok ? (await response.json()).version || null : null;
+    } catch {
+      latest = null;
+    }
+
+    // Failures are cached too, so an offline machine does not retry on every wake-up.
+    await fs.mkdir(path.dirname(cachePath), { recursive: true }).catch(() => {});
+    await fs.writeFile(cachePath, `${JSON.stringify({ checkedAt: now, latest })}\n`).catch(() => {});
+  }
+
+  return latest && isNewerVersion(latest, currentVersion) ? { current: currentVersion, latest } : null;
+}
+
+async function wakeUp({ projectRoot, checkUpdate = checkForUpdate } = {}) {
+  const [pull, update] = await Promise.all([pullMemory(), checkUpdate().catch(() => null)]);
   const globalRoot = getScopeRoot("global", projectRoot);
   const resolvedProjectRoot = getProjectRoot(projectRoot);
   const projectSlug = getProjectSlug(projectRoot);
@@ -1775,6 +1824,10 @@ async function wakeUp({ projectRoot } = {}) {
     sections.push("", "## Missing Files", "", ...missing.map((item) => `- ${item}`));
   }
 
+  if (update) {
+    sections.push("", "## Update", "", `Hippocamp ${update.latest} is available (installed ${update.current}). Tell the user once, and ask the user before running \`npx hippocamp@latest upgrade\` from outside the Hippocamp repo; agents load it after a restart.`);
+  }
+
   return {
     globalRoot,
     projectRoot: resolvedProjectRoot,
@@ -1784,11 +1837,13 @@ async function wakeUp({ projectRoot } = {}) {
     globalFiles: globalFiles.map((file) => file.path),
     projectFiles: projectFiles.map((file) => file.path),
     pull,
+    update,
     text: `${sections.join("\n").trim()}\n`,
   };
 }
 
 module.exports = {
+  checkForUpdate,
   assertRealPathInLagoon,
   getGlobalRepoRoot,
   getGlobalRoot,
