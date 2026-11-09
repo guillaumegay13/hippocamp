@@ -26,3 +26,8 @@ bench/
 
 # Published benchmark runs are for readers on GitHub, not for installs.
 docs/results/
+
+# Benchmark runners and the test suite run from a source checkout only.
+scripts/eval-*.cjs
+scripts/continuity-*.cjs
+test/
