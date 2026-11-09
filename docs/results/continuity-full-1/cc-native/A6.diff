@@ -1,0 +1,147 @@
+diff --git a/README.md b/README.md
+index a5791f1..4443320 100644
+--- a/README.md
++++ b/README.md
+@@ -8,7 +8,7 @@ Sources are configured with the `SOURCES` env var, a JSON object:
+ { "github": { "secret": "dev-secret", "target": "http://localhost:4000/in" } }
+ ```
+ 
+-If the target returns a 5xx, the delivery is put on a retry queue in a Postgres `deliveries` table (`DATABASE_URL`, default `postgres://localhost:5432/relay`; the table is created on startup) and retried with exponential backoff, up to 5 attempts in total. A background worker in the server process runs the retries, so a restart doesn't lose pending ones.
++If the target returns a 5xx, the delivery is put on a retry queue in a Postgres `deliveries` table (`DATABASE_URL`, default `postgres://localhost:5432/relay`; the table is created on startup) and retried with exponential backoff (200 ms, 400 ms, 800 ms, ...), up to 5 attempts in total. A source can set a slower starting delay with `"retry": { "baseDelayMs": 5000 }` (5 s, 10 s, 20 s, 40 s); it's read when each retry runs, so changing it also affects retries already queued. A background worker in the server process runs the retries, so a restart doesn't lose pending ones.
+ 
+ Admin API: `GET /admin/deliveries` and `GET /admin/deliveries/:id` return delivery metadata (id, source, target, status, attempts, `receivedAt` in epoch ms). `GET /admin/deliveries/:id/attempts` returns the attempt history, oldest first (`attempt`, `at` in epoch ms, `ok`, `statusCode` or `null` on a network error, and `error` when there was one). Payload bodies are never returned.
+ 
+diff --git a/src/deliver.ts b/src/deliver.ts
+index 3756d75..b854a30 100644
+--- a/src/deliver.ts
++++ b/src/deliver.ts
+@@ -57,6 +57,8 @@ export async function deliver(delivery: Delivery, store: Store, queue: RetryQueu
+ }
+ 
+ export type WorkerOptions = RetryOptions & {
++  // Per-delivery overrides (e.g. a source's own retry delay), looked up on every retry.
++  retryFor?: (delivery: Delivery) => RetryOptions | undefined;
+   pollIntervalMs?: number;
+   batchSize?: number;
+   // How long a claimed delivery stays hidden before another worker may retry it.
+@@ -67,7 +69,7 @@ export type WorkerOptions = RetryOptions & {
+ export async function processDue(store: Store, queue: RetryQueue, send: Send = fetch, options: WorkerOptions = {}): Promise<number> {
+   const now = options.now ?? Date.now;
+   const due = await queue.claimDue(now(), options.batchSize ?? 50, options.leaseMs ?? 30_000);
+-  await Promise.all(due.map((delivery) => deliver(delivery, store, queue, send, options)));
++  await Promise.all(due.map((delivery) => deliver(delivery, store, queue, send, { ...options, ...options.retryFor?.(delivery) })));
+   return due.length;
+ }
+ 
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index 17bc2c6..d8d708a 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -4,7 +4,12 @@ import { headerValue, verifyHmac } from "../lib/hmac";
+ import { RetryQueue } from "../queue";
+ import { Delivery, Store } from "../store";
+ 
+-export type SourceConfig = { secret: string; target: string };
++export type SourceConfig = {
++  secret: string;
++  target: string;
++  // Optional per-source retry policy; falls back to the defaults in deliver.ts.
++  retry?: { baseDelayMs?: number };
++};
+ export type Sources = Record<string, SourceConfig>;
+ 
+ export type WebhookResult = { status: number; body: Record<string, unknown> };
+@@ -40,6 +45,16 @@ export async function handleWebhook(
+ 
+   await store.save(delivery);
+   // First attempt is inline; any retries go through the queue and the worker.
+-  const result = await deliver(delivery, store, queue, send);
++  const result = await deliver(delivery, store, queue, send, config.retry);
+   return { status: 202, body: { id: result.id, status: result.status } };
+ }
++
++// Throws if a source's retry settings are unusable (e.g. a negative or non-numeric delay).
++export function validateSources(sources: Sources): void {
++  for (const [name, config] of Object.entries(sources)) {
++    const baseDelayMs = config.retry?.baseDelayMs;
++    if (baseDelayMs !== undefined && !(typeof baseDelayMs === "number" && Number.isFinite(baseDelayMs) && baseDelayMs > 0)) {
++      throw new Error(`source "${name}": retry.baseDelayMs must be a positive number of milliseconds`);
++    }
++  }
++}
+diff --git a/src/server.ts b/src/server.ts
+index d27852f..e95f2b8 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -3,10 +3,11 @@ import pg from "pg";
+ import { startRetryWorker } from "./deliver";
+ import { PostgresRetryQueue } from "./queue";
+ import { getDelivery, getDeliveryAttempts, listDeliveries } from "./routes/admin";
+-import { handleWebhook, Sources } from "./routes/webhooks";
++import { handleWebhook, Sources, validateSources } from "./routes/webhooks";
+ import { MemoryStore } from "./store";
+ 
+ const sources: Sources = JSON.parse(process.env.SOURCES || "{}");
++validateSources(sources);
+ const store = new MemoryStore();
+ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL || "postgres://localhost:5432/relay" });
+ const queue = new PostgresRetryQueue(pool);
+@@ -53,7 +54,7 @@ let stopWorker: () => Promise<void> = async () => {};
+ 
+ queue.init().then(
+   () => {
+-    stopWorker = startRetryWorker(store, queue);
++    stopWorker = startRetryWorker(store, queue, fetch, { retryFor: (delivery) => sources[delivery.source]?.retry });
+     server.listen(port, () => console.log(`relay listening on ${port}`));
+   },
+   (error) => {
+diff --git a/test/deliver.test.ts b/test/deliver.test.ts
+index 04d4a13..47fd53c 100644
+--- a/test/deliver.test.ts
++++ b/test/deliver.test.ts
+@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
+ import { createHmac } from "node:crypto";
+ import { deliver, processDue } from "../src/deliver";
+ import { MemoryRetryQueue } from "../src/queue";
+-import { handleWebhook } from "../src/routes/webhooks";
++import { handleWebhook, validateSources } from "../src/routes/webhooks";
+ import { Delivery, MemoryStore } from "../src/store";
+ 
+ const sources = { github: { secret: "s3cret", target: "http://client.test/in" } };
+@@ -146,3 +146,36 @@ test("signed webhook is stored and forwarded", async () => {
+   assert.equal(result.status, 202);
+   assert.equal((await store.list())[0].body, body);
+ });
++
++test("a source's retry.baseDelayMs slows its retries, including queued ones", async () => {
++  const slow = { github: { ...sources.github, retry: { baseDelayMs: 5000 } } };
++  const store = new MemoryStore();
++  const queue = new MemoryRetryQueue();
++  const { send } = sequence(503, 503, 200);
++  // The handler's first attempt uses the real clock, so anchor the fake clock to it.
++  const t0 = Date.now();
++  let clock = t0;
++  const now = () => clock;
++
++  // First attempt goes through the webhook handler with the source's policy: next try in >= 5s.
++  const body = "{}";
++  await handleWebhook("github", body, { "x-signature": sign(body) }, slow, store, queue, send);
++  const [{ id }] = await store.list();
++  assert.deepEqual(await queue.claimDue(t0 + 4999, 10, 1), []);
++
++  // The worker looks the policy up by source, so the second retry is due 10s after the first.
++  const retryFor = (d: Delivery) => slow[d.source as "github"]?.retry;
++  clock = t0 + 6000;
++  assert.equal(await processDue(store, queue, send, { now, retryFor, leaseMs: 1 }), 1);
++  clock = t0 + 15_999;
++  assert.equal(await processDue(store, queue, send, { now, retryFor, leaseMs: 1 }), 0);
++  clock = t0 + 16_000;
++  assert.equal(await processDue(store, queue, send, { now, retryFor, leaseMs: 1 }), 1);
++  assert.equal((await store.get(id))?.status, "delivered");
++});
++
++test("validateSources rejects a bad retry.baseDelayMs", () => {
++  assert.throws(() => validateSources({ a: { secret: "s", target: "t", retry: { baseDelayMs: -1 } } }));
++  assert.throws(() => validateSources({ a: { secret: "s", target: "t", retry: { baseDelayMs: "5000" as any } } }));
++  validateSources({ a: { secret: "s", target: "t" }, b: { secret: "s", target: "t", retry: { baseDelayMs: 5000 } } });
++});

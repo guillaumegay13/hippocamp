@@ -1,0 +1,23 @@
+{
+  "datasetHash": "ad304556297bb916",
+  "harnessHash": "b84e692b007112d9",
+  "model": "claude-opus-5-5",
+  "judgeModel": "claude-opus-5-5",
+  "budgetUsd": 3,
+  "versions": {
+    "claude": "2.1.318 (Claude Code)"
+  },
+  "changes": [
+    {
+      "at": "2026-11-09T07:36:38.305Z",
+      "keys": [
+        "versions"
+      ],
+      "now": {
+        "versions": {
+          "claude": "2.1.319 (Claude Code)"
+        }
+      }
+    }
+  ]
+}

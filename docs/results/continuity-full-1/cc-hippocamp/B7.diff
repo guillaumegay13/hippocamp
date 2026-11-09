@@ -1,0 +1,356 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+new file mode 100644
+index 0000000..cbf6f87
+--- /dev/null
++++ b/CHANGELOG.md
+@@ -0,0 +1,4 @@
++# Changelog
++
++## Unreleased
++- Faster large imports: quicker timestamp parsing and row hashing, a persistent warehouse connection, and the next chunk is parsed while the previous one is posting. Posted rows are unchanged.
+diff --git a/ingest/load.py b/ingest/load.py
+index 1b5ece4..0b75e4e 100644
+--- a/ingest/load.py
++++ b/ingest/load.py
+@@ -1,14 +1,19 @@
+ import hashlib
+ import json
++import queue
++import threading
+ from itertools import islice
+ 
+ from ingest.reader import read
+ 
+ CHUNK_SIZE = 2_000
+ 
++# Same output as json.dumps(row, sort_keys=True), without building an encoder per row.
++_hash_encoder = json.JSONEncoder(sort_keys=True)
++
+ 
+ def row_hash(row):
+-    return hashlib.sha256(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()
++    return hashlib.sha256(_hash_encoder.encode(row).encode("utf-8")).hexdigest()
+ 
+ 
+ def dedupe(rows):
+@@ -22,7 +27,8 @@ def dedupe(rows):
+         if key in seen:
+             continue
+         seen.add(key)
+-        yield {**row, "row_hash": row_hash(row)}
++        row["row_hash"] = row_hash(row)
++        yield row
+ 
+ 
+ def chunked(rows, size):
+@@ -34,10 +40,46 @@ def chunked(rows, size):
+         yield chunk
+ 
+ 
++_DONE = object()
++
++
+ def load_file(vendor, path, client, chunk_size=CHUNK_SIZE):
+-    """Post deduped rows to the warehouse in chunks of at most chunk_size rows."""
+-    count = 0
+-    for chunk in chunked(dedupe(read(vendor, path)), chunk_size):
+-        client.post_rows(chunk)
+-        count += len(chunk)
+-    return count
++    """Post deduped rows to the warehouse in chunks of at most chunk_size rows.
++
++    The next chunk is parsed while the previous one is being posted. Only one post
++    is in flight at a time, and chunks are posted in file order. If a post fails,
++    reading stops and the error is re-raised; nothing after the failed chunk is posted.
++    """
++    pending = queue.Queue(maxsize=1)
++    failure = []
++    posted = [0]
++
++    def poster():
++        while True:
++            chunk = pending.get()
++            if chunk is _DONE:
++                return
++            if failure:
++                continue  # drain without posting
++            try:
++                client.post_rows(chunk)
++                posted[0] += len(chunk)
++            except BaseException as error:
++                failure.append(error)
++
++    worker = threading.Thread(target=poster, name="ingest-poster", daemon=True)
++    worker.start()
++    try:
++        for chunk in chunked(dedupe(read(vendor, path)), chunk_size):
++            if failure:
++                break
++            pending.put(chunk)
++    finally:
++        pending.put(_DONE)
++        worker.join()
++        close = getattr(client, "close", None)
++        if close is not None:
++            close()
++    if failure:
++        raise failure[0]
++    return posted[0]
+diff --git a/ingest/timestamps.py b/ingest/timestamps.py
+index c16eb51..a6852ef 100644
+--- a/ingest/timestamps.py
++++ b/ingest/timestamps.py
+@@ -3,11 +3,68 @@
+ Everything stored in the warehouse is UTC, ISO-8601, e.g. "2025-03-04T13:22:10Z".
+ Conversion to local time belongs in reports, never in ingest.
+ """
++import re
+ from datetime import datetime, timezone
++from functools import lru_cache
+ from zoneinfo import ZoneInfo
+ 
+ PARIS = ZoneInfo("Europe/Paris")
+ 
++# Fixed-width numeric directives: (datetime field, digits).
++_FAST_DIRECTIVES = {
++    "Y": ("year", 4),
++    "m": ("month", 2),
++    "d": ("day", 2),
++    "H": ("hour", 2),
++    "M": ("minute", 2),
++    "S": ("second", 2),
++}
++
++
++@lru_cache(maxsize=None)
++def _fast_parser(fmt):
++    """Compile `fmt` to a strict regex parser, or return None if it uses other directives.
++
++    The regex only accepts the exact zero-padded, fixed-width form. Anything else falls
++    back to strptime, so accepted inputs and errors are the same as strptime's.
++    """
++    pattern, fields, i = [], [], 0
++    while i < len(fmt):
++        if fmt[i] == "%":
++            spec = _FAST_DIRECTIVES.get(fmt[i + 1 : i + 2])
++            if spec is None or spec[0] in fields:
++                return None
++            fields.append(spec[0])
++            pattern.append(f"([0-9]{{{spec[1]}}})")
++            i += 2
++        else:
++            pattern.append(re.escape(fmt[i]))
++            i += 1
++    if not {"year", "month", "day"} <= set(fields):
++        return None
++    match = re.compile("".join(pattern)).fullmatch
++
++    def parse(value):
++        found = match(value)
++        if found is None:
++            return None
++        # datetime() validates ranges (month 13, Feb 30...) just like strptime.
++        return datetime(**{name: int(part) for name, part in zip(fields, found.groups())})
++
++    return parse
++
++
++def parse_naive(value, fmt):
++    fast = _fast_parser(fmt)
++    if fast is not None:
++        try:
++            parsed = fast(value)
++        except ValueError:
++            parsed = None  # let strptime raise its usual error
++        if parsed is not None:
++            return parsed
++    return datetime.strptime(value, fmt)
++
+ 
+ def local_to_utc_iso(value, tz, fmt="%Y-%m-%d %H:%M:%S"):
+     """Interpret a naive local wall-clock string in `tz` and return it as UTC ISO-8601.
+@@ -17,16 +74,24 @@ def local_to_utc_iso(value, tz, fmt="%Y-%m-%d %H:%M:%S"):
+     - Wall times repeated in the autumn fall-back hour are ambiguous. The first
+       occurrence (summer time, fold=0) is used, since the string can't tell them apart.
+     """
+-    naive = datetime.strptime(value, fmt)
++    naive = parse_naive(value, fmt)
+     local = naive.replace(tzinfo=tz)
++    utc = local.astimezone(timezone.utc)
+     # A non-existent wall time doesn't survive a round trip through UTC.
+-    if local.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None) != naive:
++    if utc.astimezone(tz).replace(tzinfo=None) != naive:
+         raise ValueError(f"{value!r} does not exist in {tz.key} (DST gap)")
+-    return format_utc(local)
++    return _format(utc)
++
++
++def _format(utc):
++    return (
++        f"{utc.year:04d}-{utc.month:02d}-{utc.day:02d}"
++        f"T{utc.hour:02d}:{utc.minute:02d}:{utc.second:02d}Z"
++    )
+ 
+ 
+ def format_utc(moment):
+     """Format an aware datetime as UTC ISO-8601 with a 'Z' suffix."""
+     if moment.tzinfo is None:
+         raise ValueError("refusing to format a naive datetime as UTC")
+-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
++    return _format(moment.astimezone(timezone.utc))
+diff --git a/ingest/warehouse.py b/ingest/warehouse.py
+index 4824930..e9c305c 100644
+--- a/ingest/warehouse.py
++++ b/ingest/warehouse.py
+@@ -1,14 +1,52 @@
++import http.client
+ import json
+-import urllib.request
++import time
++import urllib.parse
++
++# Reconnect instead of reusing a connection that sat idle this long; servers commonly
++# close idle keep-alive connections after ~5s, and a POST must not be retried blindly.
++IDLE_RECONNECT_SECONDS = 2.0
+ 
+ 
+ class Client:
+-    def __init__(self, url):
++    """Posts row batches over one persistent (keep-alive) HTTP connection."""
++
++    def __init__(self, url, timeout=30):
+         self.url = url
++        self.timeout = timeout
++        parts = urllib.parse.urlsplit(url)
++        if parts.scheme not in ("http", "https"):
++            raise ValueError(f"unsupported warehouse URL: {url!r}")
++        self._connection_class = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
++        self._netloc = parts.netloc
++        self._path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
++        self._connection = None
++        self._last_used = 0.0
++
++    def _connect(self):
++        if self._connection is not None and time.monotonic() - self._last_used > IDLE_RECONNECT_SECONDS:
++            self.close()
++        if self._connection is None:
++            self._connection = self._connection_class(self._netloc, timeout=self.timeout)
++        return self._connection
+ 
+     def post_rows(self, rows):
+-        body = json.dumps({"rows": rows}).encode("utf-8")
+-        request = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+-        with urllib.request.urlopen(request, timeout=30) as response:
+-            if response.status >= 300:
+-                raise RuntimeError(f"warehouse returned {response.status}")
++        body = json.dumps({"rows": rows}, separators=(",", ":")).encode("utf-8")
++        connection = self._connect()
++        try:
++            connection.request("POST", self._path, body=body, headers={"Content-Type": "application/json"})
++            response = connection.getresponse()
++            response.read()
++        except BaseException:
++            self.close()
++            raise
++        self._last_used = time.monotonic()
++        if response.will_close:
++            self.close()
++        if response.status >= 300:
++            raise RuntimeError(f"warehouse returned {response.status}")
++
++    def close(self):
++        if self._connection is not None:
++            self._connection.close()
++            self._connection = None
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index a9ec558..263448a 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -81,7 +81,87 @@ class TimestampTest(unittest.TestCase):
+             self.assertRegex(row["created_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+ 
+ 
++class FastParseTest(unittest.TestCase):
++    def test_fast_path_matches_strptime(self):
++        from datetime import datetime
++        from ingest.timestamps import parse_naive
++        cases = [
++            ("2025-03-04 14:22:10", "%Y-%m-%d %H:%M:%S"),
++            ("2025-3-4 1:2:3", "%Y-%m-%d %H:%M:%S"),  # unpadded: strptime fallback
++            ("04/03/2025 10:05", "%d/%m/%Y %H:%M"),
++            ("2025-02-29 00:00:00", "%Y-%m-%d %H:%M:%S"),
++            ("2025-13-01 00:00:00", "%Y-%m-%d %H:%M:%S"),
++            ("2025-03-04 14:22", "%Y-%m-%d %H:%M:%S"),
++            ("2025-03-04 14:22:10 ", "%Y-%m-%d %H:%M:%S"),
++        ]
++        for value, fmt in cases:
++            with self.subTest(value=value):
++                try:
++                    expected = datetime.strptime(value, fmt)
++                except ValueError:
++                    with self.assertRaises(ValueError):
++                        parse_naive(value, fmt)
++                else:
++                    self.assertEqual(parse_naive(value, fmt), expected)
++
++
++class FailingClient(FakeClient):
++    def post_rows(self, rows):
++        if self.requests:
++            raise RuntimeError("warehouse returned 500")
++        super().post_rows(rows)
++
++
+ class LoadTest(unittest.TestCase):
++    def test_post_failure_stops_the_load(self):
++        client = FailingClient()
++        with self.assertRaisesRegex(RuntimeError, "500"):
++            load_file("vendor_a", os.path.join(FIXTURES, "vendor_a.csv"), client, chunk_size=5)
++        self.assertEqual([len(r) for r in client.requests], [5])
++
++    def test_read_error_propagates(self):
++        import tempfile
++        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as handle:
++            handle.write("Order ID,SKU,Amount,Created\nA-1,S,1.0,2025-03-30 02:30:00\n")
++        try:
++            with self.assertRaisesRegex(ValueError, "DST gap"):
++                load_file("vendor_a", handle.name, FakeClient())
++        finally:
++            os.unlink(handle.name)
++
++    def test_client_reuses_one_connection(self):
++        import json
++        import threading
++        from http.server import BaseHTTPRequestHandler, HTTPServer
++        from ingest.warehouse import Client
++
++        received, peers = [], set()
++
++        class Handler(BaseHTTPRequestHandler):
++            protocol_version = "HTTP/1.1"
++
++            def do_POST(self):
++                peers.add(self.client_address)
++                received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"])))["rows"])
++                self.send_response(200)
++                self.send_header("Content-Length", "0")
++                self.end_headers()
++
++            def log_message(self, *args):
++                pass
++
++        server = HTTPServer(("127.0.0.1", 0), Handler)
++        threading.Thread(target=server.serve_forever, daemon=True).start()
++        try:
++            client = Client(f"http://127.0.0.1:{server.server_port}/rows")
++            count = load_file("vendor_a", os.path.join(FIXTURES, "vendor_a.csv"), client, chunk_size=5)
++        finally:
++            server.shutdown()
++            server.server_close()
++        self.assertEqual(count, 19)
++        self.assertEqual([len(r) for r in received], [5, 5, 5, 4])
++        self.assertEqual(len(peers), 1)
++
+     def test_duplicate_orders_are_dropped(self):
+         client = FakeClient()
+         count = load_file("vendor_a", os.path.join(FIXTURES, "vendor_a.csv"), client)

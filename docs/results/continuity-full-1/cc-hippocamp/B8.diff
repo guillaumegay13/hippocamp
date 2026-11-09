@@ -1,0 +1,129 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index cbf6f87..aa3dd8b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,3 +2,4 @@
+ 
+ ## Unreleased
+ - Faster large imports: quicker timestamp parsing and row hashing, a persistent warehouse connection, and the next chunk is parsed while the previous one is posting. Posted rows are unchanged.
++- vendor_b imports now accept UTF-8 exports (with or without a BOM) as well as Windows-1252; the encoding is detected per file.
+diff --git a/README.md b/README.md
+index cd90db7..cca5223 100644
+--- a/README.md
++++ b/README.md
+@@ -4,7 +4,7 @@ Reads vendor order exports (CSV), normalizes the columns, drops duplicate orders
+ 
+ Timestamps are stored as UTC ISO-8601 (`2025-03-04T13:22:10Z`). vendor_a and vendor_b send Paris local time with no offset; it is converted on ingest. Convert to local time only in reports.
+ 
+-Supported vendors: `vendor_a`, `vendor_b`. To add one, add a `Vendor` entry (encoding, column mapping, parsers) to `VENDORS` in `ingest/reader.py`.
++Supported vendors: `vendor_a`, `vendor_b`. To add one, add a `Vendor` entry (encodings to try, column mapping, parsers) to `VENDORS` in `ingest/reader.py`.
+ 
+ ```sh
+ python3 -m unittest
+diff --git a/ingest/reader.py b/ingest/reader.py
+index 6702ca9..738f59f 100644
+--- a/ingest/reader.py
++++ b/ingest/reader.py
+@@ -1,8 +1,9 @@
+ """Vendor registry: how each vendor's CSV export maps onto normalized order rows.
+ 
+-To add a vendor, add a `Vendor` entry to `VENDORS`: the file encoding, and for each
++To add a vendor, add a `Vendor` entry to `VENDORS`: the file encodings to try, and for each
+ normalized field the source column and a parser for its (already stripped) value.
+ """
++import codecs
+ import csv
+ from dataclasses import dataclass
+ from typing import Callable, Mapping, Tuple
+@@ -26,15 +27,31 @@ class Vendor:
+     name: str
+     # normalized field -> (source column, parser)
+     columns: Mapping[str, Tuple[str, Callable[[str], object]]]
+-    encoding: str = "utf-8"
++    # Tried in order; the first that decodes the whole file wins. Put strict
++    # encodings (UTF-8) before permissive ones (cp1252 decodes almost anything).
++    encodings: Tuple[str, ...] = ("utf-8",)
+ 
+     def __post_init__(self):
+         if set(self.columns) != set(FIELDS):
+             raise ValueError(f"{self.name}: columns must map exactly {FIELDS}")
+ 
++    def detect_encoding(self, path):
++        """Return the first of `encodings` that decodes the whole file."""
++        for encoding in self.encodings:
++            decoder = codecs.getincrementaldecoder(encoding)()
++            try:
++                with open(path, "rb") as raw:
++                    for block in iter(lambda: raw.read(1 << 16), b""):
++                        decoder.decode(block)
++                    decoder.decode(b"", final=True)
++            except UnicodeDecodeError:
++                continue
++            return encoding
++        raise ValueError(f"{self.name}: {path} is not valid {' or '.join(self.encodings)}")
++
+     def read(self, path):
+         """Stream an export as normalized order rows."""
+-        with open(path, newline="", encoding=self.encoding) as handle:
++        with open(path, newline="", encoding=self.detect_encoding(path)) as handle:
+             reader = csv.DictReader(handle)
+             missing = {source for source, _ in self.columns.values()} - set(reader.fieldnames or ())
+             if missing:
+@@ -62,8 +79,10 @@ VENDORS = {
+         ),
+         Vendor(
+             name="vendor_b",
+-            # Exports are Windows-1252, not UTF-8 (e.g. "Café" is byte 0xE9).
+-            encoding="cp1252",
++            # Exports are usually Windows-1252 (e.g. "Café" is byte 0xE9), but some
++            # real files arrive as UTF-8, possibly with a BOM. Strict UTF-8 first,
++            # since cp1252 would silently mis-decode UTF-8 bytes into mojibake.
++            encodings=("utf-8-sig", "cp1252"),
+             columns={
+                 "order_id": ("ref", text),
+                 # vendor_b sends a product label, not a SKU code.
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index 263448a..e40f245 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -33,6 +33,40 @@ class ReaderTest(unittest.TestCase):
+         # 04/03/2025 is 4 March (day-first), 10:05 Paris winter time.
+         self.assertEqual(rows[0]["created_at"], "2025-03-04T09:05:00Z")
+ 
++    def _vendor_b_bytes(self, data):
++        import tempfile
++        with tempfile.NamedTemporaryFile("wb", suffix=".csv", delete=False) as handle:
++            handle.write(data)
++        self.addCleanup(os.unlink, handle.name)
++        return list(read("vendor_b", handle.name))
++
++    def test_vendor_b_utf8_export_is_decoded(self):
++        line = "ref,article,montant,date_commande\nB-1,Ångström Ýé,1.00,04/03/2025 10:05\n"
++        rows = self._vendor_b_bytes(line.encode("utf-8"))
++        self.assertEqual(rows[0]["sku"], "Ångström Ýé")
++
++    def test_vendor_b_utf8_bom_is_stripped(self):
++        line = "ref,article,montant,date_commande\nB-1,Café,1.00,04/03/2025 10:05\n"
++        rows = self._vendor_b_bytes(line.encode("utf-8-sig"))
++        self.assertEqual(rows[0]["order_id"], "B-1")
++        self.assertEqual(rows[0]["sku"], "Café")
++
++    def test_vendor_b_falls_back_to_cp1252(self):
++        line = "ref,article,montant,date_commande\nB-1,Café – noir,1.00,04/03/2025 10:05\n"
++        rows = self._vendor_b_bytes(line.encode("cp1252"))
++        self.assertEqual(rows[0]["sku"], "Café – noir")
++
++    def test_undecodable_file_is_reported(self):
++        from ingest.reader import Vendor, text
++        vendor = Vendor(name="vendor_x", encodings=("utf-8",), columns={
++            f: (f, text) for f in ("order_id", "sku", "amount", "created_at")})
++        import tempfile
++        with tempfile.NamedTemporaryFile("wb", suffix=".csv", delete=False) as handle:
++            handle.write(b"order_id\n\xe9\n")
++        self.addCleanup(os.unlink, handle.name)
++        with self.assertRaisesRegex(ValueError, "not valid utf-8"):
++            list(vendor.read(handle.name))
++
+     def test_missing_column_is_reported(self):
+         import tempfile
+         with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as handle:

@@ -41,17 +41,28 @@ The same reader reaches 90% with the correct sessions, so the remaining gap is r
 
 ## Work continuity
 
-Preliminary, not yet a result. `npm run eval:continuity` runs real headless Claude Code (`claude-opus-5-5`) through 21 synthetic sessions over two projects, once with Claude Code's native auto-memory and once with Hippocamp. An Opus judge grades 28 hidden checks.
+Does memory carry real engineering work from one coding session to the next? `npm run eval:continuity` runs real headless Claude Code (`claude-opus-5-5`, Claude Code 2.1.318 to 2.1.319) through 21 sessions over two small synthetic projects (a TypeScript webhook relay and a Python ingest job). Early sessions plant facts the way work does: a rejected library, a pinned Node version, a blocked vendor, a parked branch, a user preference. Later sessions give tickets that only go well if the agent remembers them. The prompts never say "remember" or point at memory.
 
-One development run gave Hippocamp 27 / 27 and native memory 24 / 27. An independent review found this does not yet support a claim:
+Each arm is installed the way a developer has it, in its own sandbox home: Claude Code defaults with native auto-memory, or Hippocamp through its real installer (`install-claude`) with auto-memory off. A blind judge (Opus, arm names and memory paths scrubbed) grades 28 checks against the diff and the tool calls. A check is n/a when the session wrote no code it applies to.
 
-- It is a single run per system, and the difference is not statistically meaningful.
-- The three cases native missed were added after the first 12 sessions ended in a tie.
-- Hippocamp's install adds `CLAUDE.md` instructions to use memory on every task; native memory got no equivalent instructions.
-- No `none` (no memory) run has checked which items really need memory.
-- Native's misses included acting on its own stale note (a batch size it never updated) and storing a cross-repo preference under one project only. These are real behaviors, but the harness also kept git history uninformative and never answered the agent's offer to save the preference globally.
+Run `full-1`, one run per arm:
 
-The harness, checks and protocol are being fixed and frozen before final runs with a `none` baseline and repeated runs per system.
+| | Claude Code native memory | Hippocamp in Claude Code |
+| --- | ---: | ---: |
+| Checks passed | 96% (25 / 26) | 100% (20 / 20) |
+| Checks marked as needing memory | 92% (11 / 12) | 100% (10 / 10) |
+| Tokens per session, median | 179k | 224k |
+| Time per session, median | 62 s | 73 s |
+| Agent cost per run, API price | $8.84 | $9.19 |
+| Memory entries at the end | 8 | 15 |
+| Planted facts covered by memory | 22% | 30% |
+| Memory entries that are useful (precision) | 88% | 80% |
+
+What it shows: Hippocamp, plugged into Claude Code as a plain MCP server, does as well as Claude Code's own memory, at about the same cost (+4% dollars, +25% tokens per session). Native memory's one miss was a parked `fix/late-dedupe` branch it no longer knew about, so it rewrote the fix from scratch. Hippocamp's 8 n/a checks come mostly from one session where it correctly held a blocked vendor back and wrote no code; native also held the vendor back, but with gated code the checks could grade.
+
+What it does not show: that Hippocamp is better. The difference is one check, from one run per arm (bootstrap 95% interval over probes: +4 points, 0 to +16). There is no no-memory run, so the "needing memory" label comes from the dataset, not from a measured baseline. An earlier development run (27 / 27 vs 24 / 27) is not used: its cases were added after a tie and its harness was unfair to native memory.
+
+The diffs, judge prompts, grades with evidence and memory snapshots of this run are in [results/continuity-full-1](results/continuity-full-1/) (start with `report.md` and `validation.csv`). Full transcripts are left out for size.
 
 ## Why less text matters
 
@@ -69,5 +80,7 @@ Memory results share the agent's context with code, diffs, and tool output, and 
 `npm run eval:retrieval` measures search on LongMemEval-S without any model: Recall@5, Hit@5, MRR, snippet evidence (the returned text comes from an answer turn), returned context size, and latency, next to an in-process BM25 reference. Run it with `--help` for the one-time data download.
 
 `npm run eval:lagoon` runs the same kind of check, read-only, against your real Lagoon. It reads cases from `<Lagoon root>/evals/retrieval-cases.json`: a project, a query, and the event ids that answer it. An empty list means no memory should be returned. Keep the cases in Lagoon, not in this repo, because they quote private work.
+
+`npm run eval:continuity -- --systems cc-native,cc-hippocamp --run <name>` reruns the work continuity benchmark with your Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN` in `.env`); `--report <name>` prints the tables, and `--dry-run` shows the cost estimate. A run stops cleanly at a usage limit and resumes where it stopped.
 
 `npm run eval:qa` measures answer accuracy on the same LongMemEval-S data with the official LongMemEval reader and grader prompts. It compares Hippocamp top 5 (`hippocamp`), top 10 (`hippocamp-k10`), and the labeled answer sessions (`oracle`). It calls an OpenAI-compatible endpoint from `MANIFEST_BASE_URL` and `MANIFEST_API_KEY`; set `QA_READER_MODEL` and `QA_GRADER_MODEL` to change models. Results are cached in `.context/qa-results.jsonl`, and `--dry-run` shows the jobs and token estimates without any API call.
