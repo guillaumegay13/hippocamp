@@ -22,6 +22,12 @@ This installs Hippocamp into every supported agent it finds and creates your mem
 
 A replay of a real session. Neither prompt mentions Hippocamp.
 
+## Build and own your agents' memory
+
+![A real Lagoon in Obsidian's graph view: thousands of agent-written events linked by shared keywords](https://raw.githubusercontent.com/guillaumegay13/hippocamp/main/assets/brand/lagoon-graph.jpg)
+
+A real `~/.lagoon` opened in Obsidian. Every dot is a Markdown note your agents wrote, linked by keywords. It's plain files in your own Git repo, so you can open them in any editor.
+
 ## Why Hippocamp?
 
 - **Written by the agent itself.** The agent doing the work records what is worth keeping, in its own words. Events stay as written. Optional Dream reviews recent events to update and compact the two summary files, promoting supported lessons through a pull request you review.
