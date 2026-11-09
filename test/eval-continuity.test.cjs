@@ -88,7 +88,17 @@ test("claudeArgs uses resume after the first turn and mcp only for hippocamp", (
   assert.equal(later[later.indexOf("--mcp-config") + 1], sandboxPaths("t", "hippocamp").mcpConfig);
 });
 
-test("prepareSandbox gives every system the same repo CLAUDE.md", async () => {
+// Runs the real Hippocamp installer, which registers the server through the claude CLI.
+const hasClaude = (() => {
+  try {
+    execFileSync("claude", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test("prepareSandbox gives every system the same repo CLAUDE.md", { skip: hasClaude ? false : "needs the claude CLI" }, async () => {
   const dataset = await loadDataset(DATASET_DIR);
   const runId = `test-${process.pid}-${Date.now()}`;
   const contents = {};
