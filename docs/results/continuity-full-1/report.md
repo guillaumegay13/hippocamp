@@ -27,7 +27,7 @@ Agent $ is per run, at API price. Note: no cc-none run: memory-required falls ba
 
 | Arm | Entries | Coverage | Precision | Stale | Noise | Duplicates |
 |---|---|---|---|---|---|---|
-| cc-hippocamp | 15 | 30% | 80% | 1.0 | 1.0 | 1.0 |
+| cc-hippocamp | 27 | 57% | 81% | 2.0 | 3.0 | 0.0 |
 | cc-native | 8 | 22% | 88% | 0.0 | 0.0 | 1.0 |
 
 ## Differences (bootstrap over probes)

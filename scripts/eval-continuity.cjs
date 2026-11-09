@@ -608,6 +608,19 @@ function factsAsOf(facts, timeline) {
 }
 
 // Judged again when the run was extended past the session it was last judged at.
+// Everything the arm remembers at the end, across every project: some arms export only one project's scope per call.
+async function finalMemory(adapter, paths) {
+  const seen = new Map();
+
+  for (const project of Object.keys(paths.repos)) {
+    for (const entry of await adapter.exportMemory(paths, project)) {
+      seen.set(entry.file, seen.get(entry.file) || entry);
+    }
+  }
+
+  return [...seen.values()];
+}
+
 async function needsQualityJudge(file, through) {
   const saved = await fs.readFile(file, "utf8").then(JSON.parse, () => null);
   return !saved || saved.through !== through;
@@ -795,7 +808,7 @@ async function run(options) {
       continue;
     }
 
-    const entries = await ADAPTERS[resolveArm(system)].exportMemory(paths, Object.keys(paths.repos)[0]);
+    const entries = await finalMemory(ADAPTERS[resolveArm(system)], paths);
     const finalDir = path.join(outDir, system, "memory-final");
     await fs.rm(finalDir, { recursive: true, force: true });
     await fs.mkdir(finalDir, { recursive: true });
@@ -919,6 +932,7 @@ module.exports = {
   factsAsOf,
   isOffer,
   judgeProbe,
+  finalMemory,
   memorySnapshot,
   needsQualityJudge,
   parseArgs,
