@@ -35,7 +35,9 @@ test("no notice when up to date, offline, or turned off", async (t) => {
 
   assert.equal(await memory.checkForUpdate({ enabled: true, currentVersion: "0.2.15", cachePath, fetchImpl: registry("0.2.15", calls) }), null);
   assert.equal(await memory.checkForUpdate({ enabled: true, currentVersion: "0.2.10", cachePath: `${cachePath}.2`, fetchImpl: async () => { throw new Error("offline"); } }), null);
+  const before = calls.length;
   assert.equal(await memory.checkForUpdate({ enabled: false, currentVersion: "0.2.10", cachePath: `${cachePath}.3`, fetchImpl: registry("9.9.9", calls) }), null);
+  assert.equal(calls.length, before);
   assert.equal(await memory.checkForUpdate({ enabled: true, currentVersion: "0.2.10", cachePath: `${cachePath}.4`, fetchImpl: registry("0.2.9", calls) }), null);
 });
 
@@ -55,4 +57,41 @@ test("wake_up shows the update notice and asks the agent to check with the user"
   assert.match(result.text, /Hippocamp 0\.2\.15 is available \(installed 0\.2\.14\)/);
   assert.match(result.text, /npx hippocamp@latest upgrade/);
   assert.match(result.text, /[Aa]sk the user/);
+});
+
+test("an offline failure is cached, and the default stays off under tests and with the opt-out", async (t) => {
+  const cachePath = await cacheDir(t);
+  let failures = 0;
+  const offline = async () => {
+    failures += 1;
+    throw new Error("offline");
+  };
+
+  await memory.checkForUpdate({ enabled: true, currentVersion: "0.2.10", cachePath, fetchImpl: offline, now: 1000 });
+  await memory.checkForUpdate({ enabled: true, currentVersion: "0.2.10", cachePath, fetchImpl: offline, now: 2000 });
+  assert.equal(failures, 1);
+
+  const calls = [];
+  assert.equal(await memory.checkForUpdate({ currentVersion: "0.2.10", cachePath: `${cachePath}.default`, fetchImpl: registry("9.9.9", calls) }), null);
+  const saved = { opt: process.env.HIPPOCAMP_NO_UPDATE_CHECK, ctx: process.env.NODE_TEST_CONTEXT };
+  delete process.env.NODE_TEST_CONTEXT;
+  process.env.HIPPOCAMP_NO_UPDATE_CHECK = "1";
+  try {
+    assert.equal(await memory.checkForUpdate({ currentVersion: "0.2.10", cachePath: `${cachePath}.opt`, fetchImpl: registry("9.9.9", calls) }), null);
+  } finally {
+    if (saved.opt === undefined) delete process.env.HIPPOCAMP_NO_UPDATE_CHECK;
+    else process.env.HIPPOCAMP_NO_UPDATE_CHECK = saved.opt;
+    if (saved.ctx !== undefined) process.env.NODE_TEST_CONTEXT = saved.ctx;
+  }
+  assert.equal(calls.length, 0);
+});
+
+test("parallel wake-ups in one process share a single registry request", async (t) => {
+  const cachePath = await cacheDir(t);
+  const calls = [];
+  const options = { enabled: true, currentVersion: "0.2.14", cachePath, fetchImpl: registry("0.2.15", calls) };
+
+  await Promise.all([memory.checkForUpdate(options), memory.checkForUpdate(options), memory.checkForUpdate(options)]);
+
+  assert.equal(calls.length, 1);
 });

@@ -1719,7 +1719,20 @@ function isNewerVersion(candidate, current) {
 // Asks npm for the latest version at most once a day, outside the Lagoon, with a short timeout.
 // It only reports: upgrading stays a user decision. Off under the Node test runner and with
 // HIPPOCAMP_NO_UPDATE_CHECK=1. Any failure means no notice.
-async function checkForUpdate({
+const updateChecksInFlight = new Map();
+
+// Parallel wake-ups in one process share one lookup; separate processes may each fetch once.
+function checkForUpdate(options = {}) {
+  const key = options.cachePath || "default";
+
+  if (!updateChecksInFlight.has(key)) {
+    updateChecksInFlight.set(key, runUpdateCheck(options).finally(() => updateChecksInFlight.delete(key)));
+  }
+
+  return updateChecksInFlight.get(key);
+}
+
+async function runUpdateCheck({
   enabled = !process.env.HIPPOCAMP_NO_UPDATE_CHECK && !process.env.NODE_TEST_CONTEXT,
   currentVersion = PACKAGE_VERSION,
   cachePath = path.join(os.homedir(), ".hippocamp", "update-check.json"),
