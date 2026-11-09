@@ -1,0 +1,25 @@
+test/dream.test.cjs
+  s_df17c2731cbf68::t_4c64bd290bd5d5 94,104,119,142,148,179
+  s_df17c2731cbf68::t_187f1f15a666eb 191,210-214,216-236
+  s_df17c2731cbf68::t_6d720ade540dca 215
+scripts/hippocamp-dream.cjs
+  s_df17c2731cbf68::t_09ebe9514c8041 369-370,418-419,463,471-479,612-613,617-619,641-653,658-659,669-671,695-696,749,825
+docs/dream.md
+  s_df17c2731cbf68::t_e6b11b1c605bae 16-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4ae4248bb1d634cb9b478bbb56624e3999b58a4e",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
