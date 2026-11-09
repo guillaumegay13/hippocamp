@@ -206,6 +206,7 @@ test("Dream refuses a summary file that links outside the Lagoon, without callin
   await assert.rejects(dream.dreamProject(f.slug, f.options), /memory root/);
   assert.equal(called, false);
   assert.equal(await fs.readFile(path.join(outside, "secret.md"), "utf8"), "TOPSECRET\n");
+});
 
 test("Dream refuses a result that silently drops an open thread, and writes nothing", async (t) => {
   const f = await fixture(t);
