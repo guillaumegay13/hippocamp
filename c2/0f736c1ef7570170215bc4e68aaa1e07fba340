@@ -1,0 +1,19 @@
+test/package-paths.test.cjs
+  s_df17c2731cbf68::t_852ef25a1a02c2 43-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c20f736c1ef7570170215bc4e68aaa1e07fba340",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
