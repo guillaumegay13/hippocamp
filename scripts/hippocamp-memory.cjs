@@ -235,6 +235,8 @@ function resolveScopedPath(scope, relativePath, projectRoot) {
 // The lexical check above cannot see symlinks: a link inside the Lagoon may point anywhere.
 // Resolve the real location (of the longest existing part, for files not created yet) and
 // require it to stay inside the real Lagoon root, which may itself be a symlink.
+const SYMLINK_ESCAPE = "path escapes the memory root through a symbolic link.";
+
 function isRealPathInLagoon(absolutePath) {
   const lagoon = realpathExisting(getGlobalRoot());
   const real = realpathExisting(absolutePath);
@@ -243,7 +245,7 @@ function isRealPathInLagoon(absolutePath) {
 
 function assertRealPathInLagoon(absolutePath) {
   if (!isRealPathInLagoon(absolutePath)) {
-    throw new Error("path escapes the memory root through a symbolic link.");
+    throw new Error(SYMLINK_ESCAPE);
   }
 
   return absolutePath;
@@ -485,12 +487,19 @@ async function getGitRepoRoot(startPath) {
 
 // Resolve symlinks in a path whose last parts may not exist yet, so it compares with
 // Git's top level, which Git always reports resolved (macOS /tmp is /private/tmp).
-function realpathExisting(targetPath) {
+function realpathExisting(targetPath, depth = 0) {
   try {
     return fsSync.realpathSync(targetPath);
   } catch {
+    // A dangling symlink still decides where a write would land: follow it to its target.
+    const link = depth < 40 && fsSync.lstatSync(targetPath, { throwIfNoEntry: false })?.isSymbolicLink();
+
+    if (link) {
+      return realpathExisting(path.resolve(path.dirname(targetPath), fsSync.readlinkSync(targetPath)), depth + 1);
+    }
+
     const parent = path.dirname(targetPath);
-    return parent === targetPath ? targetPath : path.join(realpathExisting(parent), path.basename(targetPath));
+    return parent === targetPath ? targetPath : path.join(realpathExisting(parent, depth), path.basename(targetPath));
   }
 }
 
@@ -1404,8 +1413,16 @@ async function readRecentEvents({ projectRoot, after, before = new Date().toISOS
   for (const candidate of candidates) {
     if (results.length >= maxResults) break;
     if (!days.has(candidate.path)) {
-      const target = resolveScopedPath("project", candidate.path, projectRoot);
-      const content = await readFileIfExists(target.absolutePath);
+      // A log linked outside the Lagoon is skipped, like in search, instead of failing the whole read.
+      const target = (() => {
+        try {
+          return resolveScopedPath("project", candidate.path, projectRoot);
+        } catch (error) {
+          if (error.message === SYMLINK_ESCAPE) return null;
+          throw error;
+        }
+      })();
+      const content = target ? await readFileIfExists(target.absolutePath) : null;
       days.set(candidate.path, new Map(parseEventBlocks(content || "").map((block) => [block.id, block])));
     }
     const block = days.get(candidate.path).get(candidate.id);
@@ -1695,7 +1712,10 @@ async function wakeUp({ projectRoot } = {}) {
 
   for (const relativePath of DEFAULT_GLOBAL_FILES) {
     // A wake-up file that links outside the Lagoon is reported missing rather than loaded.
-    const file = await readMemoryFile({ scope: "global", path: relativePath, projectRoot }).catch(() => ({ found: false }));
+    const file = await readMemoryFile({ scope: "global", path: relativePath, projectRoot }).catch((error) => {
+      if (error.message === SYMLINK_ESCAPE) return { found: false };
+      throw error;
+    });
 
     if (!file.found) {
       missing.push(`global:${relativePath}`);
@@ -1710,7 +1730,10 @@ async function wakeUp({ projectRoot } = {}) {
 
   for (const relativePath of projectSlug ? DEFAULT_PROJECT_FILES : []) {
     // A wake-up file that links outside the Lagoon is reported missing rather than loaded.
-    const file = await readMemoryFile({ scope: "project", path: relativePath, projectRoot }).catch(() => ({ found: false }));
+    const file = await readMemoryFile({ scope: "project", path: relativePath, projectRoot }).catch((error) => {
+      if (error.message === SYMLINK_ESCAPE) return { found: false };
+      throw error;
+    });
 
     if (!file.found) {
       missing.push(`project:${relativePath}`);
