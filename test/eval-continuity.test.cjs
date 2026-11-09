@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { loadDataset } = require("../scripts/continuity-dataset.cjs");
 const { ADAPTERS } = require("../scripts/continuity-adapters.cjs");
+const { blindText } = require("../scripts/continuity-judge.cjs");
 const { execFileSync } = require("node:child_process");
 const {
   assertNoInstructionFiles,
@@ -216,6 +217,31 @@ test("runTimeline resumes turns and commits per session", async (t) => {
   assert.equal(records[0].ok, true);
   assert.notEqual(records[0].before, records[0].after);
   assert.ok(fsSync.existsSync(path.join(outDir, "none", "S1.jsonl")));
+});
+
+test("runTimeline drives codex arms with codex exec and resumes the thread Codex reported", async (t) => {
+  const { dataset, paths, outDir } = await runnerFixture(t);
+  const commands = [];
+  const spawn = async (command, args, options) => {
+    commands.push({ command, args });
+    await fs.appendFile(path.join(options.cwd, "work.txt"), `${args.at(-1)}\n`);
+    const events = [{ type: "thread.started", thread_id: "thread-7" }, { type: "item.completed", item: { type: "agent_message", text: "ok" } }, { type: "turn.completed", usage: { input_tokens: 5, output_tokens: 1 } }];
+    return { code: 0, stdout: events.map((event) => JSON.stringify(event)).join("\n") };
+  };
+  const records = await runTimeline({ dataset, system: "codex-native", adapter: ADAPTERS["codex-native"], paths, outDir, budgetUsd: 3, spawn });
+
+  assert.deepEqual([...new Set(commands.map((call) => call.command))], ["codex"]);
+  assert.deepEqual(commands[1].args.slice(0, 3), ["exec", "resume", "thread-7"]);
+  assert.equal(records[0].sessionUuid, "thread-7");
+  assert.equal(records[0].tokens.output, 2);
+  assert.ok(records[0].durationMs >= 0);
+});
+
+test("blindText scrubs Codex memory paths and arm names", () => {
+  const paths = { ...sandboxPaths("t", "codex-native"), codexHome: "/s/sandbox-home/.codex" };
+  const text = blindText(`read /s/sandbox-home/.codex/memories/MEMORY.md in codex-native vs codex-hippocamp`, { paths });
+
+  assert.ok(!/codex-native|codex-hippocamp|\.codex\/memories/.test(text), text);
 });
 
 test("runTimeline commits and continues after a failed session", async (t) => {

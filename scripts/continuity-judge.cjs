@@ -46,6 +46,7 @@ function blindText(text, { paths }) {
   const places = [
     [paths.lagoon, "<memory>"],
     [path.join(paths.configDir, "projects"), "<memory>"],
+    ...(paths.codexHome ? [[path.join(paths.codexHome, "memories"), "<memory>"], [paths.codexHome, "<home>/config"]] : []),
     ...Object.values(paths.repos).map((repo) => [repo, "<repo>"]),
     [paths.configDir, "<home>/config"],
     [paths.home, "<home>"],
@@ -54,7 +55,7 @@ function blindText(text, { paths }) {
 
   return places
     .reduce((out, [from, to]) => out.split(from).join(to), String(text).replace(/mcp__hippocamp__\w+/g, "memory_tool"))
-    .replace(/cc-(none|native|hippocamp|memory)/g, "arm")
+    .replace(/(cc|codex)-(none|native|hippocamp|memory)/g, "arm")
     .replace(/hippocamp|lagoon|\.claude\/projects/gi, "memory");
 }
 

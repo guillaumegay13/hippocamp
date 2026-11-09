@@ -11,7 +11,7 @@ const { factDistance, loadDataset, validateDataset } = require("./continuity-dat
 const { complete: completeModel } = require("./eval-locomo.cjs");
 const { attributeMisses, blindDigest, blindText, judgeMemory, judgeProbe, transcriptDigest } = require("./continuity-judge.cjs");
 const { bootstrapDiff, breakdownTable, efficiencyTable, qualityTable, summarize, validationSheet } = require("./continuity-report.cjs");
-const { ADAPTERS, ARMS, AUTO_LOADED, GIT_IDENTITY, MODEL, resolveArm } = require("./continuity-adapters.cjs");
+const { ADAPTERS, ARMS, AUTO_LOADED, CODEX_MODEL, GIT_IDENTITY, MODEL, resolveArm } = require("./continuity-adapters.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -58,6 +58,7 @@ function sandboxPaths(runId, system, env = process.env) {
     root,
     home,
     configDir: path.join(home, ".claude"),
+    codexHome: path.join(home, ".codex"),
     lagoon: path.join(root, "lagoon"),
     repos: { relay: path.join(root, "repos", "relay"), ingest: path.join(root, "repos", "ingest") },
     mcpConfig: path.join(root, "mcp.json"),
@@ -307,10 +308,17 @@ async function runTimeline({ dataset, system, adapter = ADAPTERS[resolveArm(syst
 
     for (let index = 0; index < prompts.length; index += 1) {
       const args = adapter.args({ paths, sessionUuid: record.sessionUuid, resume: index > 0, prompt: prompts[index], budgetUsd });
-      const result = await spawn("claude", args, { cwd: repo, env: adapter.env(paths) });
-      const parsed = parseStream(result.stdout);
+      const started = Date.now();
+      const result = await spawn(adapter.command || "claude", args, { cwd: repo, env: adapter.env(paths) });
+      const parsed = (adapter.parse || parseStream)(result.stdout);
       record.turns += 1;
-      record.durationMs += parsed.durationMs;
+      // Codex reports no duration; wall-clock time stands in.
+      record.durationMs += parsed.durationMs || Date.now() - started;
+
+      // Codex names its thread on the first turn; follow-up turns resume it by that id.
+      if (parsed.threadId) {
+        record.sessionUuid = parsed.threadId;
+      }
 
       for (const key of Object.keys(record.tokens)) {
         record.tokens[key] += parsed.tokens[key];
@@ -528,6 +536,7 @@ const HARNESS_FILES = [
   "scripts/continuity-judge.cjs",
   "scripts/continuity-dataset.cjs",
   "scripts/install-claude.cjs",
+  "scripts/install-codex.cjs",
   "scripts/install-common.cjs",
   "scripts/hippocamp-mcp.cjs",
   "scripts/hippocamp-memory.cjs",
@@ -647,7 +656,7 @@ async function judgeSystem({ dataset, system, paths, outDir, records, judge, jud
     }
 
     const systemDir = path.join(outDir, system);
-    const stream = parseStream(await fs.readFile(path.join(systemDir, `${record.id}.jsonl`), "utf8").catch(() => ""));
+    const stream = (ADAPTERS[resolveArm(system)].parse || parseStream)(await fs.readFile(path.join(systemDir, `${record.id}.jsonl`), "utf8").catch(() => ""));
     const diff = await probeDiff(paths.repos[session.project], record.before, record.after);
     const exchange = {};
     // Keep exactly what the judge saw and said, so every verdict can be audited and published.
@@ -730,8 +739,14 @@ async function run(options) {
   const outDir = path.join(RESULTS_DIR, options.run);
   const judgedPath = path.join(outDir, "judged.jsonl");
   await fs.mkdir(outDir, { recursive: true });
-  const claudeVersion = (await execFileAsync("claude", ["--version"])).stdout.trim();
-  await checkManifest(outDir, options.run, await runManifest({ judgeModel: options.judge, budgetUsd: options.budget, versions: { claude: claudeVersion } }), { force: options.forceManifest });
+  const versions = { claude: (await execFileAsync("claude", ["--version"])).stdout.trim() };
+
+  // Recorded only for runs with a Codex arm, so Claude-only runs keep their manifest.
+  if (options.systems.some((system) => ADAPTERS[resolveArm(system)].harness === "codex")) {
+    versions.codex = `${(await execFileAsync("codex", ["--version"])).stdout.trim()} ${CODEX_MODEL}`;
+  }
+
+  await checkManifest(outDir, options.run, await runManifest({ judgeModel: options.judge, budgetUsd: options.budget, versions }), { force: options.forceManifest });
 
   // Systems run side by side; sessions within a system stay strictly in timeline order.
   // allSettled: one system failing must not exit while the others have claude mid-turn.

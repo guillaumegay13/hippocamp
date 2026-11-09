@@ -23,3 +23,6 @@ assets/brand/hippocamp-demo.gif
 
 # Benchmark data is for development runs only.
 bench/
+
+# Published benchmark runs are for readers on GitHub, not for installs.
+docs/results/
