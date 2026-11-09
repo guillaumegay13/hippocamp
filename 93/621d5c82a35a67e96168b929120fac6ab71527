@@ -1,0 +1,244 @@
+docs/results.md
+  s_df17c2731cbf68::t_8a0bc75ab9345d 44,46,48,50-65,84
+  s_df17c2731cbf68::t_8e34fb10b57e4f 85
+docs/results/continuity-full-1/judged.jsonl
+  s_df17c2731cbf68::t_4db4c7606167a7 1-56
+README.md
+  s_df17c2731cbf68::t_8a0bc75ab9345d 55
+docs/results/continuity-full-1/cc-hippocamp/A1.json
+  s_df17c2731cbf68::t_b73ed72d2c511b 1-22
+docs/results/continuity-full-1/cc-hippocamp/A10.json
+  s_df17c2731cbf68::t_7064fa8daba370 1-22
+docs/results/continuity-full-1/cc-hippocamp/A2.json
+  s_df17c2731cbf68::t_73d63a32e111ad 1-22
+docs/results/continuity-full-1/cc-hippocamp/A3.json
+  s_df17c2731cbf68::t_f002f65fbead4e 1-22
+docs/results/continuity-full-1/cc-hippocamp/A4.json
+  s_df17c2731cbf68::t_2756d6c57acbdc 1-22
+docs/results/continuity-full-1/cc-hippocamp/A5.json
+  s_df17c2731cbf68::t_34055488120b76 1-22
+docs/results/continuity-full-1/cc-hippocamp/A6.diff
+  s_df17c2731cbf68::t_eea185b87c6f96 1-229
+docs/results/continuity-full-1/cc-hippocamp/A6.json
+  s_df17c2731cbf68::t_afaac865a1dc25 1-22
+docs/results/continuity-full-1/cc-hippocamp/A6.judge.json
+  s_df17c2731cbf68::t_5567cffbb72163 1-4
+docs/results/continuity-full-1/cc-hippocamp/A6.snapshot.md
+  s_df17c2731cbf68::t_99253affa9a5ec 1-150
+docs/results/continuity-full-1/cc-hippocamp/A7.diff
+  s_df17c2731cbf68::t_f32bb4bc15ecd1 1-125
+docs/results/continuity-full-1/cc-hippocamp/A7.json
+  s_df17c2731cbf68::t_98887652bd2168 1-22
+docs/results/continuity-full-1/cc-hippocamp/A7.judge.json
+  s_df17c2731cbf68::t_70624bd8377153 1-4
+docs/results/continuity-full-1/cc-hippocamp/A7.snapshot.md
+  s_df17c2731cbf68::t_83ebfa59ee2e29 1-166
+docs/results/continuity-full-1/cc-hippocamp/A8.diff
+  s_df17c2731cbf68::t_d3475736554ffa 1-229
+docs/results/continuity-full-1/cc-hippocamp/A8.json
+  s_df17c2731cbf68::t_7f626ab5df0880 1-22
+docs/results/continuity-full-1/cc-hippocamp/A8.judge.json
+  s_df17c2731cbf68::t_7cd8fd4b3dfbb2 1-4
+docs/results/continuity-full-1/cc-hippocamp/A8.snapshot.md
+  s_df17c2731cbf68::t_12093fbd720d79 1-212
+docs/results/continuity-full-1/cc-hippocamp/A9.json
+  s_df17c2731cbf68::t_53a7de8d27533b 1-22
+docs/results/continuity-full-1/cc-hippocamp/B1.json
+  s_df17c2731cbf68::t_6f77c5c4de74a8 1-22
+docs/results/continuity-full-1/cc-hippocamp/B10.json
+  s_df17c2731cbf68::t_d471922a3738de 1-22
+docs/results/continuity-full-1/cc-hippocamp/B11.diff
+  s_df17c2731cbf68::t_37676d8e71f90d 1-166
+docs/results/continuity-full-1/cc-hippocamp/B11.json
+  s_df17c2731cbf68::t_752e59a832d25c 1-22
+docs/results/continuity-full-1/cc-hippocamp/B11.judge.json
+  s_df17c2731cbf68::t_5743b1d0705cb9 1-4
+docs/results/continuity-full-1/cc-hippocamp/B11.snapshot.md
+  s_df17c2731cbf68::t_17fa2c5984284f 1-199
+docs/results/continuity-full-1/cc-hippocamp/B2.json
+  s_df17c2731cbf68::t_08d359aa8bfebe 1-22
+docs/results/continuity-full-1/cc-hippocamp/B3.json
+  s_df17c2731cbf68::t_b83a2cddca6b99 1-22
+docs/results/continuity-full-1/cc-hippocamp/B4.json
+  s_df17c2731cbf68::t_9ea312260e805d 1-22
+docs/results/continuity-full-1/cc-hippocamp/B5.json
+  s_df17c2731cbf68::t_8cfe25f238b567 1-22
+docs/results/continuity-full-1/cc-hippocamp/B6.json
+  s_df17c2731cbf68::t_1938d1cbaad110 1-22
+docs/results/continuity-full-1/cc-hippocamp/B6.judge.json
+  s_df17c2731cbf68::t_1f6e0eda5ee72c 1-4
+docs/results/continuity-full-1/cc-hippocamp/B6.snapshot.md
+  s_df17c2731cbf68::t_9d88d6e2720246 1-144
+docs/results/continuity-full-1/cc-hippocamp/B7.diff
+  s_df17c2731cbf68::t_c0d1c530fb10d4 1-356
+docs/results/continuity-full-1/cc-hippocamp/B7.json
+  s_df17c2731cbf68::t_826d5b32f1c551 1-22
+docs/results/continuity-full-1/cc-hippocamp/B7.judge.json
+  s_df17c2731cbf68::t_f0a3c179dea99e 1-4
+docs/results/continuity-full-1/cc-hippocamp/B7.snapshot.md
+  s_df17c2731cbf68::t_87cadb90497d93 1-144
+docs/results/continuity-full-1/cc-hippocamp/B8.diff
+  s_df17c2731cbf68::t_843ba75246c7ce 1-129
+docs/results/continuity-full-1/cc-hippocamp/B8.json
+  s_df17c2731cbf68::t_a038718c6090d3 1-22
+docs/results/continuity-full-1/cc-hippocamp/B8.judge.json
+  s_df17c2731cbf68::t_26bcc4f74bd901 1-4
+docs/results/continuity-full-1/cc-hippocamp/B8.snapshot.md
+  s_df17c2731cbf68::t_c1173626873e5a 1-166
+docs/results/continuity-full-1/cc-hippocamp/B9.json
+  s_df17c2731cbf68::t_c7d822c19d4631 1-23
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m1.md
+  s_df17c2731cbf68::t_9bd86ca318acd6 1-7
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m10.md
+  s_df17c2731cbf68::t_100db543bc4f38 1-15
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m11.md
+  s_df17c2731cbf68::t_b3d5aa963a689e 1-16
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m12.md
+  s_df17c2731cbf68::t_39a12fe18b0584 1-14
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m13.md
+  s_df17c2731cbf68::t_b1b67eb63d4f37 1-14
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m14.md
+  s_df17c2731cbf68::t_9a366286b56751 1-12
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m15.md
+  s_df17c2731cbf68::t_19fdc4776f8c63 1-20
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m2.md
+  s_df17c2731cbf68::t_0b800f2f5ff0db 1-16
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m3.md
+  s_df17c2731cbf68::t_b5ca8825036930 1-16
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m4.md
+  s_df17c2731cbf68::t_07293456bb5bc9 1-14
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m5.md
+  s_df17c2731cbf68::t_2ac058b501888d 1-13
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m6.md
+  s_df17c2731cbf68::t_4086e4db79e6b9 1-15
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m7.md
+  s_df17c2731cbf68::t_2d41efe4954b3a 1-15
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m8.md
+  s_df17c2731cbf68::t_680bb76f0cbb65 1-15
+docs/results/continuity-full-1/cc-hippocamp/memory-final/m9.md
+  s_df17c2731cbf68::t_ffd8a6763939c8 1-15
+docs/results/continuity-full-1/cc-hippocamp/memory-quality.json
+  s_df17c2731cbf68::t_94f81c1f2bc14f 1-107
+docs/results/continuity-full-1/cc-native/A1.json
+  s_df17c2731cbf68::t_6fe601a44a405f 1-22
+docs/results/continuity-full-1/cc-native/A10.json
+  s_df17c2731cbf68::t_4a9a06afef302d 1-22
+docs/results/continuity-full-1/cc-native/A2.json
+  s_df17c2731cbf68::t_90a462b94f6bca 1-22
+docs/results/continuity-full-1/cc-native/A3.json
+  s_df17c2731cbf68::t_1f4383ce28ffcb 1-22
+docs/results/continuity-full-1/cc-native/A4.json
+  s_df17c2731cbf68::t_d4d370793c9a6a 1-22
+docs/results/continuity-full-1/cc-native/A5.json
+  s_df17c2731cbf68::t_7295bbb5d80848 1-22
+docs/results/continuity-full-1/cc-native/A6.diff
+  s_df17c2731cbf68::t_ccd4f4b5918725 1-147
+docs/results/continuity-full-1/cc-native/A6.json
+  s_df17c2731cbf68::t_29a0bbb960f463 1-22
+docs/results/continuity-full-1/cc-native/A6.judge.json
+  s_df17c2731cbf68::t_a55604c396ca5f 1-4
+docs/results/continuity-full-1/cc-native/A6.snapshot.md
+  s_df17c2731cbf68::t_2ee277eb3b32f2 1-62
+docs/results/continuity-full-1/cc-native/A7.diff
+  s_df17c2731cbf68::t_5512abc78124ba 1-126
+docs/results/continuity-full-1/cc-native/A7.json
+  s_df17c2731cbf68::t_802767e1edcc72 1-22
+docs/results/continuity-full-1/cc-native/A7.judge.json
+  s_df17c2731cbf68::t_5352c73036ef84 1-4
+docs/results/continuity-full-1/cc-native/A7.snapshot.md
+  s_df17c2731cbf68::t_5b6a9636912b9c 1-81
+docs/results/continuity-full-1/cc-native/A8.diff
+  s_df17c2731cbf68::t_2185a32e9e8a56 1-233
+docs/results/continuity-full-1/cc-native/A8.json
+  s_df17c2731cbf68::t_da0ec2766b505e 1-22
+docs/results/continuity-full-1/cc-native/A8.judge.json
+  s_df17c2731cbf68::t_ec7139c483d787 1-4
+docs/results/continuity-full-1/cc-native/A8.snapshot.md
+  s_df17c2731cbf68::t_c2ee064da0b312 1-115
+docs/results/continuity-full-1/cc-native/A9.json
+  s_df17c2731cbf68::t_e5c55788d795a4 1-22
+docs/results/continuity-full-1/cc-native/B1.json
+  s_df17c2731cbf68::t_0b9a791684ee6a 1-22
+docs/results/continuity-full-1/cc-native/B10.json
+  s_df17c2731cbf68::t_c7052ee1e3517c 1-22
+docs/results/continuity-full-1/cc-native/B11.diff
+  s_df17c2731cbf68::t_72b1bdc4390097 1-133
+docs/results/continuity-full-1/cc-native/B11.json
+  s_df17c2731cbf68::t_ae8facb6cf111b 1-22
+docs/results/continuity-full-1/cc-native/B11.judge.json
+  s_df17c2731cbf68::t_c65d4b01fb7ce9 1-8
+docs/results/continuity-full-1/cc-native/B11.snapshot.md
+  s_df17c2731cbf68::t_1bcbc5803021fe 1-111
+docs/results/continuity-full-1/cc-native/B2.json
+  s_df17c2731cbf68::t_5b32a0f9da23e6 1-22
+docs/results/continuity-full-1/cc-native/B3.json
+  s_df17c2731cbf68::t_2bb5930e15bfec 1-22
+docs/results/continuity-full-1/cc-native/B4.json
+  s_df17c2731cbf68::t_adfa79cfe403d6 1-22
+docs/results/continuity-full-1/cc-native/B5.json
+  s_df17c2731cbf68::t_411063633f3aed 1-22
+docs/results/continuity-full-1/cc-native/B6.diff
+  s_df17c2731cbf68::t_0ba2b1c4ed3053 1-183
+docs/results/continuity-full-1/cc-native/B6.json
+  s_df17c2731cbf68::t_a623d63f87964f 1-22
+docs/results/continuity-full-1/cc-native/B6.judge.json
+  s_df17c2731cbf68::t_31fb0da56b4c7d 1-4
+docs/results/continuity-full-1/cc-native/B6.snapshot.md
+  s_df17c2731cbf68::t_65cfea7b41e21c 1-101
+docs/results/continuity-full-1/cc-native/B7.diff
+  s_df17c2731cbf68::t_d155cb9ae48eab 1-322
+docs/results/continuity-full-1/cc-native/B7.json
+  s_df17c2731cbf68::t_a39675b8510c16 1-22
+docs/results/continuity-full-1/cc-native/B7.judge.json
+  s_df17c2731cbf68::t_edcef28b51362b 1-4
+docs/results/continuity-full-1/cc-native/B7.snapshot.md
+  s_df17c2731cbf68::t_e113c0eadad184 1-108
+docs/results/continuity-full-1/cc-native/B8.json
+  s_df17c2731cbf68::t_4b76015a423e84 1-23
+docs/results/continuity-full-1/cc-native/B8.judge.json
+  s_df17c2731cbf68::t_6426baf57c409c 1-4
+docs/results/continuity-full-1/cc-native/B8.snapshot.md
+  s_df17c2731cbf68::t_3188d76d8f8b04 1-111
+docs/results/continuity-full-1/cc-native/B9.json
+  s_df17c2731cbf68::t_5831c999d8afd7 1-22
+docs/results/continuity-full-1/cc-native/memory-final/m1.md
+  s_df17c2731cbf68::t_6cf7d7b5f268d3 1-4
+docs/results/continuity-full-1/cc-native/memory-final/m2.md
+  s_df17c2731cbf68::t_12772d0e117b98 1-3
+docs/results/continuity-full-1/cc-native/memory-final/m3.md
+  s_df17c2731cbf68::t_bcdf7b23c85d16 1-15
+docs/results/continuity-full-1/cc-native/memory-final/m4.md
+  s_df17c2731cbf68::t_3253ea9ed12fcd 1-16
+docs/results/continuity-full-1/cc-native/memory-final/m5.md
+  s_df17c2731cbf68::t_160705cb2ec422 1-4
+docs/results/continuity-full-1/cc-native/memory-final/m6.md
+  s_df17c2731cbf68::t_2bddd4f87751fb 1-12
+docs/results/continuity-full-1/cc-native/memory-final/m7.md
+  s_df17c2731cbf68::t_18b9f6cd3cbede 1-15
+docs/results/continuity-full-1/cc-native/memory-final/m8.md
+  s_df17c2731cbf68::t_30ac4e81953742 1-17
+docs/results/continuity-full-1/cc-native/memory-quality.json
+  s_df17c2731cbf68::t_7b9abff75c7293 1-65
+docs/results/continuity-full-1/manifest.json
+  s_df17c2731cbf68::t_51be1696dd3fe8 1-23
+docs/results/continuity-full-1/report.md
+  s_df17c2731cbf68::t_c621744d0c323d 1-35
+docs/results/continuity-full-1/validation.csv
+  s_df17c2731cbf68::t_b467100f11692e 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "93621d5c82a35a67e96168b929120fac6ab71527",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
