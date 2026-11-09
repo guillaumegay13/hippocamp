@@ -1,0 +1,197 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 0e8d301..126d3fd 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,10 @@
+ 
+ ## Unreleased
+ 
++- Speed up large imports with faster Paris timestamp normalization, a bounded
++  per-file timestamp cache, and reusable hash serialization. Preserve row hashes,
++  first-occurrence ordering, DST validation, and sequential 2,000-row uploads.
++
+ - Add `vendor_c` CSV support with column normalization, UTC timestamps, and
+   the shared streaming and deduplication behavior.
+ 
+diff --git a/README.md b/README.md
+index 3caaa4f..f1f39cc 100644
+--- a/README.md
++++ b/README.md
+@@ -3,6 +3,8 @@
+ Reads vendor order exports (CSV), normalizes the columns, drops duplicate orders and posts the rows to the warehouse HTTP API at `WAREHOUSE_URL`.
+ 
+ The loader streams CSV rows and posts batches of at most 2,000 rows.
++Timestamp normalization uses a per-file cache of at most 4,096 values to speed up
++exports with repeated timestamps without retaining all timestamps in memory.
+ Deduplication keeps the first occurrence across the entire file; its set of order keys grows with the number of unique orders.
+ 
+ Supported vendors: `vendor_a`, `vendor_b`, `vendor_c`.
+diff --git a/ingest/load.py b/ingest/load.py
+index 528210d..9301376 100644
+--- a/ingest/load.py
++++ b/ingest/load.py
+@@ -4,10 +4,11 @@ import json
+ from ingest.reader import iter_read
+ 
+ BATCH_SIZE = 2_000
++_HASH_ENCODER = json.JSONEncoder(sort_keys=True)
+ 
+ 
+ def row_hash(row):
+-    return hashlib.sha256(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()
++    return hashlib.sha256(_HASH_ENCODER.encode(row).encode("utf-8")).hexdigest()
+ 
+ 
+ def iter_dedupe(rows):
+diff --git a/ingest/reader.py b/ingest/reader.py
+index d6d09e3..1c98483 100644
+--- a/ingest/reader.py
++++ b/ingest/reader.py
+@@ -1,6 +1,7 @@
+ import csv
+ from dataclasses import dataclass
+ from datetime import datetime, timezone
++from functools import lru_cache
+ from zoneinfo import ZoneInfo
+ 
+ 
+@@ -12,17 +13,22 @@ def normalize_created_at(value, date_format=None):
+     parsed = (datetime.strptime(value.strip(), date_format) if date_format
+               else datetime.fromisoformat(value.strip()))
+     if parsed.tzinfo is None:
+-        # Round trips distinguish real wall times from the spring gap; both
+-        # folds distinguish a unique instant from the repeated autumn hour.
+-        candidates = set()
+-        for fold in (0, 1):
+-            utc = parsed.replace(tzinfo=PARIS, fold=fold).astimezone(timezone.utc)
+-            if utc.astimezone(PARIS).replace(tzinfo=None) == parsed:
+-                candidates.add(utc)
+-        if len(candidates) != 1:
+-            reason = "ambiguous" if candidates else "nonexistent"
+-            raise ValueError(f"{reason} Europe/Paris timestamp: {value!r}")
+-        parsed = candidates.pop()
++        first = parsed.replace(tzinfo=PARIS, fold=0)
++        second = parsed.replace(tzinfo=PARIS, fold=1)
++        if first.utcoffset() == second.utcoffset():
++            # Outside a clock transition both folds represent the same instant.
++            parsed = first
++        else:
++            # Round trips distinguish the spring gap from the repeated autumn hour.
++            candidates = set()
++            for local in (first, second):
++                utc = local.astimezone(timezone.utc)
++                if utc.astimezone(PARIS).replace(tzinfo=None) == parsed:
++                    candidates.add(utc)
++            if len(candidates) != 1:
++                reason = "ambiguous" if candidates else "nonexistent"
++                raise ValueError(f"{reason} Europe/Paris timestamp: {value!r}")
++            parsed = candidates.pop()
+     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+ 
+ 
+@@ -54,6 +60,8 @@ VENDORS = {
+ 
+ 
+ def _iter_vendor(vendor, path, config):
++    # Exports often repeat timestamps. Bound the cache and release it after each file.
++    normalize = lru_cache(maxsize=4096)(normalize_created_at)
+     with open(path, newline="", encoding=config.encoding) as handle:
+         for record in csv.DictReader(handle):
+             row = {field: record[header] for field, header in config.columns.items()}
+@@ -62,7 +70,7 @@ def _iter_vendor(vendor, path, config):
+                 "order_id": row["order_id"].strip(),
+                 "sku": row["sku"].strip(),
+                 "amount": float(row["amount"]),
+-                "created_at": normalize_created_at(row["created_at"], config.date_format),
++                "created_at": normalize(row["created_at"], config.date_format),
+             }
+ 
+ 
+diff --git a/tests/test_end_to_end.py b/tests/test_end_to_end.py
+new file mode 100644
+index 0000000..a8ef3fb
+--- /dev/null
++++ b/tests/test_end_to_end.py
+@@ -0,0 +1,69 @@
++"""Exercise real CSV -> CLI -> HTTP uploads, including multiple batch boundaries."""
++import csv
++import hashlib
++import json
++import os
++import subprocess
++import sys
++import tempfile
++import threading
++import unittest
++from http.server import BaseHTTPRequestHandler, HTTPServer
++
++from ingest.reader import VENDORS
++
++
++class EndToEndTest(unittest.TestCase):
++    def test_large_imports_preserve_rows_order_and_hashes(self):
++        batches = []
++
++        class Warehouse(BaseHTTPRequestHandler):
++            def do_POST(self):
++                body = self.rfile.read(int(self.headers['Content-Length']))
++                batches.append((len(body), json.loads(body)['rows']))
++                self.send_response(200)
++                self.end_headers()
++
++            def log_message(self, *args):
++                pass
++
++        server = HTTPServer(('127.0.0.1', 0), Warehouse)
++        thread = threading.Thread(target=server.serve_forever, daemon=True)
++        thread.start()
++        try:
++            for vendor, config in VENDORS.items():
++                with self.subTest(vendor=vendor), tempfile.NamedTemporaryFile(
++                    mode='w+', encoding=config.encoding, newline=''
++                ) as source:
++                    batches.clear()
++                    writer = csv.writer(source)
++                    writer.writerow(config.columns.values())
++                    stamp = ('04/03/2025 14:22' if config.date_format
++                             else '2025-03-04T14:22:00')
++                    for index in range(6001):
++                        writer.writerow([str(index), 'Café', '1.25', stamp])
++                        if index in (2000, 4000, 6000):
++                            writer.writerow(['0', 'duplicate', '999', stamp])
++                    source.flush()
++                    result = subprocess.run(
++                        [sys.executable, '-m', 'ingest.cli', vendor, source.name],
++                        env={**os.environ, 'WAREHOUSE_URL':
++                             f'http://127.0.0.1:{server.server_port}/rows'},
++                        capture_output=True, text=True, timeout=30,
++                    )
++                    self.assertEqual(result.returncode, 0, result.stderr)
++                    self.assertEqual(result.stdout.strip(), 'loaded 6001 rows')
++                    self.assertEqual([len(rows) for _, rows in batches], [2000, 2000, 2000, 1])
++                    self.assertTrue(all(size <= 4_000_000 for size, _ in batches))
++                    actual = [row for _, rows in batches for row in rows]
++                    for index, row in enumerate(actual):
++                        expected = dict(vendor=vendor, order_id=str(index), sku='Café',
++                                        amount=1.25, created_at='2025-03-04T13:22:00Z')
++                        expected['row_hash'] = hashlib.sha256(
++                            json.dumps(expected, sort_keys=True).encode('utf-8')
++                        ).hexdigest()
++                        self.assertEqual(row, expected)
++        finally:
++            server.shutdown()
++            server.server_close()
++            thread.join()
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index 2b64473..7a07899 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -62,6 +62,8 @@ class ReaderTest(unittest.TestCase):
+             "2025-01-01 00:30:00": "2024-12-31T23:30:00Z",
+             "2025-03-30 01:59:59": "2025-03-30T00:59:59Z",
+             "2025-03-30 03:00:00": "2025-03-30T01:00:00Z",
++            "2025-10-26 01:59:59": "2025-10-25T23:59:59Z",
++            "2025-10-26 03:00:00": "2025-10-26T02:00:00Z",
+             "2025-10-26T02:30:00+02:00": "2025-10-26T00:30:00Z",
+             "2025-10-26T02:30:00+01:00": "2025-10-26T01:30:00Z",
+             "2025-07-04T12:22:10Z": "2025-07-04T12:22:10Z",

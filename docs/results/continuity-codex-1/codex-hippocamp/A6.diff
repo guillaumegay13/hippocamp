@@ -1,0 +1,299 @@
+diff --git a/README.md b/README.md
+index 3253982..1ec3a43 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ Receives webhooks on `POST /hooks/:source`, checks the HMAC-SHA256 signature, stores the delivery and forwards the body to the source's target URL.
+ 
+-Accepted webhooks return `202` with a `pending` status after the delivery is saved in Postgres. A background worker forwards them. Target responses with status 500–599 are retried with exponential backoff (100, 200, 400, then 800 ms), up to five total attempts per delivery. The first attempt is immediate, and the backoff follows the saved attempt count across restarts. Other responses and network errors are not retried. Each attempt uses the same body and `x-relay-delivery` ID.
++Accepted webhooks return `202` with a `pending` status after the delivery is saved in Postgres. A background worker forwards them. Target responses with status 500–599 are retried with exponential backoff (100, 200, 400, then 800 ms), up to five total attempts per delivery. The first attempt is immediate, and the backoff follows the saved attempt count across restarts. Queued retries use Postgres availability times instead of sleeping while holding a lease. Other responses and network errors are not retried. Each attempt uses the same body and `x-relay-delivery` ID.
+ 
+ Set `DATABASE_URL` to the Postgres connection URL (otherwise the standard `PG*` environment variables apply). Apply `migrations/001_deliveries.sql` and then `migrations/002_attempt_history.sql` before starting the app (existing installations only need the second migration): `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_deliveries.sql -f migrations/002_attempt_history.sql`. The `deliveries` table stores delivery bodies, status, attempt counts, and pending work in a single row; use durable Postgres storage. Concurrent workers claim rows atomically with `FOR UPDATE SKIP LOCKED`. Pending work resumes automatically on application restart. Claimed work becomes available again after a 60-second lease; each outbound request has a 30-second timeout.
+ 
+@@ -10,14 +10,16 @@ Attempts are recorded before sending. A crash during a request can result in a r
+ 
+ `GET /admin/deliveries` returns an array of delivery metadata; `GET /admin/deliveries/:id` returns one record or `404` if absent. Both expose only `id`, `source`, `target`, `receivedAt` (Unix milliseconds), `status`, and `attempts`. Payload bodies are never included, including in errors. These routes have no built-in authentication; restrict access through your deployment's admin access controls.
+ 
+-`GET /admin/deliveries/:id/attempts` returns an array in attempt order containing `attempt` (one-based), `startedAt` and `completedAt` (Unix milliseconds), `statusCode`, and `outcome` (`started`, `retry`, `delivered`, or `failed`). An unfinished attempt has a null completion time and status code; network failures also have a null status code. The start is recorded before backoff and sending. No request/response bodies or raw errors are included. Existing deliveries without recorded history return `[]`; unknown IDs return `404` and storage failures return a generic `503`. History persists alongside the attempt count in Postgres, including unfinished attempts after interruption.
++`GET /admin/deliveries/:id/attempts` returns an array in attempt order containing `attempt` (one-based), `startedAt` and `completedAt` (Unix milliseconds), `statusCode`, and `outcome` (`started`, `retry`, `delivered`, or `failed`). An unfinished attempt has a null completion time and status code; network failures also have a null status code. The start is recorded before sending (and before backoff for inline delivery). No request/response bodies or raw errors are included. Existing deliveries without recorded history return `[]`; unknown IDs return `404` and storage failures return a generic `503`. History persists alongside the attempt count in Postgres, including unfinished attempts after interruption.
+ 
+ Sources are configured with the `SOURCES` env var, a JSON object:
+ 
+ ```json
+-{ "github": { "secret": "dev-secret", "target": "http://localhost:4000/in" } }
++{ "github": { "secret": "dev-secret", "target": "http://localhost:4000/in", "retryDelaysMs": [1000, 2000, 5000, 10000] } }
+ ```
+ 
++`retryDelaysMs` is optional per source endpoint. Supply exactly four integer delays in milliseconds (0–2147483647), one before each retry; omission keeps 100/200/400/800 ms. Invalid schedules fail startup. The attempt limit and retry eligibility are unchanged. The worker uses the current source configuration when scheduling each next retry, including for existing deliveries; already scheduled availability times remain unchanged. No database migration is needed for this setting.
++
+ ```sh
+ npm install
+ npm test
+diff --git a/src/app.ts b/src/app.ts
+index 1b88a84..9de9f7d 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1,9 +1,11 @@
++import { retryDelays } from "./retry";
+ import { createServer } from "node:http";
+ import { handleAdminDeliveries, handleAdminAttempts } from "./routes/admin";
+ import { handleWebhook, Sources } from "./routes/webhooks";
+ import { Store } from "./store";
+ 
+ export function createApp(sources: Sources, store: Store) {
++  for (const config of Object.values(sources)) retryDelays(config.retryDelaysMs);
+   return createServer(async (req, res) => {
+     const reply = (status: number, body: unknown) => {
+       res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
+diff --git a/src/deliver.ts b/src/deliver.ts
+index 9fec086..b64e676 100644
+--- a/src/deliver.ts
++++ b/src/deliver.ts
+@@ -1,9 +1,10 @@
++import { DEFAULT_RETRY_DELAYS_MS } from "./retry";
+ import { Delivery, DeliveryAttempt, Store } from "./store";
+ 
+ export type Send = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{ ok: boolean; status: number }>;
+ 
+ // Persist each attempt before sending so restart recovery retains the attempt budget.
+-export async function deliverAttempt(delivery: Delivery, store: Store, send: Send = fetch): Promise<Delivery> {
++export async function deliverAttempt(delivery: Delivery, store: Store, send: Send = fetch, delays: readonly number[] = DEFAULT_RETRY_DELAYS_MS, queued = false): Promise<Delivery> {
+   if (delivery.attempts >= 5) {
+     const result: Delivery = { ...delivery, status: "failed" };
+     await store.save(result);
+@@ -18,8 +19,8 @@ export async function deliverAttempt(delivery: Delivery, store: Store, send: Sen
+   await store.save(updated);
+   try {
+     // The queue runs one attempt at a time; derive the delay from persisted attempts.
+-    if (delivery.attempts > 0) {
+-      const delay = 100 * 2 ** (delivery.attempts - 1);
++    if (!queued && delivery.attempts > 0) {
++      const delay = delays[delivery.attempts - 1];
+       await new Promise<void>(resolve => setTimeout(resolve, delay));
+     }
+     const response = await send(updated.target, {
+@@ -39,10 +40,10 @@ export async function deliverAttempt(delivery: Delivery, store: Store, send: Sen
+   return updated;
+ }
+ 
+-export async function deliver(delivery: Delivery, store: Store, send: Send = fetch): Promise<Delivery> {
++export async function deliver(delivery: Delivery, store: Store, send: Send = fetch, delays: readonly number[] = DEFAULT_RETRY_DELAYS_MS): Promise<Delivery> {
+   let result = delivery;
+   do {
+-    result = await deliverAttempt(result, store, send);
++    result = await deliverAttempt(result, store, send, delays);
+   } while (result.status === "pending");
+   return result;
+ }
+diff --git a/src/postgres-store.ts b/src/postgres-store.ts
+index a3ea35c..ab02c64 100644
+--- a/src/postgres-store.ts
++++ b/src/postgres-store.ts
+@@ -53,7 +53,7 @@ export class PostgresStore implements QueueStore {
+     return rows[0] && this.decode(rows[0]);
+   }
+ 
+-  async release(id: string): Promise<void> {
+-    await this.db.query("UPDATE deliveries SET available_at = now() WHERE id = $1 AND status = 'pending'", [id]);
++  async release(id: string, delayMs = 0): Promise<void> {
++    await this.db.query("UPDATE deliveries SET available_at = now() + ($2 * interval '1 millisecond') WHERE id = $1 AND status = 'pending'", [id, delayMs]);
+   }
+ }
+diff --git a/src/retry.ts b/src/retry.ts
+new file mode 100644
+index 0000000..7cc1481
+--- /dev/null
++++ b/src/retry.ts
+@@ -0,0 +1,10 @@
++export const DEFAULT_RETRY_DELAYS_MS = [100, 200, 400, 800] as const;
++
++export function retryDelays(value?: number[]): readonly number[] {
++  if (value === undefined) return DEFAULT_RETRY_DELAYS_MS;
++  if (!Array.isArray(value) || value.length !== 4 ||
++      value.some(delay => !Number.isSafeInteger(delay) || delay < 0 || delay > 2147483647)) {
++    throw new Error("retryDelaysMs must contain four integer delays between 0 and 2147483647 milliseconds");
++  }
++  return value;
++}
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index 2d2f06d..d3eb4e6 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -1,9 +1,10 @@
++import { retryDelays } from "../retry";
+ import { verifyHmac } from "../lib/hmac";
+ import { randomUUID } from "node:crypto";
+ import { deliver, Send } from "../deliver";
+ import { Delivery, Store } from "../store";
+ 
+-export type SourceConfig = { secret: string; target: string };
++export type SourceConfig = { secret: string; target: string; retryDelaysMs?: number[] };
+ export type Sources = Record<string, SourceConfig>;
+ 
+ export type WebhookResult = { status: number; body: Record<string, unknown> };
+@@ -41,6 +42,6 @@ export async function handleWebhook(
+   };
+ 
+   await store.save(delivery);
+-  const result = queued ? delivery : await deliver(delivery, store, send);
++  const result = queued ? delivery : await deliver(delivery, store, send, retryDelays(config.retryDelaysMs));
+   return { status: 202, body: { id: result.id, status: result.status, receivedAt: result.receivedAt.getTime() } };
+ }
+diff --git a/src/server.ts b/src/server.ts
+index aa788e9..821f41a 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -17,7 +17,7 @@ let stopping = false;
+ async function runWorker(): Promise<void> {
+   while (!stopping) {
+     try {
+-      if (await processNext(store)) continue;
++      if (await processNext(store, undefined, sources)) continue;
+     } catch (error) {
+       console.error("retry worker:", error);
+     }
+diff --git a/src/store.ts b/src/store.ts
+index 0b067d2..99be7e3 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -27,7 +27,7 @@ export interface Store {
+ 
+ export interface QueueStore extends Store {
+   claim(): Promise<Delivery | undefined>;
+-  release(id: string): Promise<void>;
++  release(id: string, delayMs?: number): Promise<void>;
+ }
+ 
+ export class MemoryStore implements Store {
+diff --git a/src/worker.ts b/src/worker.ts
+index 469e03d..5c6667c 100644
+--- a/src/worker.ts
++++ b/src/worker.ts
+@@ -1,10 +1,13 @@
++import { Sources } from "./routes/webhooks";
++import { retryDelays } from "./retry";
+ import { deliverAttempt, Send } from "./deliver";
+ import { QueueStore } from "./store";
+ 
+-export async function processNext(store: QueueStore, send: Send = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(30000) })): Promise<boolean> {
++export async function processNext(store: QueueStore, send: Send = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(30000) }), sources: Sources = {}): Promise<boolean> {
+   const delivery = await store.claim();
+   if (!delivery) return false;
+-  const result = await deliverAttempt(delivery, store, send);
+-  if (result.status === "pending") await store.release(result.id);
++  const delays = retryDelays(sources[delivery.source]?.retryDelaysMs);
++  const result = await deliverAttempt(delivery, store, send, delays, true);
++  if (result.status === "pending") await store.release(result.id, delays[result.attempts - 1]);
+   return true;
+ }
+diff --git a/test/deliver.test.ts b/test/deliver.test.ts
+index 723d407..eeaa351 100644
+--- a/test/deliver.test.ts
++++ b/test/deliver.test.ts
+@@ -1,6 +1,7 @@
+ import test from "node:test";
+ import assert from "node:assert/strict";
+ import { createHmac } from "node:crypto";
++import { retryDelays } from "../src/retry";
+ import { deliver, deliverAttempt } from "../src/deliver";
+ import { handleWebhook } from "../src/routes/webhooks";
+ import { Delivery, MemoryStore } from "../src/store";
+@@ -135,3 +136,28 @@ test("signed webhook is stored and forwarded", async () => {
+   assert.equal(saved.body, body);
+   assert.equal(result.body.receivedAt, saved.receivedAt.getTime());
+ });
++
++
++test("signed endpoints use their own inline retry schedules", async (t) => {
++  const delays: number[] = [];
++  const schedule = globalThis.setTimeout;
++  t.mock.method(globalThis, "setTimeout", (callback: () => void, delay: number) => {
++    delays.push(delay);
++    return schedule(callback, 0);
++  });
++  for (const custom of [undefined, [1000, 2000, 5000, 10000]]) {
++    const store = new MemoryStore();
++    await handleWebhook("github", "{}", { "x-signature": sign("{}") },
++      { github: { ...sources.github, retryDelaysMs: custom } }, store,
++      async () => ({ ok: false, status: 503 }));
++    assert.equal((await store.list())[0].attempts, 5);
++  }
++  assert.deepEqual(delays, [100, 200, 400, 800, 1000, 2000, 5000, 10000]);
++});
++
++test("retry schedules reject invalid timer values and require four delays", () => {
++  for (const value of [null, [], [1], [1, 2, 3, -1], [1, 2, 3, 0.5], [1, 2, 3, Infinity], [1, 2, 3, 2147483648], "slow"]) {
++    assert.throws(() => retryDelays(value as number[]), /retryDelaysMs/);
++  }
++  assert.deepEqual(retryDelays([0, 0, 0, 0]), [0, 0, 0, 0]);
++});
+diff --git a/test/queue.test.ts b/test/queue.test.ts
+index 9fb8c08..d9cef59 100644
+--- a/test/queue.test.ts
++++ b/test/queue.test.ts
+@@ -12,8 +12,8 @@ class FakeQueue extends MemoryStore implements QueueStore {
+     if (delivery) this.leases.set(delivery.id, this.now + 60000);
+     return delivery;
+   }
+-  async release(id: string): Promise<void> {
+-    this.leases.delete(id);
++  async release(id: string, delayMs = 0): Promise<void> {
++    this.leases.set(id, this.now + delayMs);
+   }
+ }
+ 
+@@ -25,18 +25,19 @@ test("worker recovers leased work and retains the persisted retry budget on a fa
+   await store.save(delivery);
+   await processNext(store, async () => ({ ok: false, status: 503 }));
+   assert.equal((await store.get(delivery.id))?.attempts, 1);
++  store.now = 100;
+   const claimed = await store.claim();
+   assert.equal(claimed?.id, delivery.id);
+   await store.save({ ...claimed!, attempts: 2 });
+   assert.equal(await store.claim(), undefined);
+-  store.now = 60000;
++  store.now = 60100;
+   let calls = 0;
+   while (await processNext(store, async (_url, init) => {
+     calls++;
+     assert.equal(init.body, delivery.body);
+     assert.equal(init.headers["x-relay-delivery"], delivery.id);
+     return { ok: false, status: 500 };
+-  })) {}
++  })) { store.now += 10000; }
+   assert.equal(calls, 3);
+   assert.equal((await store.get(delivery.id))?.attempts, 5);
+   assert.equal((await store.get(delivery.id))?.status, "failed");
+@@ -73,7 +74,7 @@ test("Postgres adapter binds payloads, maps records, and propagates storage fail
+   assert.deepEqual(await store.list(), [delivery]);
+   assert.deepEqual(await store.claim(), delivery);
+   await store.release(delivery.id);
+-  assert.deepEqual(calls[4].values, [delivery.id]);
++  assert.deepEqual(calls[4].values, [delivery.id, 0]);
+   const attemptHistory = [{ attempt: 1, startedAt: 100, completedAt: 200, statusCode: 200, outcome: "delivered" as const }];
+   rows = [{ ...fields, received_at: receivedAt, attempt_history: attemptHistory } as typeof rows[number]];
+   assert.deepEqual((await store.get(delivery.id))?.attemptHistory, attemptHistory);
+@@ -86,3 +87,22 @@ test("Postgres adapter binds payloads, maps records, and propagates storage fail
+   await assert.rejects(store.save(delivery), /database unavailable/);
+   await assert.rejects(store.claim(), /database unavailable/);
+ });
++
++
++test("endpoint schedules defer queued retries without sleeping or blocking other work", async (t) => {
++  t.mock.method(globalThis, "setTimeout", () => { throw new Error("worker must not sleep"); });
++  const store = new FakeQueue();
++  const sources = { provider: { secret: "s", target: delivery.target, retryDelaysMs: [120000, 240000, 480000, 960000] } };
++  await store.save(delivery);
++  const send = async () => ({ ok: false, status: 503 });
++  for (const delay of sources.provider.retryDelaysMs) {
++    assert.equal(await processNext(store, send, sources), true);
++    assert.equal(await processNext(store, send, sources), false);
++    store.now += delay - 1;
++    assert.equal(await processNext(store, send, sources), false);
++    store.now += 1;
++  }
++  assert.equal(await processNext(store, send, sources), true);
++  assert.equal((await store.get(delivery.id))?.attempts, 5);
++  assert.equal((await store.get(delivery.id))?.status, "failed");
++});

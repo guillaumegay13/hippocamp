@@ -1,0 +1,81 @@
+diff --git a/DEPLOY.md b/DEPLOY.md
+new file mode 100644
+index 0000000..b20f0a6
+--- /dev/null
++++ b/DEPLOY.md
+@@ -0,0 +1,7 @@
++# PostgreSQL retry switch
++
++- Configure durable Postgres storage with `DATABASE_URL` (or standard `PG*` variables) and `SOURCES`. Redis is no longer required. Stop the old retry workers before starting the Postgres workers; the production retry backfill is already complete, so do not import those rows again.
++- Apply missing migrations in order: `001_deliveries.sql`, `002_attempt_history.sql`, then `003_pending_lookup.sql`. Existing installations with the first two applied need only `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_pending_lookup.sql`. Run migration 003 outside a transaction; concurrent index creation keeps writes available and `ANALYZE` refreshes estimates after the backfill. It ensures the pending index exists; installations already using it retain the same claim query and index.
++- Build with `npm ci && npm run build`, then start with `npm start`. Verify a signed webhook returns `202`/`pending` and becomes delivered; monitor worker errors and overdue pending rows. Restrict `/admin/*` through deployment access controls.
++- Retries survive restarts: only 5xx responses retry, with five total attempts and default delays of 100/200/400/800 ms. Optional per-source `retryDelaysMs` supplies four integer millisecond delays. Existing scheduled times remain unchanged. Claims recover after 60 seconds; requests time out after 30 seconds. Recipients must deduplicate `x-relay-delivery` because interrupted requests can repeat.
++- On rollback, stop the new workers and retain the database and pending rows. Resume with a compatible Postgres worker; an older Redis worker cannot consume this queue. Do not reset attempts or replay the completed backfill.
+diff --git a/README.md b/README.md
+index 1ec3a43..16812f8 100644
+--- a/README.md
++++ b/README.md
+@@ -14,6 +14,11 @@ Attempts are recorded before sending. A crash during a request can result in a r
+ 
+ Sources are configured with the `SOURCES` env var, a JSON object:
+ 
++Configure Acme under the `acme` source key and send to `POST /hooks/acme`.
++It signs the exact body with HMAC-SHA256, supplied as a lowercase hexadecimal
++digest in `X-Acme-Signature`. Other sources use `X-Signature` with the same format.
++See [DEPLOY.md](DEPLOY.md) for the PostgreSQL retry rollout and pending-index upgrade.
++
+ ```json
+ { "github": { "secret": "dev-secret", "target": "http://localhost:4000/in", "retryDelaysMs": [1000, 2000, 5000, 10000] } }
+ ```
+diff --git a/migrations/003_pending_lookup.sql b/migrations/003_pending_lookup.sql
+new file mode 100644
+index 0000000..3f6810d
+--- /dev/null
++++ b/migrations/003_pending_lookup.sql
+@@ -0,0 +1,7 @@
++-- Run outside a transaction: keep writes available while indexing existing rows.
++-- Also repairs older installations missing the index from the initial schema.
++CREATE INDEX CONCURRENTLY IF NOT EXISTS deliveries_pending
++  ON deliveries (available_at, id) WHERE status = 'pending';
++
++-- Refresh planner estimates after the production retry backfill.
++ANALYZE deliveries;
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index d3eb4e6..57da3d8 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -24,7 +24,7 @@ export async function handleWebhook(
+     return { status: 404, body: { error: "unknown source" } };
+   }
+ 
+-  const header = headers["x-signature"];
++  const header = headers[source === "acme" ? "x-acme-signature" : "x-signature"];
+   const signature = Array.isArray(header) ? header[0] : header;
+ 
+   if (!verifyHmac(rawBody, config.secret, signature)) {
+diff --git a/test/hmac.test.ts b/test/hmac.test.ts
+index f95b332..4e336ab 100644
+--- a/test/hmac.test.ts
++++ b/test/hmac.test.ts
+@@ -30,3 +30,21 @@ test("queued webhook persists without sending and rejects invalid signatures wit
+   assert.equal(saved.attempts, 0);
+   assert.equal(result.body.receivedAt, saved.receivedAt.getTime());
+ });
++
++test("Acme accepts its own header and rejects fallback headers or tampered bodies", async () => {
++  const store = new MemoryStore();
++  const sources = { acme: { secret: "acme-secret", target: "http://example.test" } };
++  const body = '{ "message": "hello é" }\n';
++  const signature = createHmac("sha256", sources.acme.secret).update(body).digest("hex");
++  for (const [rawBody, headers] of [
++    [body, { "x-signature": signature }],
++    [body.trim(), { "x-acme-signature": signature }],
++    [body, { "x-acme-signature": "invalid", "x-signature": signature }],
++  ] as const) {
++    assert.equal((await handleWebhook("acme", rawBody, headers, sources, store, undefined, true)).status, 401);
++  }
++  assert.equal((await store.list()).length, 0);
++  const result = await handleWebhook("acme", body, { "x-acme-signature": signature }, sources, store, undefined, true);
++  assert.equal(result.status, 202);
++  assert.equal((await store.list())[0].body, body);
++});

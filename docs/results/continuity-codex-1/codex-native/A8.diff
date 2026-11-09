@@ -1,0 +1,239 @@
+diff --git a/README.md b/README.md
+index 02c9b07..3a7e8e3 100644
+--- a/README.md
++++ b/README.md
+@@ -31,7 +31,7 @@ Tests use an in-memory fake queue store and require no database or external serv
+ 
+ Admin endpoints:
+ 
+-- `GET /admin/deliveries` returns an array of delivery metadata.
++- `GET /admin/deliveries` returns `{ "items": [...], "nextCursor": null }`. Results are ordered by `receivedAt` ascending, then ID. Use `?limit=100` (default 100, range 1–1000) and pass a non-null `nextCursor` back as `?cursor=...` to retrieve the next page. Invalid or repeated pagination parameters return `400`. This replaces the previous bare array response. Cursors identify a position, not a snapshot; newly inserted deliveries after that position can appear on subsequent pages.
+ - `GET /admin/deliveries/:id` returns one delivery's metadata, or `404` if missing.
+ 
+ Both return only `id`, `source`, `target`, `receivedAt` (Unix milliseconds), `status`, and `attempts`. Payload `body` fields are never included, including for pending and failed deliveries.
+diff --git a/src/app.ts b/src/app.ts
+index e9820aa..35cbe7a 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -6,12 +6,13 @@ import { Delivery, Store } from "./store";
+ export function createRequestHandler(sources: Sources, store: Store & { enqueue(delivery: Delivery): Promise<void> }): RequestListener {
+   return async (req, res) => {
+     try {
+-      const path = new URL(req.url || "/", "http://localhost").pathname;
++      const url = new URL(req.url || "/", "http://localhost");
++      const path = url.pathname;
+       const admin = req.method === "GET" && path.match(/^\/admin\/deliveries(?:\/([^/]+)(\/attempts)?)?$/);
+       if (admin) {
+         const result = admin[2]
+           ? await handleAttempts(store, decodeURIComponent(admin[1]))
+-          : await handleAdmin(store, admin[1] === undefined ? undefined : decodeURIComponent(admin[1]));
++          : await handleAdmin(store, admin[1] === undefined ? undefined : decodeURIComponent(admin[1]), url.searchParams);
+         res.writeHead(result.status, { "content-type": "application/json" }).end(JSON.stringify(result.body));
+         return;
+       }
+diff --git a/src/postgres.ts b/src/postgres.ts
+index 4a50fe7..adbfa88 100644
+--- a/src/postgres.ts
++++ b/src/postgres.ts
+@@ -1,6 +1,6 @@
+ import { retryDelayMs } from "./retry";
+ import { Pool } from "pg";
+-import { Delivery, DeliveryAttempt } from "./store";
++import { Delivery, DeliveryAttempt, ListOptions } from "./store";
+ import { DeliveryQueueStore } from "./queue";
+ 
+ const columns = 'id, source, target, body, received_at AS "receivedAt", status, attempts, retry_delay_ms AS "retryDelayMs"';
+@@ -34,6 +34,8 @@ export class PostgresStore implements DeliveryQueueStore {
+         error text,
+         PRIMARY KEY (delivery_id, attempt)
+       );
++      CREATE INDEX IF NOT EXISTS deliveries_received_id_idx
++        ON deliveries (received_at, id COLLATE "C");
+       CREATE INDEX IF NOT EXISTS deliveries_pending_available_id_idx
+         ON deliveries (available_at, id) WHERE status = 'pending';
+     `);
+@@ -59,7 +61,13 @@ export class PostgresStore implements DeliveryQueueStore {
+     return (await this.pool.query<Delivery>(`SELECT ${columns} FROM deliveries WHERE id = $1`, [id])).rows[0];
+   }
+ 
+-  async list(): Promise<Delivery[]> {
++  async list(options?: ListOptions): Promise<Delivery[]> {
++    if (options) {
++      return (await this.pool.query<Delivery>(`SELECT ${columns} FROM deliveries
++        WHERE ($1::timestamptz IS NULL OR (received_at, id COLLATE "C") > ($1::timestamptz, $2::text COLLATE "C"))
++        ORDER BY received_at, id COLLATE "C" LIMIT $3`,
++        [options.after ? new Date(options.after.receivedAt) : null, options.after?.id ?? null, options.limit])).rows;
++    }
+     return (await this.pool.query<Delivery>(`SELECT ${columns} FROM deliveries ORDER BY received_at, id`)).rows;
+   }
+ 
+diff --git a/src/queue.ts b/src/queue.ts
+index 6b58c37..b7ad341 100644
+--- a/src/queue.ts
++++ b/src/queue.ts
+@@ -1,6 +1,6 @@
+ import { randomUUID } from "node:crypto";
+ import { deliver, Send } from "./deliver";
+-import { Delivery, DeliveryAttempt, Store } from "./store";
++import { Delivery, DeliveryAttempt, ListOptions, Store } from "./store";
+ 
+ export interface DeliveryQueueStore extends Store {
+   enqueue(delivery: Delivery): Promise<void>;
+@@ -18,7 +18,7 @@ export class DeliveryQueue implements Store {
+   listAttempts(id: string) { return this.store.listAttempts(id); }
+   save(delivery: Delivery) { return this.store.save(delivery); }
+   get(id: string) { return this.store.get(id); }
+-  list() { return this.store.list(); }
++  list(options?: ListOptions) { return this.store.list(options); }
+   enqueue(delivery: Delivery) { return this.store.enqueue(delivery); }
+ 
+   async processNext(send?: Send): Promise<boolean> {
+diff --git a/src/routes/admin.ts b/src/routes/admin.ts
+index 576e77e..69b38ee 100644
+--- a/src/routes/admin.ts
++++ b/src/routes/admin.ts
+@@ -1,4 +1,4 @@
+-import { Delivery, Store } from "../store";
++import { Delivery, DeliveryCursor, Store } from "../store";
+ 
+ // Explicitly select public metadata so stored payloads never enter admin responses.
+ function metadata(delivery: Delivery) {
+@@ -12,9 +12,34 @@ function metadata(delivery: Delivery) {
+   };
+ }
+ 
+-export async function handleAdmin(store: Pick<Store, "get" | "list">, id?: string) {
++export async function handleAdmin(store: Pick<Store, "get" | "list">, id?: string, query = new URLSearchParams()) {
+   if (id === undefined) {
+-    return { status: 200, body: (await store.list()).map(metadata) };
++    const rawLimit = query.get("limit") ?? "100";
++    const rawCursor = query.get("cursor");
++    let after: DeliveryCursor | undefined;
++    if (!/^[1-9]\d*$/.test(rawLimit) || Number(rawLimit) > 1000 ||
++        query.getAll("limit").length > 1 || query.getAll("cursor").length > 1) {
++      return { status: 400, body: { error: "invalid pagination" } };
++    }
++    if (rawCursor !== null) {
++      try {
++        if (!/^[A-Za-z0-9_-]+$/.test(rawCursor) || rawCursor.length > 4096) throw new Error();
++        const decoded = JSON.parse(Buffer.from(rawCursor, "base64url").toString("utf8"));
++        if (!Array.isArray(decoded) || decoded.length !== 2 ||
++            !Number.isSafeInteger(decoded[0]) || !Number.isFinite(new Date(decoded[0]).getTime()) ||
++            typeof decoded[1] !== "string" || !decoded[1] || decoded[1].includes("\u0000")) throw new Error();
++        after = { receivedAt: decoded[0], id: decoded[1] };
++      } catch {
++        return { status: 400, body: { error: "invalid pagination" } };
++      }
++    }
++    const limit = Number(rawLimit);
++    const rows = await store.list({ limit: limit + 1, after });
++    const items = rows.slice(0, limit).map(metadata);
++    const last = items[items.length - 1];
++    const nextCursor = rows.length > limit
++      ? Buffer.from(JSON.stringify([last.receivedAt, last.id])).toString("base64url") : null;
++    return { status: 200, body: { items, nextCursor } };
+   }
+   const delivery = await store.get(id);
+   return delivery
+diff --git a/src/store.ts b/src/store.ts
+index b884e7e..f6c7d77 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -19,12 +19,15 @@ export type DeliveryAttempt = {
+   error: string | null;
+ };
+ 
++export type DeliveryCursor = { receivedAt: number; id: string };
++export type ListOptions = { limit: number; after?: DeliveryCursor };
++
+ export interface Store {
+   recordAttempt(id: string, attempt: DeliveryAttempt): Promise<void>;
+   listAttempts(id: string): Promise<DeliveryAttempt[]>;
+   save(delivery: Delivery): Promise<void>;
+   get(id: string): Promise<Delivery | undefined>;
+-  list(): Promise<Delivery[]>;
++  list(options?: ListOptions): Promise<Delivery[]>;
+ }
+ 
+ export class MemoryStore implements Store {
+@@ -52,7 +55,15 @@ export class MemoryStore implements Store {
+     return delivery && { ...delivery };
+   }
+ 
+-  async list(): Promise<Delivery[]> {
+-    return [...this.deliveries.values()].map((delivery) => ({ ...delivery }));
++  async list(options?: ListOptions): Promise<Delivery[]> {
++    let deliveries = [...this.deliveries.values()];
++    if (options) {
++      deliveries.sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
++      const after = options.after;
++      if (after) deliveries = deliveries.filter((d) => d.receivedAt.getTime() > after.receivedAt ||
++        (d.receivedAt.getTime() === after.receivedAt && d.id > after.id));
++      deliveries = deliveries.slice(0, options.limit);
++    }
++    return deliveries.map((delivery) => ({ ...delivery }));
+   }
+ }
+diff --git a/test/admin.test.ts b/test/admin.test.ts
+index 057c1a3..b3bd623 100644
+--- a/test/admin.test.ts
++++ b/test/admin.test.ts
+@@ -30,7 +30,7 @@ test("admin HTTP endpoints expose metadata only for every delivery status", asyn
+ 
+   const list = await fetch(`${base}/admin/deliveries`);
+   assert.equal(list.status, 200);
+-  assert.deepEqual(await list.json(), expected);
++  assert.deepEqual(await list.json(), { items: [...expected].sort((a, b) => a.id.localeCompare(b.id)), nextCursor: null });
+   for (const metadata of expected) {
+     const detail = await fetch(`${base}/admin/deliveries/${metadata.id}`);
+     assert.equal(detail.status, 200);
+@@ -45,9 +45,9 @@ test("admin HTTP endpoints expose metadata only for every delivery status", asyn
+   assert.equal(wrongMethod.status, 404);
+ });
+ 
+-test("empty admin list returns an empty array", async () => {
++test("empty admin list returns an empty page", async () => {
+   const { handleAdmin } = await import("../src/routes/admin");
+-  assert.deepEqual(await handleAdmin(new MemoryStore()), { status: 200, body: [] });
++  assert.deepEqual(await handleAdmin(new MemoryStore()), { status: 200, body: { items: [], nextCursor: null } });
+ });
+ 
+ test("attempt history records retries and errors without exposing payloads", async (t) => {
+@@ -100,3 +100,37 @@ test("attempt history records retries and errors without exposing payloads", asy
+   assert.deepEqual(await missing.json(), { error: "not found" });
+   assert.equal((await fetch(`${base}/history/attempts`, { method: "POST" })).status, 404);
+ });
++
++test("admin pagination traverses equal timestamps and rejects invalid parameters", async (t) => {
++  const store = new Queue();
++  for (const id of ["c", "a", "b", "d"]) {
++    await store.save({ id, source: "github", target: "http://client.test/in", body: "private",
++      receivedAt: new Date(id === "d" ? 2000 : 1000), status: "pending", attempts: 0 });
++  }
++  const server = createServer(createRequestHandler({}, store));
++  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
++  t.after(() => new Promise<void>((resolve, reject) => {
++    server.close((error) => error ? reject(error) : resolve());
++    server.closeAllConnections();
++  }));
++  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/admin/deliveries`;
++  const first = await (await fetch(`${base}?limit=2`)).json();
++  assert.deepEqual(first.items.map((d: { id: string }) => d.id), ["a", "b"]);
++  assert.equal(typeof first.nextCursor, "string");
++  // The cursor remains useful even if its delivery is removed or has changed status.
++  await store.save({ ...(await store.get("b"))!, status: "delivered" });
++  const second = await (await fetch(`${base}?limit=2&cursor=${first.nextCursor}`)).json();
++  assert.deepEqual(second.items.map((d: { id: string }) => d.id), ["c", "d"]);
++  assert.equal(second.nextCursor, null);
++  const end = Buffer.from(JSON.stringify([2000, "d"])).toString("base64url");
++  assert.deepEqual(await (await fetch(`${base}?cursor=${end}`)).json(), { items: [], nextCursor: null });
++  for (const query of ["limit=0", "limit=-1", "limit=1001", "limit=1.5", "limit=abc", "limit=", "limit=1&limit=2",
++    "cursor=", "cursor=bad", "cursor=e30", "cursor=WzAsMV0", "cursor=x&cursor=y"]) {
++    const response = await fetch(`${base}?${query}`);
++    assert.equal(response.status, 400, query);
++    assert.deepEqual(await response.json(), { error: "invalid pagination" });
++  }
++  const page = await (await fetch(base)).json();
++  assert.equal(page.items.length, 4);
++  assert.equal(JSON.stringify(page).includes("private"), false);
++});

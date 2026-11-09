@@ -1,0 +1,218 @@
+diff --git a/README.md b/README.md
+index 3066b9d..bc05940 100644
+--- a/README.md
++++ b/README.md
+@@ -11,9 +11,11 @@ Delivery payloads, statuses, attempt counts, and worker leases live in Postgres,
+ Sources are configured with the `SOURCES` env var, a JSON object:
+ 
+ ```json
+-{ "github": { "secret": "dev-secret", "target": "http://localhost:4000/in" } }
++{ "github": { "secret": "dev-secret", "target": "http://localhost:4000/in", "retryDelayMs": 1000 } }
+ ```
+ 
++Each source accepts an optional `retryDelayMs` base delay in milliseconds (default `100`). For example, `1000` waits 1000, 2000, 4000, and 8000 ms between attempts. It must be an integer from 0 to 268435455; invalid values fail startup. The delay is stored with each accepted delivery, so later configuration changes apply only to new deliveries. Existing queued deliveries use the default. Interrupted deliveries continue the exponential schedule using their persisted attempt count. The five-attempt limit and retryable responses are unchanged.
++
+ ```sh
+ npm install
+ npm test
+diff --git a/src/deliver.ts b/src/deliver.ts
+index 44ec491..526169f 100644
+--- a/src/deliver.ts
++++ b/src/deliver.ts
+@@ -1,3 +1,4 @@
++import { retryDelayMs } from "./retry";
+ import { Delivery, DeliveryAttempt, Store } from "./store";
+ 
+ export type Send = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{ ok: boolean; status: number }>;
+@@ -7,7 +8,7 @@ export async function deliver(delivery: Delivery, store: Store, send: Send = fet
+   let ok = false;
+   let attempts = delivery.attempts;
+ 
+-  let delay = 100;
++  const baseDelay = retryDelayMs(delivery.retryDelayMs);
+   while (attempts < 5) {
+     attempts += 1;
+     await store.save({ ...delivery, attempts, status: "pending" });
+@@ -32,8 +33,7 @@ export async function deliver(delivery: Delivery, store: Store, send: Send = fet
+     await store.recordAttempt(delivery.id, attempt);
+     if (!retry) break;
+     if (attempts < 5) {
+-      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+-      delay *= 2;
++      await new Promise<void>((resolve) => setTimeout(resolve, baseDelay * 2 ** (attempts - 1)));
+     }
+   }
+ 
+diff --git a/src/postgres.ts b/src/postgres.ts
+index 530c0dc..ce70797 100644
+--- a/src/postgres.ts
++++ b/src/postgres.ts
+@@ -1,9 +1,10 @@
++import { retryDelayMs } from "./retry";
+ import { Pool } from "pg";
+ import { Delivery, DeliveryAttempt } from "./store";
+ import { DeliveryQueueStore } from "./queue";
+ 
+-const columns = 'id, source, target, body, received_at AS "receivedAt", status, attempts';
+-const values = (d: Delivery) => [d.id, d.source, d.target, d.body, d.receivedAt, d.status, d.attempts];
++const columns = 'id, source, target, body, received_at AS "receivedAt", status, attempts, retry_delay_ms AS "retryDelayMs"';
++const values = (d: Delivery) => [d.id, d.source, d.target, d.body, d.receivedAt, d.status, d.attempts, retryDelayMs(d.retryDelayMs)];
+ 
+ export class PostgresStore implements DeliveryQueueStore {
+   constructor(private pool: Pool) {}
+@@ -22,6 +23,8 @@ export class PostgresStore implements DeliveryQueueStore {
+         lease_token text,
+         lease_until timestamptz
+       );
++      ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS retry_delay_ms integer NOT NULL DEFAULT 100
++        CHECK (retry_delay_ms BETWEEN 0 AND 268435455);
+       CREATE TABLE IF NOT EXISTS delivery_attempts (
+         delivery_id text NOT NULL REFERENCES deliveries(id),
+         attempt integer NOT NULL CHECK (attempt > 0),
+@@ -38,17 +41,18 @@ export class PostgresStore implements DeliveryQueueStore {
+ 
+   async enqueue(delivery: Delivery): Promise<void> {
+     await this.pool.query(`INSERT INTO deliveries
+-      (id, source, target, body, received_at, status, attempts)
+-      VALUES ($1, $2, $3, $4, $5, $6, $7)`, values(delivery));
++      (id, source, target, body, received_at, status, attempts, retry_delay_ms)
++      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, values(delivery));
+   }
+ 
+   async save(delivery: Delivery): Promise<void> {
+     await this.pool.query(`INSERT INTO deliveries
+-      (id, source, target, body, received_at, status, attempts)
+-      VALUES ($1, $2, $3, $4, $5, $6, $7)
++      (id, source, target, body, received_at, status, attempts, retry_delay_ms)
++      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO UPDATE SET source = EXCLUDED.source, target = EXCLUDED.target,
+         body = EXCLUDED.body, received_at = EXCLUDED.received_at,
+-        status = EXCLUDED.status, attempts = EXCLUDED.attempts`, values(delivery));
++        status = EXCLUDED.status, attempts = EXCLUDED.attempts,
++        retry_delay_ms = EXCLUDED.retry_delay_ms`, values(delivery));
+   }
+ 
+   async get(id: string): Promise<Delivery | undefined> {
+diff --git a/src/retry.ts b/src/retry.ts
+new file mode 100644
+index 0000000..cb9d956
+--- /dev/null
++++ b/src/retry.ts
+@@ -0,0 +1,11 @@
++export const DEFAULT_RETRY_DELAY_MS = 100;
++// The fourth wait is eight times the base; keep every wait within Node's timer limit.
++export const MAX_RETRY_DELAY_MS = Math.floor(2_147_483_647 / 8);
++
++export function retryDelayMs(value: unknown): number {
++  if (value === undefined) return DEFAULT_RETRY_DELAY_MS;
++  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_RETRY_DELAY_MS) {
++    throw new Error(`retryDelayMs must be an integer between 0 and ${MAX_RETRY_DELAY_MS}`);
++  }
++  return value;
++}
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index 680a547..f8abe2a 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -1,8 +1,9 @@
+ import { randomUUID } from "node:crypto";
+ import { verifyHmac } from "../lib/hmac";
++import { retryDelayMs } from "../retry";
+ import { Delivery } from "../store";
+ 
+-export type SourceConfig = { secret: string; target: string };
++export type SourceConfig = { secret: string; target: string; retryDelayMs?: number };
+ export type Sources = Record<string, SourceConfig>;
+ 
+ export type WebhookResult = { status: number; body: Record<string, unknown> };
+@@ -34,6 +35,7 @@ export async function handleWebhook(
+     receivedAt: new Date(),
+     status: "pending",
+     attempts: 0,
++    retryDelayMs: retryDelayMs(config.retryDelayMs),
+   };
+ 
+   await queue.enqueue(delivery);
+diff --git a/src/server.ts b/src/server.ts
+index 800bbbf..31c1a1b 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -1,6 +1,7 @@
+ import { createServer } from "node:http";
+ import { Pool } from "pg";
+ import { setTimeout } from "node:timers/promises";
++import { retryDelayMs } from "./retry";
+ import { Sources } from "./routes/webhooks";
+ import { createRequestHandler } from "./app";
+ import { DeliveryQueue } from "./queue";
+@@ -8,6 +9,7 @@ import { PostgresStore } from "./postgres";
+ 
+ async function main() {
+   const sources: Sources = JSON.parse(process.env.SOURCES || "{}");
++  for (const config of Object.values(sources)) retryDelayMs(config.retryDelayMs);
+   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+   pool.on("error", (error) => console.error("Postgres error", error));
+   const store = new PostgresStore(pool);
+diff --git a/src/store.ts b/src/store.ts
+index 33a7ea3..b884e7e 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -8,6 +8,7 @@ export type Delivery = {
+   receivedAt: Date;
+   status: DeliveryStatus;
+   attempts: number;
++  retryDelayMs?: number;
+ };
+ 
+ export type DeliveryAttempt = {
+diff --git a/test/queue.test.ts b/test/queue.test.ts
+index ae195f7..3c4fe65 100644
+--- a/test/queue.test.ts
++++ b/test/queue.test.ts
+@@ -92,3 +92,29 @@ test("webhook cannot acknowledge a failed durable enqueue", async () => {
+     provider: { secret: "secret", target: "http://target.test" },
+   }, { enqueue: async () => { throw new Error("database unavailable"); } }), /database unavailable/);
+ });
++
++test("endpoint retry delays survive queue recreation and resume at the persisted attempt", async (t) => {
++  const delays: number[] = [];
++  const originalSetTimeout = globalThis.setTimeout;
++  t.mock.method(globalThis, "setTimeout", (callback: () => void, delay: number) => {
++    delays.push(delay);
++    return originalSetTimeout(callback, 0);
++  });
++  const store = new FakeQueueStore();
++  const body = "{}";
++  const signature = createHmac("sha256", "secret").update(body).digest("hex");
++  for (const base of [1000, 2500]) {
++    const response = await handleWebhook("provider", body, { "x-signature": signature }, {
++      provider: { secret: "secret", target: `http://target.test/${base}`, retryDelayMs: base },
++    }, new DeliveryQueue(store));
++    const id = response.body.id as string;
++    assert.equal((await store.get(id))?.retryDelayMs, base);
++    // A new worker needs no source configuration to recover the accepted policy.
++    await new DeliveryQueue(store).processNext(async () => ({ ok: false, status: 503 }));
++    assert.deepEqual(delays.splice(0), [base, base * 2, base * 4, base * 8]);
++    const saved = (await store.get(id))!;
++    await store.save({ ...saved, status: "pending", attempts: 3 });
++    await new DeliveryQueue(store).processNext(async () => ({ ok: false, status: 503 }));
++    assert.deepEqual(delays.splice(0), [base * 8]);
++  }
++});
+diff --git a/test/retry.test.ts b/test/retry.test.ts
+new file mode 100644
+index 0000000..a4c9bc6
+--- /dev/null
++++ b/test/retry.test.ts
+@@ -0,0 +1,11 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import { retryDelayMs, MAX_RETRY_DELAY_MS } from "../src/retry";
++
++test("retry base delay defaults and timer-safe limits", () => {
++  assert.equal(retryDelayMs(undefined), 100);
++  for (const value of [0, 1000, MAX_RETRY_DELAY_MS]) assert.equal(retryDelayMs(value), value);
++  for (const value of [null, "1000", -1, 0.5, NaN, Infinity, MAX_RETRY_DELAY_MS + 1]) {
++    assert.throws(() => retryDelayMs(value), /retryDelayMs must be an integer/);
++  }
++});

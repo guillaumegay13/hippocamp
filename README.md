@@ -53,6 +53,7 @@ Reproducible with the scripts in this repo.
 | Answer accuracy, Claude Sonnet 5, top 10 results | 77% | Correct sessions given directly: 90% |
 | Unrelated questions that return nothing (our own test set) | 10 / 10 | |
 | Work continuity, 21 real Claude Code sessions, checks passed | 100% (20 / 20) | Claude Code native memory: 96% (25 / 26) |
+| Work continuity, same 21 sessions in Codex, checks passed | 86% (24 / 28) | Codex native memory: 86% (24 / 28) |
 
 Full tables, method, and limits: [docs/results.md](docs/results.md).
 

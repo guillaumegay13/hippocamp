@@ -43,6 +43,8 @@ The same reader reaches 90% with the correct sessions, so the remaining gap is r
 
 Does memory carry real engineering work from one coding session to the next? `npm run eval:continuity` runs real headless Claude Code (`claude-opus-5-5`, Claude Code 2.1.318 to 2.1.319) through 21 sessions over two small synthetic projects (a TypeScript webhook relay and a Python ingest job). Early sessions plant facts the way work does: a rejected library, a pinned Node version, a blocked vendor, a parked branch, a user preference. Later sessions give tickets that only go well if the agent remembers them. The prompts never say "remember" or point at memory.
 
+In short: the same Hippocamp server, plugged unchanged into Claude Code or Codex, keeps up with each one's own memory (100% vs 96% in Claude Code, 86% vs 86% in Codex), with fewer than 5 points of difference and one run per arm. In Codex, whose built-in memory stored almost nothing, Hippocamp's memory covered 35% of the planted facts against 4%.
+
 Each arm is installed the way a developer has it, in its own sandbox home: Claude Code defaults with native auto-memory, or Hippocamp through its real installer (`install-claude`) with auto-memory off. A blind judge (Opus, arm names and memory paths scrubbed) grades 28 checks against the diff and the tool calls. A check is n/a when the session wrote no code it applies to.
 
 Run `full-1`, one run per arm:
@@ -64,6 +66,29 @@ What it does not show: that Hippocamp is better. The difference is one check, fr
 
 The diffs, judge prompts, grades with evidence and memory snapshots of this run are in [results/continuity-full-1](results/continuity-full-1/) (start with `report.md` and `validation.csv`). Full transcripts are left out for size.
 
+### Same benchmark in Codex
+
+Run `codex-1` repeats the 21 sessions in Codex (`codex exec`, codex-cli 0.159.2, `gpt-6.1-sol`, ChatGPT sign-in), same checks and same blind Opus judge. Codex native memory is its `memories` feature, turned on (it is off by default) with `min_rollout_idle_hours = 0`, because the benchmark runs sessions back to back instead of days apart. Hippocamp is installed with `install-codex`; nothing else changes.
+
+| | Codex native memory | Hippocamp in Codex |
+| --- | ---: | ---: |
+| Checks passed | 86% (24 / 28) | 86% (24 / 28) |
+| Checks marked as needing memory | 67% (8 / 12) | 75% (9 / 12) |
+| Tokens per session, median | 166k | 238k |
+| Time per session, median | 63 s | 82 s |
+| Memory calls per session | 1.0 | 4.9 |
+| Memory entries at the end | 4 | 17 |
+| Planted facts covered by memory | 4% | 35% |
+| Memory entries that are useful (precision) | 25% | 76% |
+
+What it shows: the same Hippocamp server, with no Codex-specific code, works in Codex as it does in Claude Code. Codex called `wake_up`, `search_memory` and `append_event` on its own, and the memory it built covers about as many planted facts as in Claude Code (35% vs 30%). The two Codex arms tie on checks (bootstrap: 0 points, -14 to +14).
+
+Codex's own memory stored almost nothing in this run: its background summaries never produced a memory from a past session, and the one real entry is a changelog preference the agent wrote as a note. The other three entries are Codex's empty templates, which the judge counts as noise. Codex still passed most checks without it, from the repository itself (code, commit messages, notes it wrote in the repo); that is why the score does not drop more. Hippocamp's misses include one stale next step and one fact it never saved (a blocked vendor).
+
+Codex reports no dollar cost, so this run has token and time numbers only.
+
+The run data is in [results/continuity-codex-1](results/continuity-codex-1/).
+
 ## Why less text matters
 
 Memory results share the agent's context with code, diffs, and tool output, and agents search several times per task. About 6k characters per search is roughly 1.5k tokens; whole sessions would be about 16k. Fewer tokens make each turn cheaper and faster, and keep the relevant lines from being buried. Less text is only useful when the answer is still in it, which is why we report answer accuracy next to text size.
@@ -81,6 +106,6 @@ Memory results share the agent's context with code, diffs, and tool output, and 
 
 `npm run eval:lagoon` runs the same kind of check, read-only, against your real Lagoon. It reads cases from `<Lagoon root>/evals/retrieval-cases.json`: a project, a query, and the event ids that answer it. An empty list means no memory should be returned. Keep the cases in Lagoon, not in this repo, because they quote private work.
 
-`npm run eval:continuity -- --systems cc-native,cc-hippocamp --run <name>` reruns the work continuity benchmark with your Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN` in `.env`); `--report <name>` prints the tables, and `--dry-run` shows the cost estimate. A run stops cleanly at a usage limit and resumes where it stopped.
+`npm run eval:continuity -- --systems cc-native,cc-hippocamp --run <name>` (or `codex-native,codex-hippocamp`, which needs a Codex ChatGPT sign-in) reruns the work continuity benchmark with your Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN` in `.env`); `--report <name>` prints the tables, and `--dry-run` shows the cost estimate. A run stops cleanly at a usage limit and resumes where it stopped.
 
 `npm run eval:qa` measures answer accuracy on the same LongMemEval-S data with the official LongMemEval reader and grader prompts. It compares Hippocamp top 5 (`hippocamp`), top 10 (`hippocamp-k10`), and the labeled answer sessions (`oracle`). It calls an OpenAI-compatible endpoint from `MANIFEST_BASE_URL` and `MANIFEST_API_KEY`; set `QA_READER_MODEL` and `QA_GRADER_MODEL` to change models. Results are cached in `.context/qa-results.jsonl`, and `--dry-run` shows the jobs and token estimates without any API call.

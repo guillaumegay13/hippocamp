@@ -1,0 +1,132 @@
+diff --git a/README.md b/README.md
+index c45393c..590c425 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,13 @@
+ 
+ Reads vendor order exports (CSV), normalizes the columns, drops duplicate orders and posts the rows to the warehouse HTTP API at `WAREHOUSE_URL`.
+ 
+-Supported vendors: `vendor_a`, `vendor_b`.
++Supported vendors: `vendor_a`, `vendor_b`, `vendor_c`.
++
++Vendor C exports use UTF-8 encoding. Its `orderNumber`, `productCode`,
++`totalPrice`, and `orderedAt` columns map to `order_id`, `sku`, `amount`, and
++`created_at`. ISO-8601 timestamps must include a UTC offset (or `Z`) and are
++converted to UTC using that offset. Invalid timestamps or missing offsets
++raise an error.
+ 
+ Vendor B exports use Latin-1 encoding. Its `ref`, `article`, `montant`, and
+ `date_commande` columns map to `order_id`, `sku`, `amount`, and `created_at`.
+@@ -35,7 +41,7 @@ are removed when the load finishes or fails.
+ ## Usage
+ 
+ Set `WAREHOUSE_URL` to the warehouse rows endpoint and pass exactly two
+-positional arguments: the vendor (`vendor_a` or `vendor_b`) and the CSV path.
++positional arguments: the vendor (`vendor_a`, `vendor_b`, or `vendor_c`) and the CSV path.
+ 
+ ```sh
+ WAREHOUSE_URL=http://localhost:8080/rows python3 -m ingest.cli <vendor> <path>
+@@ -46,6 +52,7 @@ For example:
+ ```sh
+ WAREHOUSE_URL=http://localhost:8080/rows python3 -m ingest.cli vendor_a fixtures/vendor_a.csv
+ WAREHOUSE_URL=http://localhost:8080/rows python3 -m ingest.cli vendor_b fixtures/vendor_b.csv
++WAREHOUSE_URL=http://localhost:8080/rows python3 -m ingest.cli vendor_c fixtures/vendor_c.csv
+ ```
+ 
+ On success, the CLI prints `loaded N rows`, where `N` is the number of unique
+diff --git a/ingest/reader.py b/ingest/reader.py
+index 7b20388..2527b72 100644
+--- a/ingest/reader.py
++++ b/ingest/reader.py
+@@ -29,6 +29,14 @@ def vendor_b_timestamp(value):
+     return paris_timestamp(value, "%d/%m/%Y %H:%M")
+ 
+ 
++def vendor_c_timestamp(value):
++    """Normalize an ISO-8601 timestamp with an explicit offset to UTC."""
++    timestamp = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
++    if timestamp.tzinfo is None:
++        raise ValueError(f"missing UTC offset in vendor_c timestamp: {value!r}")
++    return timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
++
++
+ @dataclass(frozen=True)
+ class VendorSpec:
+     encoding: str
+@@ -55,6 +63,15 @@ VENDORS = {
+             "created_at": ("date_commande", vendor_b_timestamp),
+         },
+     ),
++    "vendor_c": VendorSpec(
++        encoding="utf-8",
++        columns={
++            "order_id": ("orderNumber", str.strip),
++            "sku": ("productCode", str.strip),
++            "amount": ("totalPrice", float),
++            "created_at": ("orderedAt", vendor_c_timestamp),
++        },
++    ),
+ }
+ 
+ 
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index c709854..34e09e4 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -5,7 +5,8 @@ from unittest.mock import patch
+ import unittest
+ 
+ from ingest.load import load_file
+-from ingest.reader import VENDORS, VendorSpec, read, vendor_a_timestamp, vendor_b_timestamp
++from ingest.reader import (VENDORS, VendorSpec, read, vendor_a_timestamp,
++                           vendor_b_timestamp, vendor_c_timestamp)
+ 
+ FIXTURES = os.path.join(os.path.dirname(__file__), "..", "fixtures")
+ 
+@@ -19,6 +20,31 @@ class FakeClient:
+ 
+ 
+ class ReaderTest(unittest.TestCase):
++    def test_vendor_c_columns_are_normalized(self):
++        rows = read("vendor_c", os.path.join(FIXTURES, "vendor_c.csv"))
++        self.assertEqual(len(rows), 10)
++        self.assertEqual(rows[0], {
++            "vendor": "vendor_c",
++            "order_id": "C3000",
++            "sku": "PC-0",
++            "amount": 11.0,
++            "created_at": "2025-06-01T07:15:00Z",
++        })
++
++    def test_vendor_c_timestamps_use_explicit_offsets(self):
++        for source, expected in [
++            (" 2025-06-01T09:15:00+02:00 ", "2025-06-01T07:15:00Z"),
++            ("2025-01-01T00:15:00+05:30", "2024-12-31T18:45:00Z"),
++            ("2025-06-01T09:15:00-04:00", "2025-06-01T13:15:00Z"),
++            ("2025-06-01T09:15:00Z", "2025-06-01T09:15:00Z"),
++            ("2025-10-26T02:30:00+02:00", "2025-10-26T00:30:00Z"),
++        ]:
++            with self.subTest(source=source):
++                self.assertEqual(vendor_c_timestamp(source), expected)
++        for source in ("bad date", "2025-06-01T09:15:00", "2025-06-01"):
++            with self.subTest(source=source), self.assertRaises(ValueError):
++                vendor_c_timestamp(source)
++
+     def test_vendor_a_columns_are_normalized(self):
+         rows = read("vendor_a", os.path.join(FIXTURES, "vendor_a.csv"))
+         self.assertEqual(rows[0]["order_id"], "A-1001")
+@@ -81,6 +107,14 @@ class ReaderTest(unittest.TestCase):
+ 
+ 
+ class LoadTest(unittest.TestCase):
++    def test_vendor_c_loads_with_hashes(self):
++        client = FakeClient()
++        count = load_file("vendor_c", os.path.join(FIXTURES, "vendor_c.csv"), client)
++        self.assertEqual(count, 10)
++        self.assertEqual(len(client.requests), 1)
++        self.assertEqual(client.requests[0][0]["created_at"], "2025-06-01T07:15:00Z")
++        self.assertIn("row_hash", client.requests[0][0])
++
+     def test_vendor_b_loads_with_hashes(self):
+         client = FakeClient()
+         count = load_file("vendor_b", os.path.join(FIXTURES, "vendor_b.csv"), client)

@@ -861,7 +861,7 @@ async function buildReport(runIds, dataset) {
     }
   }
 
-  const pairs = [["cc-hippocamp", "cc-native"], ...ARMS.filter((arm) => arm !== "cc-none").map((arm) => [arm, "cc-none"])];
+  const pairs = [["cc-hippocamp", "cc-native"], ["codex-hippocamp", "codex-native"], ...ARMS.filter((arm) => arm !== "cc-none").map((arm) => [arm, "cc-none"])];
   const intervals = pairs
     .filter(([a, b]) => rows.some((row) => row.system === a) && rows.some((row) => row.system === b))
     .map(([a, b]) => {

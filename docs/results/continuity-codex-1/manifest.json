@@ -1,0 +1,11 @@
+{
+  "datasetHash": "ad304556297bb916",
+  "harnessHash": "743d6a3f8179e503",
+  "model": "claude-opus-5-5",
+  "judgeModel": "claude-opus-5-5",
+  "budgetUsd": 3,
+  "versions": {
+    "claude": "2.1.319 (Claude Code)",
+    "codex": "codex-cli 0.159.2 gpt-6.1-sol"
+  }
+}

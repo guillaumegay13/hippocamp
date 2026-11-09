@@ -1,0 +1,159 @@
+diff --git a/README.md b/README.md
+index ed97fd0..1902856 100644
+--- a/README.md
++++ b/README.md
+@@ -37,11 +37,14 @@ when rendering reports. This repository does not contain report rendering.
+ Requires Python 3.9+ and an installed IANA timezone database (system zoneinfo
+ or the Python `tzdata` package).
+ 
+-The loader streams CSV rows and sends up to 2,000 unique rows per request.
+-Duplicate keys are stored in a temporary SQLite file to keep memory bounded;
++The loader sends up to 2,000 unique rows per request. For vendor A, the last
++occurrence of an order wins, so corrected rows replace earlier rows in the file.
++The full file is staged in SQLite before uploading, with orders emitted in order
++of first appearance. Vendor B and C stream rows and keep the first occurrence,
++including across request boundaries.
++Duplicate keys (and winning rows for vendor A) are stored in a temporary SQLite file to keep memory bounded;
+ the worker needs temporary disk space proportional to the number of unique orders.
+-The first occurrence wins, including across request boundaries. Temporary files
+-are removed when the load finishes or fails.
++Temporary files are removed when the load finishes or fails.
+ 
+ ## Usage
+ 
+diff --git a/ingest/load.py b/ingest/load.py
+index 8fd86d7..f8ab1c6 100644
+--- a/ingest/load.py
++++ b/ingest/load.py
+@@ -15,27 +15,39 @@ def row_hash(row):
+     return hashlib.sha256(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()
+ 
+ 
+-def dedupe(rows):
+-    """Stream first occurrences in file order, storing keys on disk."""
++def dedupe(rows, *, keep_last=False):
++    """Deduplicate on disk, preserving the order of first appearance.
++
++    Keeping the last occurrence requires staging the full input before yielding.
++    """
+     with tempfile.TemporaryDirectory(prefix="ingest-") as directory:
+         with closing(sqlite3.connect(str(Path(directory) / "seen.sqlite"))) as seen:
+             seen.execute("PRAGMA cache_size = -2048")
+             seen.execute(
+-                "CREATE TABLE seen (vendor TEXT, order_id TEXT, "
++                "CREATE TABLE seen (vendor TEXT, order_id TEXT, position INTEGER, payload TEXT, "
+                 "PRIMARY KEY (vendor, order_id)) WITHOUT ROWID"
+             )
+-            for row in rows:
++            for position, row in enumerate(rows):
+                 cursor = seen.execute(
+-                    "INSERT OR IGNORE INTO seen VALUES (?, ?)",
+-                    (row["vendor"], row["order_id"]),
++                    "INSERT INTO seen VALUES (?, ?, ?, ?) "
++                    "ON CONFLICT (vendor, order_id) DO UPDATE SET payload = excluded.payload"
++                    if keep_last else "INSERT OR IGNORE INTO seen VALUES (?, ?, ?, ?)",
++                    (row["vendor"], row["order_id"], position,
++                     json.dumps(row) if keep_last else None),
+                 )
+-                if cursor.rowcount:
++                if not keep_last and cursor.rowcount:
++                    yield {**row, "row_hash": row_hash(row)}
++            if keep_last:
++                for (payload,) in seen.execute("SELECT payload FROM seen ORDER BY position"):
++                    row = json.loads(payload)
+                     yield {**row, "row_hash": row_hash(row)}
+ 
+ 
+ def load_file(vendor, path, client):
+     count = 0
+-    with closing(iter_read(vendor, path)) as source, closing(dedupe(source)) as rows:
++    with closing(iter_read(vendor, path)) as source, closing(
++        dedupe(source, keep_last=vendor == "vendor_a")
++    ) as rows:
+         while batch := list(islice(rows, BATCH_SIZE)):
+             client.post_rows(batch)
+             count += len(batch)
+diff --git a/tests/test_e2e.py b/tests/test_e2e.py
+index a0a7024..d15331d 100644
+--- a/tests/test_e2e.py
++++ b/tests/test_e2e.py
+@@ -62,6 +62,8 @@ class ImportEndToEndTest(unittest.TestCase):
+                         for index, row in enumerate(rows):
+                             expected = {"vendor": vendor, "order_id": str(index), "sku": "Café",
+                                         "amount": 42.5, "created_at": "2025-07-04T08:05:00Z"}
++                            if vendor == "vendor_a" and index == 0:
++                                expected.update(sku="replacement", amount=99.0)
+                             self.assertEqual(row, {**expected, "row_hash": row_hash(expected)})
+         finally:
+             server.shutdown()
+diff --git a/tests/test_load.py b/tests/test_load.py
+index e196499..ca530c3 100644
+--- a/tests/test_load.py
++++ b/tests/test_load.py
+@@ -5,6 +5,29 @@ from ingest.load import load_file, row_hash
+ 
+ 
+ class BatchTest(unittest.TestCase):
++    def test_vendor_a_last_correction_wins_with_matching_hash(self):
++        original = {"vendor": "vendor_a", "order_id": "1", "sku": "original",
++                    "amount": 10.0, "created_at": "2025-07-04T08:05:00Z"}
++        other = {**original, "order_id": "2"}
++        corrected = {**original, "sku": "corrected", "amount": 25.0}
++        requests = []
++
++        class Client:
++            def post_rows(self, rows):
++                requests.append(rows)
++
++        def source(*args):
++            yield from [original, other, {**original, "amount": 20.0}, corrected]
++
++        with patch("ingest.load.iter_read", side_effect=source):
++            count = load_file("vendor_a", "unused.csv", Client())
++
++        self.assertEqual(count, 2)
++        self.assertEqual(requests, [[
++            {**corrected, "row_hash": row_hash(corrected)},
++            {**other, "row_hash": row_hash(other)},
++        ]])
++
+     def run_load(self, size, duplicate=False):
+         consumed = 0
+         requests = []
+@@ -13,9 +36,9 @@ class BatchTest(unittest.TestCase):
+             nonlocal consumed
+             for index in range(size):
+                 consumed += 1
+-                yield {"vendor": "vendor_a", "order_id": str(index)}
++                yield {"vendor": "vendor_b", "order_id": str(index)}
+             if duplicate:
+-                yield {"vendor": "vendor_a", "order_id": "0"}
++                yield {"vendor": "vendor_b", "order_id": "0"}
+ 
+         class Client:
+             def post_rows(self, rows):
+@@ -26,7 +49,7 @@ class BatchTest(unittest.TestCase):
+ 
+         self_outer = self
+         with patch("ingest.load.iter_read", side_effect=lambda *args: source()):
+-            count = load_file("vendor_a", "unused.csv", Client())
++            count = load_file("vendor_b", "unused.csv", Client())
+         self.assertEqual(count, size)
+         flattened = [row for batch in requests for row in batch]
+         self.assertEqual([row["order_id"] for row in flattened], list(map(str, range(size))))
+@@ -52,7 +75,7 @@ class BatchTest(unittest.TestCase):
+                 for index in range(2_001):
+                     if index == 2_000:
+                         self.fail("read beyond failed batch")
+-                    yield {"vendor": "vendor_a", "order_id": str(index)}
++                    yield {"vendor": "vendor_b", "order_id": str(index)}
+             finally:
+                 closed.append(True)
+ 
+@@ -62,5 +85,5 @@ class BatchTest(unittest.TestCase):
+ 
+         with patch("ingest.load.iter_read", side_effect=lambda *args: source()):
+             with self.assertRaisesRegex(RuntimeError, "post failed"):
+-                load_file("vendor_a", "unused.csv", Client())
++                load_file("vendor_b", "unused.csv", Client())
+         self.assertEqual(closed, [True])

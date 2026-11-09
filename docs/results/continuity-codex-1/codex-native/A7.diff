@@ -1,0 +1,116 @@
+diff --git a/DEPLOY.md b/DEPLOY.md
+new file mode 100644
+index 0000000..c2dbed0
+--- /dev/null
++++ b/DEPLOY.md
+@@ -0,0 +1,30 @@
++# Postgres retry queue deployment
++
++- Provision durable Postgres storage and set `DATABASE_URL` (or standard `PG*`
++  variables). The application role must be able to create tables, indexes, and
++  add columns. Run `npm ci`, `npm test`, and `npm run build` before deployment.
++- Drain the old in-memory workers before switching traffic; their pending work
++  is not migrated to Postgres. Start the new service only after database setup
++  succeeds. Startup creates `deliveries`, `delivery_attempts`, and the pending
++  index, and adds `retry_delay_ms` with default `100` to existing deliveries.
++- For a large existing table, build the new index before deploying, outside a
++  transaction, to avoid a blocking index build at startup:
++
++  ```sql
++  CREATE INDEX CONCURRENTLY IF NOT EXISTS deliveries_pending_available_id_idx
++    ON deliveries (available_at, id) WHERE status = 'pending';
++  ```
++
++  Verify the index build completed successfully before starting the new version.
++  The old `deliveries_pending_idx` can then be dropped concurrently.
++- Smoke-test a signed webhook: expect `202`, then check its admin status and
++  attempt history. A target returning 5xx should retry up to five total attempts,
++  with waits of 100, 200, 400, and 800 ms by default. Other responses and network
++  errors are not retried. Optional source `retryDelayMs` changes only new jobs;
++  it must be an integer from 0 to 268435455.
++- Restart once with pending work and verify it resumes; interrupted jobs become
++  claimable after the 60-second lease expires. Targets must deduplicate using
++  `x-relay-delivery`, since retries and crash recovery can send duplicates.
++- To roll back, stop intake and drain Postgres workers first. Keep the database
++  and queued rows; an older in-memory version cannot resume them. Do not drop
++  queue tables or columns during rollback.
+diff --git a/README.md b/README.md
+index bc05940..02c9b07 100644
+--- a/README.md
++++ b/README.md
+@@ -14,6 +14,10 @@ Sources are configured with the `SOURCES` env var, a JSON object:
+ { "github": { "secret": "dev-secret", "target": "http://localhost:4000/in", "retryDelayMs": 1000 } }
+ ```
+ 
++Configure an `acme` source to receive Acme webhooks at `POST /hooks/acme`.
++Acme sends the hex HMAC-SHA256 of the exact request body in `X-Acme-Signature`;
++other sources use `X-Signature`. Both use the configured source secret.
++
+ Each source accepts an optional `retryDelayMs` base delay in milliseconds (default `100`). For example, `1000` waits 1000, 2000, 4000, and 8000 ms between attempts. It must be an integer from 0 to 268435455; invalid values fail startup. The delay is stored with each accepted delivery, so later configuration changes apply only to new deliveries. Existing queued deliveries use the default. Interrupted deliveries continue the exponential schedule using their persisted attempt count. The five-attempt limit and retryable responses are unchanged.
+ 
+ ```sh
+diff --git a/src/postgres.ts b/src/postgres.ts
+index ce70797..4a50fe7 100644
+--- a/src/postgres.ts
++++ b/src/postgres.ts
+@@ -34,8 +34,8 @@ export class PostgresStore implements DeliveryQueueStore {
+         error text,
+         PRIMARY KEY (delivery_id, attempt)
+       );
+-      CREATE INDEX IF NOT EXISTS deliveries_pending_idx
+-        ON deliveries (available_at) WHERE status = 'pending';
++      CREATE INDEX IF NOT EXISTS deliveries_pending_available_id_idx
++        ON deliveries (available_at, id) WHERE status = 'pending';
+     `);
+   }
+ 
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index f8abe2a..921ffd6 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -21,7 +21,7 @@ export async function handleWebhook(
+     return { status: 404, body: { error: "unknown source" } };
+   }
+ 
+-  const header = headers["x-signature"];
++  const header = headers[source === "acme" ? "x-acme-signature" : "x-signature"];
+   const signature = Array.isArray(header) ? header[0] : header;
+   if (!verifyHmac(rawBody, config.secret, signature)) {
+     return { status: 401, body: { error: "bad signature" } };
+diff --git a/test/webhooks.test.ts b/test/webhooks.test.ts
+new file mode 100644
+index 0000000..2900fc8
+--- /dev/null
++++ b/test/webhooks.test.ts
+@@ -0,0 +1,31 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import { createHmac } from "node:crypto";
++import { handleWebhook } from "../src/routes/webhooks";
++import { FakeQueueStore } from "./fake-queue-store";
++
++test("Acme verifies its signature header and preserves the signed body", async () => {
++  const body = '{ "message": "héllo" }\n';
++  const signature = createHmac("sha256", "secret").update(body).digest("hex");
++  const sources = { acme: { secret: "secret", target: "http://target.test" } };
++  const store = new FakeQueueStore();
++  const response = await handleWebhook("acme", body, { "x-acme-signature": signature }, sources, store);
++  assert.equal(response.status, 202);
++  assert.equal((await store.get(response.body.id as string))?.body, body);
++
++  for (const headers of [{}, { "x-signature": signature }, { "x-acme-signature": "bad" }]) {
++    assert.equal((await handleWebhook("acme", body, headers, sources, store)).status, 401);
++  }
++  assert.equal((await handleWebhook("acme", body + " ", { "x-acme-signature": signature }, sources, store)).status, 401);
++  assert.equal((await store.list()).length, 1);
++});
++
++test("other sources keep their existing signature header", async () => {
++  const body = "{}";
++  const signature = createHmac("sha256", "secret").update(body).digest("hex");
++  const sources = { provider: { secret: "secret", target: "http://target.test" } };
++  const store = new FakeQueueStore();
++  assert.equal((await handleWebhook("provider", body, { "x-signature": signature }, sources, store)).status, 202);
++  assert.equal((await handleWebhook("provider", body, { "x-acme-signature": signature }, sources, store)).status, 401);
++  assert.equal((await handleWebhook("unknown", body, {}, sources, store)).status, 404);
++});
