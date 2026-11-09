@@ -91,7 +91,7 @@ test("Dream preserves existing curated-file permissions when replacing the snaps
   const threadsPath = path.join(f.project, "open_threads.md");
   await fs.chmod(currentPath, 0o600);
   await fs.chmod(threadsPath, 0o640);
-  global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep production reads fail-closed.", open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+  global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep production reads fail-closed.", open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker." });
   await dream.dreamProject(f.slug, f.options);
   assert.equal((await fs.stat(currentPath)).mode & 0o777, 0o600);
   assert.equal((await fs.stat(threadsPath)).mode & 0o777, 0o640);
@@ -101,7 +101,7 @@ test("bounded batches defer remaining events without advancing past unseen evide
   const f = await fixture(t);
   const ids = [];
   for (let i = 0; i < 5; i++) ids.push(await f.event(`Lesson ${i}`, `Constraint ${i}: ${"Keep the documented boundary. ".repeat(18)}`, -60000 + i * 1000));
-  global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep the documented boundary.", open_threads_md: "# Open Threads\n\n- Investigate the unresolved native Google blocker." });
+  global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep the documented boundary.", open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker." });
   const first = await dream.dreamProject(f.slug, f.options);
   assert.ok(first.recentEvidence.items.length > 0 && first.recentEvidence.items.length < ids.length);
   assert.equal(first.recentEvidence.reviewedThrough, first.recentEvidence.items.at(-1).id);
@@ -116,7 +116,7 @@ test("an oversized model result fails without changing files or the event cursor
   await f.event("Durable correction", "Keep production reads fail-closed.");
   const paths = ["current_state.md", "open_threads.md"].map((name) => path.join(f.project, name));
   const before = await Promise.all(paths.map((name) => fs.readFile(name, "utf8")));
-  global.fetch = async () => respond({ current_state_md: `# Current State\n\n- ${"Too large. ".repeat(400)}`, open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+  global.fetch = async () => respond({ current_state_md: `# Current State\n\n- ${"Too large. ".repeat(400)}`, open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker." });
   await assert.rejects(dream.dreamProject(f.slug, f.options), /did not reduce the snapshot/);
   assert.deepEqual(await Promise.all(paths.map((name) => fs.readFile(name, "utf8"))), before);
 });
@@ -139,13 +139,13 @@ test("compaction retries retain source evidence while the caller owns the review
   global.fetch = async (_url, request) => {
     const input = JSON.parse(request.body).input;
     calls++;
-    if (calls === 1) return respond({ current_state_md: `# Current State\n\n- Keep production reads fail-closed. Source: ${source}.\n\n- ${"Historical detail. ".repeat(200)}`, open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+    if (calls === 1) return respond({ current_state_md: `# Current State\n\n- Keep production reads fail-closed. Source: ${source}.\n\n- ${"Historical detail. ".repeat(200)}`, open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker." });
     assert.ok(input.includes(source));
     assert.match(input, /Preserve the event path and timestamp attached to each retained/);
     assert.doesNotMatch(input, /<!-- hippocamp-dream-through:/);
     const retryTarget = Number(input.match(/Target combined size[^:]*: (\d+) chars/)[1]);
     assert.ok(retryTarget > 0 && retryTarget < f.options.targetChars);
-    return respond({ current_state_md: `# Current State\n\n- Keep production reads fail-closed. Source: ${source}.`, open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+    return respond({ current_state_md: `# Current State\n\n- Keep production reads fail-closed. Source: ${source}.`, open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker." });
   };
   const result = await dream.dreamProject(f.slug, f.options);
   assert.equal(result.compactionPasses, 2);
@@ -176,7 +176,7 @@ for (const failure of ["current_state.md", "open_threads.md", "commit"]) {
     await f.event("Durable correction", "Keep production reads fail-closed.");
     const paths = ["current_state.md", "open_threads.md"].map((name) => path.join(f.project, name));
     const before = await Promise.all(paths.map((name) => fs.readFile(name, "utf8")));
-    global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep production reads fail-closed.", open_threads_md: "# Open Threads\n\n- Keep unresolved work." });
+    global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep production reads fail-closed.", open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker." });
     const method = failure === "commit" ? "rename" : "writeFile";
     const original = fs[method];
     t.mock.method(fs, method, async (file, ...args) => {
@@ -206,4 +206,56 @@ test("Dream refuses a summary file that links outside the Lagoon, without callin
   await assert.rejects(dream.dreamProject(f.slug, f.options), /memory root/);
   assert.equal(called, false);
   assert.equal(await fs.readFile(path.join(outside, "secret.md"), "utf8"), "TOPSECRET\n");
+});
+
+test("Dream refuses a result that silently drops an open thread, and writes nothing", async (t) => {
+  const f = await fixture(t);
+  await f.event("Durable correction", "Keep production reads fail-closed.");
+  const threadsPath = path.join(f.project, "open_threads.md");
+  const before = await fs.readFile(threadsPath, "utf8");
+  global.fetch = async () => respond({ current_state_md: "# Current State\n\n- Keep production reads fail-closed.", open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.", closed_threads: [] });
+
+  await assert.rejects(dream.dreamProject(f.slug, f.options), /open thread/);
+  assert.equal(await fs.readFile(threadsPath, "utf8"), before);
+});
+
+test("Dream removes an open thread only when it declares why", async (t) => {
+  const f = await fixture(t);
+  await f.event("Google blocker resolved", "The native Google blocker was fixed and verified.");
+  global.fetch = async () =>
+    respond({
+      current_state_md: "# Current State\n\n- Keep production reads fail-closed.",
+      open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.",
+      closed_threads: [{ thread: "Investigate the unresolved native Google blocker.", reason: "Fixed and verified in the 'Google blocker resolved' event." }],
+    });
+
+  const result = await dream.dreamProject(f.slug, f.options);
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.closedThreads.map((entry) => entry.thread), ["Investigate the unresolved native Google blocker."]);
+  assert.doesNotMatch(await fs.readFile(path.join(f.project, "open_threads.md"), "utf8"), /Google blocker/);
+});
+
+
+test("a closure must quote a distinct thread that is really gone", async (t) => {
+  const f = await fixture(t);
+  await f.event("Durable correction", "Keep production reads fail-closed.");
+  // The Google thread disappears, but the declared closure names the thread that was kept, twice.
+  const kept = "Merge PR #2928, then verify deployment.";
+  global.fetch = async () =>
+    respond({
+      current_state_md: "# Current State\n\n- Keep production reads fail-closed.",
+      open_threads_md: `# Open Threads\n\n- ${kept}`,
+      closed_threads: [{ thread: kept, reason: "done" }, { thread: kept, reason: "done" }],
+    });
+
+  await assert.rejects(dream.dreamProject(f.slug, f.options), /open thread/);
+});
+
+test("dry-run reports list closedThreads as an empty list", async (t) => {
+  const f = await fixture(t);
+  await f.event("Durable correction", "Keep production reads fail-closed.");
+  const result = await dream.dreamProject(f.slug, { ...f.options, write: false });
+
+  assert.deepEqual(dream.toPublicReport(result).closedThreads, []);
 });
