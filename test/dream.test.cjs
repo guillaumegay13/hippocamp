@@ -188,3 +188,22 @@ for (const failure of ["current_state.md", "open_threads.md", "commit"]) {
     assert.equal((await fs.readdir(f.project)).some((name) => name.startsWith(".dream-")), false);
   });
 }
+
+test("Dream refuses a summary file that links outside the Lagoon, without calling the model", async (t) => {
+  const f = await fixture(t);
+  await f.event("Durable correction", "Keep production reads fail-closed.");
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-dream-outside-"));
+  t.after(() => fs.rm(outside, { recursive: true, force: true }));
+  await fs.writeFile(path.join(outside, "secret.md"), "TOPSECRET\n");
+  await fs.rm(path.join(f.project, "current_state.md"));
+  await fs.symlink(path.join(outside, "secret.md"), path.join(f.project, "current_state.md"));
+  let called = false;
+  global.fetch = async () => {
+    called = true;
+    return respond({ current_state_md: "# Current State", open_threads_md: "# Open Threads" });
+  };
+
+  await assert.rejects(dream.dreamProject(f.slug, f.options), /memory root/);
+  assert.equal(called, false);
+  assert.equal(await fs.readFile(path.join(outside, "secret.md"), "utf8"), "TOPSECRET\n");
+});

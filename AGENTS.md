@@ -50,7 +50,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 
 ## Project Invariants
 
-- Memory paths must stay under the selected Lagoon memory root.
+- Memory paths must stay under the selected Lagoon memory root, also after resolving symlinks.
 - Sync paths must stay under the selected Lagoon memory root.
 - Global memory lives under `HIPPOCAMP_GLOBAL_ROOT/`.
 - Project memory lives under `HIPPOCAMP_GLOBAL_ROOT/projects/<slug>/`.
