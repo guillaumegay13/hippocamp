@@ -41,14 +41,14 @@ test("the README demo GIF stays out of the npm package", () => {
   assert.ok(!pack.files.some((file) => file.path.endsWith(".gif")));
 });
 
-test("benchmark data and published runs stay out of the npm package", () => {
+test("benchmarks, their data and the test suite stay out of the npm package", () => {
   const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
     cwd: path.join(__dirname, ".."),
     encoding: "utf8",
     shell: process.platform === "win32",
   });
   const [pack] = JSON.parse(output);
-  const leaked = pack.files.map((file) => file.path).filter((file) => /^(bench|docs\/results|\.context)\//.test(file));
+  const leaked = pack.files.map((file) => file.path).filter((file) => /^(bench\/|docs\/results\/|\.context\/|test\/|scripts\/(eval-|continuity-))/.test(file));
 
   assert.deepEqual(leaked, []);
 });
