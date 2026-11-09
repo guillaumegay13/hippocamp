@@ -1,0 +1,23 @@
+test/package-paths.test.cjs
+  s_df17c2731cbf68::t_96fd045ee59827 32-33,41
+AGENTS.md
+  s_df17c2731cbf68::t_96fd045ee59827 48
+README.md
+  s_df17c2731cbf68::t_12c4987b3b2169 60-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "81c76b1b98963a37d06fc9fd4b842c56d66b48b7",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
