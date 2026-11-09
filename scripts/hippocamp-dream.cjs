@@ -366,7 +366,8 @@ function createPrompt({ report, targetChars, threadEvidence, recentEvidence = { 
         "Group related PR review, merge, monitor, and local-run items by repo or status instead of listing every item separately.",
         "Prefer short bullets. Preserve concrete references when they are still actionable.",
         "Before returning, check both files together: replace superseded facts rather than appending a correction alongside them, even if the old fact names a version. No open thread may ask to implement or design behavior that current state says already exists. Preserve genuinely broader follow-ups without repeating obsolete prerequisites.",
-        "Return strict JSON only, with keys current_state_md and open_threads_md.",
+        "Return strict JSON only, with keys current_state_md, open_threads_md and closed_threads.",
+        "closed_threads lists every open-thread bullet you removed or merged, quoting the original bullet text in thread and saying why in reason (the event that closes it, or the bullet it was merged into). Rewording a thread is not removing it. Use an empty list when every thread is kept.",
         "current_state_md must start with '# Current State'.",
         "open_threads_md must start with '# Open Threads'.",
       ].join(" "),
@@ -414,7 +415,8 @@ function createCompactionRetryPrompt({ output, targetChars }) {
         "Do not add HTML comments or claim an event-review watermark; the caller records review progress.",
         "Remove repetition and historical detail before shortening individual facts.",
         "Do not crop text, leave partial bullets, or invent facts.",
-        "Return strict JSON only, with keys current_state_md and open_threads_md.",
+        "Return strict JSON only, with keys current_state_md, open_threads_md and closed_threads.",
+        "closed_threads lists every open-thread bullet you removed or merged, quoting the original bullet text in thread and saying why in reason (the event that closes it, or the bullet it was merged into). Rewording a thread is not removing it. Use an empty list when every thread is kept.",
         "current_state_md must start with '# Current State'.",
         "open_threads_md must start with '# Open Threads'.",
       ].join(" "),
@@ -458,13 +460,22 @@ function createDreamTextFormat() {
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["current_state_md", "open_threads_md"],
+        required: ["current_state_md", "open_threads_md", "closed_threads"],
         properties: {
           current_state_md: {
             type: "string",
           },
           open_threads_md: {
             type: "string",
+          },
+          closed_threads: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["thread", "reason"],
+              properties: { thread: { type: "string" }, reason: { type: "string" } },
+            },
           },
         },
       },
@@ -598,9 +609,14 @@ function parseDreamJson(content) {
     throw new Error("Dream response must include current_state_md and open_threads_md strings.");
   }
 
+  const closedThreads = Array.isArray(parsed.closed_threads) ? parsed.closed_threads : [];
+
   return {
     currentState: parsed.current_state_md.trim(),
     openThreads: parsed.open_threads_md.trim(),
+    closedThreads: closedThreads
+      .filter((entry) => typeof entry?.thread === "string" && entry.thread.trim() && typeof entry?.reason === "string" && entry.reason.trim())
+      .map((entry) => ({ thread: entry.thread.trim(), reason: entry.reason.trim() })),
   };
 }
 
@@ -622,10 +638,25 @@ function validateDreamStructure(output) {
   }
 }
 
+// Compaction must never lose unfinished work silently: every open thread that disappears has to
+// be declared closed or merged, with a reason, or the whole result is refused and nothing is written.
+function assertOpenThreadsAccounted(beforeThreads, output) {
+  const kept = extractOpenThreads(output.openThreads).length;
+  const missing = beforeThreads.length - kept - output.closedThreads.length;
+
+  if (missing > 0) {
+    throw new Error(
+      `Dream dropped ${missing} open thread(s) without declaring them closed (${beforeThreads.length} before, ${kept} kept, ${output.closedThreads.length} closed); nothing was written.`,
+    );
+  }
+}
+
 async function compactDreamOutput({ apiKey, baseUrl, beforeBytes, model, report, targetChars, threadEvidence, recentEvidence }) {
   const maxBytes = getMaxOutputBytes(targetChars);
   let previousBytes = beforeBytes;
   let previousOutput = null;
+  let baselineThreads = extractOpenThreads(report.files["open_threads.md"].content);
+  const closedThreads = [];
 
   for (let pass = 1; pass <= DREAM_COMPACTION_MAX_PASSES; pass += 1) {
     const messages = previousOutput
@@ -635,6 +666,9 @@ async function compactDreamOutput({ apiKey, baseUrl, beforeBytes, model, report,
     const content = await callDreamModel({ apiKey, baseUrl, messages, model });
     const output = parseDreamJson(content);
     validateDreamStructure(output);
+    assertOpenThreadsAccounted(baselineThreads, output);
+    closedThreads.push(...output.closedThreads);
+    output.closedThreads = [...closedThreads];
     output.currentState = withoutReviewMarker(output.currentState);
     if (recentEvidence?.reviewedThrough) {
       output.currentState += `\n\n<!-- hippocamp-dream-through: ${recentEvidence.reviewedThrough} -->`;
@@ -658,6 +692,8 @@ async function compactDreamOutput({ apiKey, baseUrl, beforeBytes, model, report,
 
     previousBytes = afterBytes;
     previousOutput = output;
+    // A retry rewrites the previous pass, so its threads are the new baseline.
+    baselineThreads = extractOpenThreads(output.openThreads);
   }
 
   throw new Error(
@@ -710,6 +746,7 @@ function toPublicReport(result) {
     afterWakeUpChars: result.afterWakeUpChars,
     beforeBytes: result.beforeBytes,
     changed: result.changed,
+    closedThreads: result.closedThreads,
     compactionPasses: result.compactionPasses,
     context: {
       evidenceBudgetChars: result.threadEvidence.evidenceBudgetChars,
@@ -785,6 +822,7 @@ async function dreamProject(slug, options) {
     beforeBytes,
     changed: report.files["current_state.md"].content !== `${compacted.output.currentState}\n`
       || report.files["open_threads.md"].content !== `${compacted.output.openThreads}\n`,
+    closedThreads: compacted.output.closedThreads,
     compactionPasses: compacted.passes,
     report,
     skipped: null,
