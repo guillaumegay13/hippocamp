@@ -1,0 +1,23 @@
+.npmignore
+  s_df17c2731cbf68::t_e1c22e7794a809 23
+README.md
+  s_df17c2731cbf68::t_e1c22e7794a809 25-30
+AGENTS.md
+  s_df17c2731cbf68::t_9526328f579600 49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a483de935928c41129d3aaea637da0e4b25381af",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
