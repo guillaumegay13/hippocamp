@@ -45,8 +45,7 @@ This repository is a local-first MCP package for Git-backed agent memory. Keep c
 - `assets/railway/run-dream.sh`: short-lived hosted Dream runner that clones Lagoon and opens one Dream PR per project.
 - `Dockerfile.railway` and `railway.json`: optional Railway cron deployment for overnight Dream runs.
 - `assets/brand/hippocamp-mascot.png`: README mascot asset.
-- `assets/brand/hippocamp-demo.gif`: README demo, loaded from GitHub and kept out of the npm package by `.npmignore` (keep `.npmignore` in sync with `.gitignore`).
-- `assets/brand/lagoon-graph.jpg`: README Obsidian graph view of a real Lagoon, loaded from GitHub and kept out of the npm package the same way.
+- `assets/brand/lagoon-graph.jpg`: README Obsidian graph view of a real Lagoon, loaded from GitHub and kept out of the npm package by `.npmignore` (keep `.npmignore` in sync with `.gitignore`).
 - `docs/`: user docs (setup, how it works, Dream, results, development). The README stays a short overview that links to them.
 
 ## Project Invariants
