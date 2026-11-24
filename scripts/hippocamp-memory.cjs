@@ -35,6 +35,8 @@ const QUESTION_STOPWORDS = new Set(
   "the and for with does did our are was were what which when where why how who can this that from have has had should would could there their them they you your use used about into after before over then than any all".split(" "),
 );
 const GIT_NETWORK_TIMEOUT_MS = 10_000;
+const GIT_PUSH_TIMEOUT_MS = 30_000;
+const LAGOON_LOCK_DIRECTORY = ".hippocamp-sync.lock";
 const searchIndexCache = new Map();
 const PROCESS_SESSION_ID = `mcp-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
@@ -210,6 +212,9 @@ function normalizeRelativePath(value) {
 
   if (normalized.split("/").includes(".git")) {
     throw new Error("path must not target git internals.");
+  }
+  if (normalized.split("/").includes(LAGOON_LOCK_DIRECTORY)) {
+    throw new Error("path must not target the Lagoon sync lock.");
   }
 
   return normalized;
@@ -471,11 +476,12 @@ async function runGit(args, cwd, options = {}) {
       stdout: error.stdout?.trim() || "",
       stderr: error.stderr?.trim() || error.message,
       code: error.code,
+      timedOut: Boolean(options.timeout && error.killed),
     };
   }
 }
 
-function runNetworkGit(args, cwd) {
+function runNetworkGit(args, cwd, timeout = GIT_NETWORK_TIMEOUT_MS) {
   // Use existing credentials without opening a prompt in the agent session.
   const env = {
     ...process.env,
@@ -484,7 +490,7 @@ function runNetworkGit(args, cwd) {
     SSH_ASKPASS: "true",
     GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes",
   };
-  return runGit(args, cwd, { timeout: GIT_NETWORK_TIMEOUT_MS, env });
+  return runGit(args, cwd, { timeout, env });
 }
 
 async function getGitRepoRoot(startPath) {
@@ -533,13 +539,17 @@ async function getLagoonRepo() {
   return { repoCandidate, repoRoot };
 }
 
-async function withLagoonLock(action) {
+async function withLagoonLock(action, { createRoot = false } = {}) {
   const repo = await getLagoonRepo();
   const lagoon = realpathExisting(repo.repoCandidate);
   let lockfilePath;
   if (repo.reason) {
-    const lockName = crypto.createHash("sha256").update(lagoon).digest("hex");
-    lockfilePath = path.join(os.tmpdir(), `hippocamp-lagoon-${lockName}.lock`);
+    if (createRoot) {
+      await fs.mkdir(lagoon, { recursive: true });
+    } else if (!fsSync.existsSync(lagoon)) {
+      return action(repo);
+    }
+    lockfilePath = path.join(lagoon, LAGOON_LOCK_DIRECTORY);
   } else {
     // Use the Git directory so different agents agree even when they use different temp directories.
     const gitDir = await runGit(["rev-parse", "--absolute-git-dir"], repo.repoRoot);
@@ -706,10 +716,11 @@ async function pushToUpstream(repoRoot, result) {
     };
   }
 
-  let pushResult = await runNetworkGit(["push"], repoRoot);
+  let pushResult = await runNetworkGit(["push"], repoRoot, GIT_PUSH_TIMEOUT_MS);
 
   if (!pushResult.ok) {
     const pending = { ...result, pushed: false, pushError: pushResult.stderr };
+    if (pushResult.timedOut) return { ...pending, reason: "push_timeout" };
     const fetch = await runNetworkGit(["fetch", "--quiet"], repoRoot);
     if (!fetch.ok) return { ...pending, reason: "fetch_failed", pullError: fetch.stderr };
 
@@ -743,13 +754,13 @@ async function pushToUpstream(repoRoot, result) {
       };
     }
 
-    pushResult = await runNetworkGit(["push"], repoRoot);
+    pushResult = await runNetworkGit(["push"], repoRoot, GIT_PUSH_TIMEOUT_MS);
 
     if (!pushResult.ok) {
       return {
         ...result,
         pushed: false,
-        reason: "push_failed",
+        reason: pushResult.timedOut ? "push_timeout" : "push_failed",
         pushError: pushResult.stderr,
       };
     }
@@ -801,7 +812,7 @@ async function listDirectoryEntries(scope, relativePath, projectRoot) {
     targetPath === root ? "" : path.relative(root, targetPath).split(path.sep).join(path.posix.sep);
 
   return entries
-    .filter((entry) => entry.name !== ".git")
+    .filter((entry) => entry.name !== ".git" && entry.name !== LAGOON_LOCK_DIRECTORY)
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((entry) => ({
       name: entry.name,
@@ -1244,40 +1255,38 @@ async function readMemoryFile({ scope, path: relativePath, projectRoot }) {
 }
 
 async function writeMemoryFile({ scope, path: relativePath, content, projectRoot, sync = true }) {
-  const target = resolveScopedPath(scope, relativePath, projectRoot);
-
-  // Event logs are append-only in every scope, including a project's log reached from the global root.
-  const fromGlobal = path.relative(getGlobalRoot(), target.absolutePath).split(path.sep);
-
-  if (target.path === "events" || target.path.startsWith("events/") || fromGlobal[0] === "events" || (fromGlobal[0] === "projects" && fromGlobal[2] === "events")) {
-    throw new Error("events/ is append-only. Use append_event with a title and keywords instead.");
-  }
-
   const nextContent = ensureTrailingNewline(requireNonEmptyString(content, "content"));
 
-  const syncResult = await withLagoonLock(async (repo) => {
+  return withLagoonLock(async (repo) => {
     assertLagoonWritable(repo);
+    const target = resolveScopedPath(scope, relativePath, projectRoot);
+
+    // Event logs are append-only in every scope, including a project's log reached from the global root.
+    const fromGlobal = path.relative(getGlobalRoot(), target.absolutePath).split(path.sep);
+    if (target.path === "events" || target.path.startsWith("events/") || fromGlobal[0] === "events" || (fromGlobal[0] === "projects" && fromGlobal[2] === "events")) {
+      throw new Error("events/ is append-only. Use append_event with a title and keywords instead.");
+    }
+
     await ensureParentDirectory(target.absolutePath);
     await fs.writeFile(target.absolutePath, nextContent, "utf8");
 
-    return sync
-      ? syncMemoryLocked({
+    const syncResult = sync
+      ? await syncMemoryLocked({
           scope,
           projectRoot,
           paths: [target.absolutePath],
           message: `hippocamp: update ${scope} memory ${target.path}`,
         }, repo)
       : { attempted: false, skipped: true, reason: "sync_disabled" };
-  });
-
-  return {
-    scope,
-    root: target.root,
-    path: target.path,
-    absolutePath: target.absolutePath,
-    bytes: Buffer.byteLength(nextContent, "utf8"),
-    sync: syncResult,
-  };
+    return {
+      scope,
+      root: target.root,
+      path: target.path,
+      absolutePath: target.absolutePath,
+      bytes: Buffer.byteLength(nextContent, "utf8"),
+      sync: syncResult,
+    };
+  }, { createRoot: true });
 }
 
 async function appendEvent({
@@ -1303,10 +1312,10 @@ async function appendEvent({
   const attributionSection = formatAttributionSection(attribution);
   const eventBody = attributionSection ? `${attributionSection}\n\n${bodyWithKeywords}` : bodyWithKeywords;
   const relativePath = `events/${date}.md`;
-  const target = resolveScopedPath(scope, relativePath, projectRoot);
 
-  const { eventBlock, indexPath, syncResult } = await withLagoonLock(async (repo) => {
+  return withLagoonLock(async (repo) => {
     assertLagoonWritable(repo);
+    const target = resolveScopedPath(scope, relativePath, projectRoot);
     await ensureParentDirectory(target.absolutePath);
     const existing = await readFileIfExists(target.absolutePath);
     const takenIds = new Set(parseEventBlocks(existing || "").map((event) => event.id));
@@ -1334,23 +1343,20 @@ async function appendEvent({
         }, repo)
       : { attempted: false, skipped: true, reason: "sync_disabled" };
 
-    return { eventBlock: block, indexPath, syncResult };
-  });
-
-  const parsed = parseEventBlocks(eventBlock)[0];
-
-  return {
-    scope,
-    root: target.root,
-    path: target.path,
-    timestamp,
-    title: title?.trim() || null,
-    agent: parsed?.agent || attribution.agent,
-    session: parsed?.session || attribution.session,
-    keywords: parsed?.keywords || [],
-    indexPath,
-    sync: syncResult,
-  };
+    const parsed = parseEventBlocks(block)[0];
+    return {
+      scope,
+      root: target.root,
+      path: target.path,
+      timestamp,
+      title: title?.trim() || null,
+      agent: parsed?.agent || attribution.agent,
+      session: parsed?.session || attribution.session,
+      keywords: parsed?.keywords || [],
+      indexPath,
+      sync: syncResult,
+    };
+  }, { createRoot: true });
 }
 
 async function readJsonFileIfExists(filePath) {

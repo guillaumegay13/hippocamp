@@ -234,8 +234,7 @@ test("sync leaves a rebase started outside Hippocamp untouched", async (t) => {
   assert.equal(git(["status", "--porcelain"]), before);
 });
 
-test("parallel processes push every event and its index", async (t) => {
-  const { git, lagoon, remote } = await createSyncClones(t);
+async function appendInParallel(tempRoot, titles) {
   const run = promisify(execFile);
   const worker = `
     const memory = require(process.argv[1]);
@@ -244,14 +243,23 @@ test("parallel processes push every event and its index", async (t) => {
       .then((result) => console.log(JSON.stringify(result.sync)))
       .catch((error) => { console.error(error.message); process.exitCode = 1; });
   `;
-  const titles = Array.from({ length: 8 }, (_, i) => `Checkpoint ${i}`);
   const modulePath = require.resolve("../scripts/hippocamp-memory.cjs");
-  const results = await Promise.allSettled(titles.map((title) => run(process.execPath, ["-e", worker, modulePath, title], {
-    env: { ...process.env, TMPDIR: path.join(os.tmpdir(), title) },
-  })));
-  for (const result of results) {
+  const results = await Promise.allSettled(titles.map(async (title) => {
+    const tmp = await fs.mkdtemp(path.join(tempRoot, "worker-"));
+    return run(process.execPath, ["-e", worker, modulePath, title], {
+      env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
+    });
+  }));
+  return results.map((result) => {
     assert.equal(result.status, "fulfilled", result.reason?.stderr);
-    const sync = JSON.parse(result.value.stdout);
+    return JSON.parse(result.value.stdout);
+  });
+}
+
+test("parallel processes push every event and its index", async (t) => {
+  const { git, lagoon, remote } = await createSyncClones(t);
+  const titles = Array.from({ length: 8 }, (_, i) => `Checkpoint ${i}`);
+  for (const sync of await appendInParallel(path.dirname(lagoon), titles)) {
     assert.equal(sync.committed, true, JSON.stringify(sync));
     assert.equal(sync.pushed, true, JSON.stringify(sync));
   }
@@ -262,6 +270,22 @@ test("parallel processes push every event and its index", async (t) => {
   assert.deepEqual(index.events.map((event) => event.heading).sort(), titles);
   const eventLog = git(["show", "main:events/2026-11-24.md"], remote);
   for (const title of titles) assert.match(eventLog, new RegExp(title));
+});
+
+test("non-Git Lagoon appends share a lock across different temp directories", async (t) => {
+  withGitIdentity(t);
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-no-git-"));
+  t.after(() => fs.rm(tempRoot, { recursive: true, force: true, maxRetries: 5 }));
+  const lagoon = path.join(tempRoot, "lagoon");
+  process.env.HIPPOCAMP_GLOBAL_ROOT = lagoon;
+  const titles = Array.from({ length: 8 }, (_, i) => `Checkpoint ${i}`);
+
+  for (const sync of await appendInParallel(tempRoot, titles)) {
+    assert.equal(sync.reason, "not_git_repo");
+  }
+
+  const index = JSON.parse(await fs.readFile(path.join(lagoon, "events", "2026-11-24.index.json"), "utf8"));
+  assert.deepEqual(index.events.map((event) => event.heading).sort(), titles);
 });
 
 test("wake_up pulls memory another machine pushed", async (t) => {
