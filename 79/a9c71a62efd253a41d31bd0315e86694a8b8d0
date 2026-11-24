@@ -1,0 +1,21 @@
+test/memory-boundaries.test.cjs
+  s_df17c2731cbf68::t_85184361e17ffb 1-53
+scripts/hippocamp-memory.cjs
+  s_df17c2731cbf68::t_f0659d9c3b01b5 1087-1090,1279-1280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "79a9c71a62efd253a41d31bd0315e86694a8b8d0",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

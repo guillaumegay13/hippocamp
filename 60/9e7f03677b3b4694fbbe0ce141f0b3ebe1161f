@@ -1,0 +1,23 @@
+scripts/eval-continuity.cjs
+  s_df17c2731cbf68::t_c61116fe666a70 108-113,195,197-202,515-517,584-603,625,691-692,696,725
+test/eval-continuity.test.cjs
+  s_df17c2731cbf68::t_b8718cb5bb0a76 13,413-437
+docs/development.md
+  s_df17c2731cbf68::t_6b90e377ee8812 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "609e7f03677b3b4694fbbe0ce141f0b3ebe1161f",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

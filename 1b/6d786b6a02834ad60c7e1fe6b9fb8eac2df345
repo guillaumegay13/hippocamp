@@ -1,0 +1,21 @@
+package-lock.json
+  s_1c4f4c9ef45655::t_e1eff261d7f3b1 3,9
+package.json
+  s_1c4f4c9ef45655::t_e420d5b7a52cd2 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1b6d786b6a02834ad60c7e1fe6b9fb8eac2df345",
+  "prompts": {},
+  "sessions": {
+    "s_1c4f4c9ef45655": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12f66-953c-78e0-9634-d328c349d4bf",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

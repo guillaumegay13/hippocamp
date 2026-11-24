@@ -1,0 +1,25 @@
+scripts/install-claude.cjs
+  s_df17c2731cbf68::t_d063949ef9d71f 276-283
+scripts/eval-continuity.cjs
+  s_df17c2731cbf68::t_d3dbedbff2f1c8 1-127
+  s_df17c2731cbf68::t_795ecde573f6ee 128-130
+test/eval-continuity.test.cjs
+  s_df17c2731cbf68::t_e5bbdaef0e5bc0 22
+  s_df17c2731cbf68::t_ec19af67ab6cbb 1-21,23-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dd75da0f42b738828efe61cdff6fa131d5592060",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+bench/continuity/scenarios/relay/seed/src/server.ts
+  s_df17c2731cbf68::t_777104bec4aa8d 1-27
+bench/continuity/scenarios/relay/seed/src/deliver.ts
+  s_df17c2731cbf68::t_777104bec4aa8d 1-23
+bench/continuity/scenarios/relay/seed/README.md
+  s_df17c2731cbf68::t_777104bec4aa8d 1-15
+bench/continuity/scenarios/relay/seed/package.json
+  s_df17c2731cbf68::t_777104bec4aa8d 1-8,10-15
+  s_df17c2731cbf68::t_e337f926e54ff6 9
+bench/continuity/scenarios/relay/seed/src/store.ts
+  s_df17c2731cbf68::t_777104bec4aa8d 1-34
+bench/continuity/scenarios/relay/seed/test/deliver.test.ts
+  s_df17c2731cbf68::t_777104bec4aa8d 1-46
+bench/continuity/scenarios/relay/seed/src/routes/webhooks.ts
+  s_df17c2731cbf68::t_777104bec4aa8d 1-45
+bench/continuity/scenarios/relay/seed/tsconfig.json
+  s_df17c2731cbf68::t_777104bec4aa8d 1-12
+bench/continuity/scenarios/relay/seed/.gitignore
+  s_df17c2731cbf68::t_777104bec4aa8d 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1bbc594e08b78c0a40aa0326b68a9bd4aecdf7e9",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+test/eval-continuity.test.cjs
+  s_df17c2731cbf68::t_fb97e6b21fbdcb 8,15,17,253-316
+  s_df17c2731cbf68::t_7eb7123b3325ea 162-167,179,185,237,240
+  s_df17c2731cbf68::t_97f3c9f5ff1386 317
+scripts/eval-continuity.cjs
+  s_df17c2731cbf68::t_626b3844f094ef 166-219,244,246,249,252-253,266-271,273,287-294,298,763,765
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "39dcd21e3782995e26b7fdebdcc4bbb4767b7027",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

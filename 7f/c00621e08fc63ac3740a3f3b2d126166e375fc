@@ -1,0 +1,30 @@
+AGENTS.md
+  s_75023a3665dfd2::t_dac389f13bf41e 88
+scripts/install-common.cjs
+  s_75023a3665dfd2::t_7825e16fc741b6 7,47,80-92,106
+test/install-common.test.cjs
+  s_75023a3665dfd2::t_1c3349a6e62224 130-175
+scripts/hippocamp-memory.cjs
+  s_75023a3665dfd2::t_63bd1fc777f600 761-764,769-825,1711
+  s_75023a3665dfd2::t_f01d16c122004a 765-768
+docs/setup.md
+  s_75023a3665dfd2::t_dac389f13bf41e 19
+docs/how-it-works.md
+  s_75023a3665dfd2::t_acc19609a10ed2 81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7fc00621e08fc63ac3740a3f3b2d126166e375fc",
+  "prompts": {},
+  "sessions": {
+    "s_75023a3665dfd2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf891f97-db60-42dd-b8ef-f179d6188105",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

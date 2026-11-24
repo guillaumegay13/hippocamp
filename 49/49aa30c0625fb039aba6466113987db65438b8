@@ -1,0 +1,28 @@
+test/memory-boundaries.test.cjs
+  s_df17c2731cbf68::t_d5e305de74a6e8 54-81
+scripts/hippocamp-memory.cjs
+  s_df17c2731cbf68::t_a5016014856cfe 231,235-251,1309-1310,1343-1344,1697-1698,1712-1713
+  s_df17c2731cbf68::t_8d917195b403f5 1769
+scripts/hippocamp-dream.cjs
+  s_df17c2731cbf68::t_8d917195b403f5 230-231
+test/dream.test.cjs
+  s_df17c2731cbf68::t_fd6d2fa9f077ff 191-209
+AGENTS.md
+  s_df17c2731cbf68::t_d2c422f94b42f0 53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4949aa30c0625fb039aba6466113987db65438b8",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

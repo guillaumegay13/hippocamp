@@ -1,0 +1,32 @@
+docs/how-it-works.md
+  s_75023a3665dfd2::t_11e4342c5cb73e 81
+test/install-common.test.cjs
+  s_75023a3665dfd2::t_a9f90aa34f2cce 176-224
+AGENTS.md
+  s_75023a3665dfd2::t_11e4342c5cb73e 88
+  s_75023a3665dfd2::t_a9f90aa34f2cce 51
+scripts/hippocamp-memory.cjs
+  s_75023a3665dfd2::t_bf990bc66cd369 765-766,774,794,801-804,807,816,820-824
+docs/setup.md
+  s_75023a3665dfd2::t_11e4342c5cb73e 19
+scripts/install-common.cjs
+  s_75023a3665dfd2::t_bf990bc66cd369 81-83,85,94-101,103-104
+  s_75023a3665dfd2::t_e175c7649aad08 86-92
+  s_75023a3665dfd2::t_b44c13a4bf8167 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c9ca58be7bc607dd1b81e5a224c940da463946b9",
+  "prompts": {},
+  "sessions": {
+    "s_75023a3665dfd2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf891f97-db60-42dd-b8ef-f179d6188105",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

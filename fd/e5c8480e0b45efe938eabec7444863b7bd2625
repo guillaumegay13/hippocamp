@@ -1,0 +1,25 @@
+assets/railway/run-dream.sh
+  s_1c4f4c9ef45655::t_5d6e0a9b9c6f0f 116-117
+assets/github-actions/hippocamp-dream.yml
+  s_1c4f4c9ef45655::t_5d6e0a9b9c6f0f 109-110
+docs/dream.md
+  s_1c4f4c9ef45655::t_fe072441ec8cd1 20-21
+test/dream-runner.test.cjs
+  s_1c4f4c9ef45655::t_60c2b9c2e4b83b 1-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fde5c8480e0b45efe938eabec7444863b7bd2625",
+  "prompts": {},
+  "sessions": {
+    "s_1c4f4c9ef45655": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12f66-953c-78e0-9634-d328c349d4bf",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

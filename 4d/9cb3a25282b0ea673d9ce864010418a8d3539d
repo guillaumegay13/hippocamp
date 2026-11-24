@@ -1,0 +1,36 @@
+scripts/eval-continuity.cjs
+  s_df17c2731cbf68::t_540020a633126b 14
+  s_df17c2731cbf68::t_4f1c98f1ca8b2a 61,311-313,315-321,539,659,742-749
+.npmignore
+  s_df17c2731cbf68::t_8ba7b8f2661bd7 26-28
+test/eval-continuity.test.cjs
+  s_df17c2731cbf68::t_ef02b94e00edbd 9
+  s_df17c2731cbf68::t_1a45b2b3094c56 222-240,243-246
+  s_df17c2731cbf68::t_38e2094679cff5 241-242
+scripts/continuity-judge.cjs
+  s_df17c2731cbf68::t_4f1c98f1ca8b2a 49,58
+test/continuity-adapters.test.cjs
+  s_df17c2731cbf68::t_c523ff46103bd0 7,16,41-42,138-225
+scripts/continuity-adapters.cjs
+  s_df17c2731cbf68::t_5f9b1c41e779cf 4,11,70-139,227-275,290
+AGENTS.md
+  s_df17c2731cbf68::t_c6647c895b1cba 32-33
+docs/development.md
+  s_df17c2731cbf68::t_8a8573b75034bc 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4d9cb3a25282b0ea673d9ce864010418a8d3539d",
+  "prompts": {},
+  "sessions": {
+    "s_df17c2731cbf68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aaf75ffb-1f05-4901-8b25-3d20b3045952",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}

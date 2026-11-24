@@ -1,0 +1,21 @@
+scripts/hippocamp-dream.cjs
+  s_1c4f4c9ef45655::t_3cc50111171810 665-673
+test/dream.test.cjs
+  s_1c4f4c9ef45655::t_dfc48198a0a4bc 87-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "04e69e6b739b8383365be872e2f116dbfe7ba75c",
+  "prompts": {},
+  "sessions": {
+    "s_1c4f4c9ef45655": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12f66-953c-78e0-9634-d328c349d4bf",
+        "model": "unknown"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
