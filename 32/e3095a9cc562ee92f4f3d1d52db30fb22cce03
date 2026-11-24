@@ -1,0 +1,43 @@
+docs/dream.md
+  s_f70713898ecb5d::t_be7e1a8bf2860b 14,35
+  s_1dbf6fe49b4975::t_60e92d09a5b68f 36
+test/dream.test.cjs
+  s_f70713898ecb5d::t_65344c83ef9a19 2,7,75-106,108-115,117,119-123,140
+  s_f70713898ecb5d::t_5bc77507b2d5f7 107,116,118,124-139
+  s_f70713898ecb5d::t_b28a86d962f514 141
+scripts/hippocamp-dream.cjs
+  s_f70713898ecb5d::t_d3635785f42c6b 258,380,426,690,850-851,883-889,893,897,903-904,907
+scripts/hippocamp-memory.cjs
+  s_f70713898ecb5d::t_3d210f66328f0c 40,1258-1270,1272,1284-1291,1965-1966
+package.json
+  s_f70713898ecb5d::t_e4b3281b4ae3ba 3
+assets/github-actions/hippocamp-dream.yml
+  s_f70713898ecb5d::t_3c1122abb46c00 70,103,109-116,180-184
+  s_f70713898ecb5d::t_532d511f70d762 69
+package-lock.json
+  s_f70713898ecb5d::t_121848f5cce9e4 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "32e3095a9cc562ee92f4f3d1d52db30fb22cce03",
+  "prompts": {},
+  "sessions": {
+    "s_1dbf6fe49b4975": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c76-463f-7db2-bff4-5a7d3e85b98f",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    },
+    "s_f70713898ecb5d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c7b-9ee0-7e71-b0d1-7ea8d35cb666",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
