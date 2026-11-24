@@ -1,0 +1,29 @@
+scripts/hippocamp-memory.cjs
+  s_f70713898ecb5d::t_cbf121a8fe6f3f 9,37,478-489,522-523,536-593,596-597,601-602,609,613-618,630-631,677,709,712-737,739-742,746,1258-1261,1263-1271,1308-1310,1327-1337,1826-1832,1840-1842,1844-1850,1852-1853,1855-1857,1864,1869-1870,1877
+docs/how-it-works.md
+  s_f70713898ecb5d::t_cbf121a8fe6f3f 73-77
+test/sync-memory.test.cjs
+  s_f70713898ecb5d::t_cbf121a8fe6f3f 3,7,137-265
+  s_f70713898ecb5d::t_a0ad6f8fa68ebe 266
+package.json
+  s_f70713898ecb5d::t_57c75c6cd0e1bb 3
+  s_f70713898ecb5d::t_cbf121a8fe6f3f 51
+package-lock.json
+  s_f70713898ecb5d::t_fca6896cdf1ada 3,9,14,558-563,845-855,918-926,1093-1098
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "249baa8ce1234e3a08e0b8f29390af780b4eb58c",
+  "prompts": {},
+  "sessions": {
+    "s_f70713898ecb5d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c7b-9ee0-7e71-b0d1-7ea8d35cb666",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
