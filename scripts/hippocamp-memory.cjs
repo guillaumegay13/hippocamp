@@ -6,6 +6,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { promisify } = require("node:util");
 const MiniSearch = require("minisearch");
+const lockfile = require("proper-lockfile");
 
 const execFileAsync = promisify(execFile);
 
@@ -33,8 +34,7 @@ const SEARCH_MIN_RARE_WORD_COVERAGE = 0.3;
 const QUESTION_STOPWORDS = new Set(
   "the and for with does did our are was were what which when where why how who can this that from have has had should would could there their them they you your use used about into after before over then than any all".split(" "),
 );
-const EVENT_LOCK_RETRY_MS = 10;
-const EVENT_LOCK_STALE_MS = 10_000;
+const GIT_NETWORK_TIMEOUT_MS = 10_000;
 const searchIndexCache = new Map();
 const PROCESS_SESSION_ID = `mcp-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
@@ -475,6 +475,18 @@ async function runGit(args, cwd, options = {}) {
   }
 }
 
+function runNetworkGit(args, cwd) {
+  // Use existing credentials without opening a prompt in the agent session.
+  const env = {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "true",
+    SSH_ASKPASS: "true",
+    GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes",
+  };
+  return runGit(args, cwd, { timeout: GIT_NETWORK_TIMEOUT_MS, env });
+}
+
 async function getGitRepoRoot(startPath) {
   const result = await runGit(["rev-parse", "--show-toplevel"], startPath);
 
@@ -507,7 +519,8 @@ function realpathExisting(targetPath, depth = 0) {
 // checkout, a home-directory repo) must never receive memory commits or pushes.
 async function getLagoonRepo() {
   const repoCandidate = getGlobalRepoRoot();
-  const repoRoot = await getGitRepoRoot(repoCandidate);
+  const repoRoot = await getGitRepoRoot(repoCandidate)
+    || (!fsSync.existsSync(repoCandidate) ? findGitRootSync(realpathExisting(repoCandidate)) : null);
 
   if (!repoRoot) {
     return { repoCandidate, reason: "not_git_repo" };
@@ -520,14 +533,72 @@ async function getLagoonRepo() {
   return { repoCandidate, repoRoot };
 }
 
+async function withLagoonLock(action) {
+  const repo = await getLagoonRepo();
+  const lagoon = realpathExisting(repo.repoCandidate);
+  let lockfilePath;
+  if (repo.reason) {
+    const lockName = crypto.createHash("sha256").update(lagoon).digest("hex");
+    lockfilePath = path.join(os.tmpdir(), `hippocamp-lagoon-${lockName}.lock`);
+  } else {
+    // Use the Git directory so different agents agree even when they use different temp directories.
+    const gitDir = await runGit(["rev-parse", "--absolute-git-dir"], repo.repoRoot);
+    if (!gitDir.ok) throw new Error(gitDir.stderr);
+    lockfilePath = path.join(gitDir.stdout, "hippocamp-sync.lock");
+  }
+  const release = await lockfile.lock(lagoon, {
+    realpath: false,
+    lockfilePath,
+    stale: 30_000,
+    retries: { retries: 300, factor: 1, minTimeout: 100 },
+  }).catch((error) => {
+    if (error.code === "ELOCKED") {
+      throw new Error("Another Hippocamp process is using this Lagoon. Retry when it finishes.", { cause: error });
+    }
+    throw error;
+  });
+
+  try {
+    const blocked = repo.reason ? null : await getGitBlock(repo.repoRoot);
+    return await action({ ...repo, blocked });
+  } finally {
+    await release();
+  }
+}
+
+function assertLagoonWritable({ blocked }) {
+  if (blocked) {
+    const paths = blocked.conflictingPaths.length ? ` Conflicting files: ${blocked.conflictingPaths.join(", ")}.` : "";
+    throw new Error(`Lagoon has an unfinished Git operation. Resolve it before writing memory.${paths}`);
+  }
+}
+
+async function getConflictingPaths(repoRoot) {
+  const result = await runGit(["ls-files", "--unmerged", "-z"], repoRoot);
+  if (!result.ok) throw new Error(result.stderr);
+  return [...new Set(result.stdout.split("\0").filter(Boolean).map((entry) => entry.slice(entry.indexOf("\t") + 1)))];
+}
+
+async function getGitBlock(repoRoot) {
+  const gitPaths = await runGit([
+    "rev-parse", "--git-path", "rebase-merge", "--git-path", "rebase-apply", "--git-path", "MERGE_HEAD",
+    "--git-path", "CHERRY_PICK_HEAD", "--git-path", "REVERT_HEAD", "--git-path", "sequencer",
+  ], repoRoot);
+  if (!gitPaths.ok) throw new Error(gitPaths.stderr);
+  const conflictingPaths = await getConflictingPaths(repoRoot);
+  if (conflictingPaths.length || gitPaths.stdout.split("\n").some((file) => fsSync.existsSync(path.resolve(repoRoot, file)))) {
+    return { reason: "git_operation_in_progress", conflictingPaths };
+  }
+}
+
 // Brings in memory pushed from other machines. Fast-forward only: local commits that have not
 // been pushed yet are reconciled by the push path, never here. Offline or slow remotes are skipped.
-async function pullMemory() {
-  const { repoRoot, reason } = await getLagoonRepo();
-
-  if (!repoRoot) {
+async function pullMemory({ repoRoot, reason, blocked }) {
+  if (reason) {
     return { pulled: false, reason };
   }
+
+  if (blocked) return { pulled: false, ...blocked };
 
   const upstream = await runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repoRoot);
 
@@ -535,14 +606,16 @@ async function pullMemory() {
     return { pulled: false, reason: "no_upstream" };
   }
 
-  // Never prompt: saved credentials (credential helpers, SSH agent) still work; anything that would ask fails fast.
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes" };
-  const result = await runGit(["pull", "--ff-only", "--quiet"], repoRoot, { timeout: 10000, env });
+  const result = await runNetworkGit(["pull", "--no-rebase", "--ff-only", "--no-autostash", "--quiet"], repoRoot);
   return result.ok ? { pulled: true } : { pulled: false, reason: "pull_failed", error: result.stderr };
 }
 
-async function syncMemory({ scope, projectRoot, paths, message }) {
-  const { repoCandidate, repoRoot, reason } = await getLagoonRepo();
+function syncMemory(args) {
+  return withLagoonLock((repo) => syncMemoryLocked(args, repo));
+}
+
+async function syncMemoryLocked({ scope, projectRoot, paths, message }, repo) {
+  const { repoCandidate, repoRoot, reason, blocked } = repo;
   const scopeRoot = getScopeRoot(scope, projectRoot);
 
   if (reason) {
@@ -553,6 +626,8 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
       repoRoot: repoRoot || repoCandidate,
     };
   }
+
+  if (blocked) return { attempted: false, skipped: true, ...blocked, repoRoot };
 
   const repoRelativePaths = paths.map((item) => {
     const relativePath =
@@ -599,7 +674,7 @@ async function syncMemory({ scope, projectRoot, paths, message }) {
         skipped: true,
         reason: "no_changes_to_commit",
         repoRoot,
-        pull: await pullMemory(),
+        pull: await pullMemory(repo),
       };
     }
 
@@ -631,22 +706,44 @@ async function pushToUpstream(repoRoot, result) {
     };
   }
 
-  let pushResult = await runGit(["push"], repoRoot);
+  let pushResult = await runNetworkGit(["push"], repoRoot);
 
   if (!pushResult.ok) {
-    const pullResult = await runGit(["pull", "--rebase", "--autostash"], repoRoot);
+    const pending = { ...result, pushed: false, pushError: pushResult.stderr };
+    const fetch = await runNetworkGit(["fetch", "--quiet"], repoRoot);
+    if (!fetch.ok) return { ...pending, reason: "fetch_failed", pullError: fetch.stderr };
 
-    if (!pullResult.ok) {
+    const behind = await runGit(["rev-list", "--count", "HEAD..@{u}"], repoRoot);
+    if (!behind.ok || behind.stdout === "0") return { ...pending, reason: "push_failed" };
+
+    const blocked = await getGitBlock(repoRoot);
+    if (blocked) return { ...pending, ...blocked };
+
+    const status = await runGit(["status", "--porcelain", "--untracked-files=no"], repoRoot);
+    if (!status.ok) return { ...pending, reason: "git_status_failed", pullError: status.stderr };
+    if (status.stdout) return { ...pending, reason: "dirty_worktree" };
+
+    const rebase = await runGit([
+      "-c", "rebase.updateRefs=false", "-c", "rerere.enabled=false", "rebase", "--no-autostash", "@{u}",
+    ], repoRoot);
+    if (!rebase.ok) {
+      const conflictingPaths = await getConflictingPaths(repoRoot);
+      const interrupted = await getGitBlock(repoRoot);
+      if (interrupted) {
+        const abort = await runGit(["rebase", "--abort"], repoRoot);
+        if (!abort.ok) {
+          return { ...pending, reason: "rebase_abort_failed", conflictingPaths, pullError: rebase.stderr, abortError: abort.stderr };
+        }
+      }
       return {
-        ...result,
-        pushed: false,
-        reason: "pull_rebase_failed",
-        pushError: pushResult.stderr,
-        pullError: pullResult.stderr,
+        ...pending,
+        reason: conflictingPaths.length ? "rebase_conflict" : "pull_rebase_failed",
+        conflictingPaths,
+        pullError: rebase.stderr,
       };
     }
 
-    pushResult = await runGit(["push"], repoRoot);
+    pushResult = await runNetworkGit(["push"], repoRoot);
 
     if (!pushResult.ok) {
       return {
@@ -1158,21 +1255,20 @@ async function writeMemoryFile({ scope, path: relativePath, content, projectRoot
 
   const nextContent = ensureTrailingNewline(requireNonEmptyString(content, "content"));
 
-  await ensureParentDirectory(target.absolutePath);
-  await fs.writeFile(target.absolutePath, nextContent, "utf8");
+  const syncResult = await withLagoonLock(async (repo) => {
+    assertLagoonWritable(repo);
+    await ensureParentDirectory(target.absolutePath);
+    await fs.writeFile(target.absolutePath, nextContent, "utf8");
 
-  const syncResult = sync
-    ? await syncMemory({
-        scope,
-        projectRoot,
-        paths: [target.absolutePath],
-        message: `hippocamp: update ${scope} memory ${target.path}`,
-      })
-    : {
-        attempted: false,
-        skipped: true,
-        reason: "sync_disabled",
-      };
+    return sync
+      ? syncMemoryLocked({
+          scope,
+          projectRoot,
+          paths: [target.absolutePath],
+          message: `hippocamp: update ${scope} memory ${target.path}`,
+        }, repo)
+      : { attempted: false, skipped: true, reason: "sync_disabled" };
+  });
 
   return {
     scope,
@@ -1182,39 +1278,6 @@ async function writeMemoryFile({ scope, path: relativePath, content, projectRoot
     bytes: Buffer.byteLength(nextContent, "utf8"),
     sync: syncResult,
   };
-}
-
-// Serialize read-modify-write of one event file across processes. The lock lives
-// in the temp directory so a crashed writer never leaves it in the Lagoon repo.
-async function withEventFileLock(filePath, action) {
-  const lockName = crypto.createHash("sha1").update(filePath).digest("hex");
-  const lockPath = path.join(os.tmpdir(), `hippocamp-event-${lockName}.lock`);
-
-  for (;;) {
-    try {
-      await (await fs.open(lockPath, "wx")).close();
-      break;
-    } catch (error) {
-      if (error.code !== "EEXIST") {
-        throw error;
-      }
-
-      const stats = await statIfExists(lockPath);
-
-      if (stats && Date.now() - stats.mtimeMs > EVENT_LOCK_STALE_MS) {
-        await fs.rm(lockPath, { force: true });
-        continue;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, EVENT_LOCK_RETRY_MS));
-    }
-  }
-
-  try {
-    return await action();
-  } finally {
-    await fs.rm(lockPath, { force: true });
-  }
 }
 
 async function appendEvent({
@@ -1242,9 +1305,9 @@ async function appendEvent({
   const relativePath = `events/${date}.md`;
   const target = resolveScopedPath(scope, relativePath, projectRoot);
 
-  await ensureParentDirectory(target.absolutePath);
-
-  const { eventBlock, indexPath } = await withEventFileLock(target.absolutePath, async () => {
+  const { eventBlock, indexPath, syncResult } = await withLagoonLock(async (repo) => {
+    assertLagoonWritable(repo);
+    await ensureParentDirectory(target.absolutePath);
     const existing = await readFileIfExists(target.absolutePath);
     const takenIds = new Set(parseEventBlocks(existing || "").map((event) => event.id));
 
@@ -1261,21 +1324,18 @@ async function appendEvent({
 
     await fs.writeFile(target.absolutePath, nextContent, "utf8");
 
-    return { eventBlock: block, indexPath: await writeEventIndex(target.absolutePath, target.path) };
-  });
+    const indexPath = await writeEventIndex(target.absolutePath, target.path);
+    const syncResult = sync
+      ? await syncMemoryLocked({
+          scope,
+          projectRoot,
+          paths: [target.absolutePath, indexPath],
+          message: `hippocamp: append ${scope} event ${date}`,
+        }, repo)
+      : { attempted: false, skipped: true, reason: "sync_disabled" };
 
-  const syncResult = sync
-    ? await syncMemory({
-        scope,
-        projectRoot,
-        paths: [target.absolutePath, indexPath],
-        message: `hippocamp: append ${scope} event ${date}`,
-      })
-    : {
-        attempted: false,
-        skipped: true,
-        reason: "sync_disabled",
-      };
+    return { eventBlock: block, indexPath, syncResult };
+  });
 
   const parsed = parseEventBlocks(eventBlock)[0];
 
@@ -1763,7 +1823,13 @@ async function runUpdateCheck({
 }
 
 async function wakeUp({ projectRoot, checkUpdate = checkForUpdate } = {}) {
-  const [pull, update] = await Promise.all([pullMemory(), checkUpdate().catch(() => null)]);
+  const update = checkUpdate().catch(() => null);
+  return withLagoonLock((repo) => wakeUpLocked(projectRoot, update, repo));
+}
+
+async function wakeUpLocked(projectRoot, updateTask, repo) {
+  const pull = await pullMemory(repo);
+  const update = await updateTask;
   const globalRoot = getScopeRoot("global", projectRoot);
   const resolvedProjectRoot = getProjectRoot(projectRoot);
   const projectSlug = getProjectSlug(projectRoot);
@@ -1771,40 +1837,44 @@ async function wakeUp({ projectRoot, checkUpdate = checkForUpdate } = {}) {
   const globalFiles = [];
   const projectFiles = [];
   const missing = [];
+  const conflictingFiles = new Set(
+    (repo.blocked?.conflictingPaths || []).map((file) => path.join(repo.repoRoot, file)),
+  );
+
+  async function readWakeUpFile(scope, relativePath) {
+    try {
+      const target = resolveScopedPath(scope, relativePath, projectRoot);
+      if (conflictingFiles.has(realpathExisting(target.absolutePath))) return null;
+      return await readFileIfExists(target.absolutePath);
+    } catch (error) {
+      if (error.message === SYMLINK_ESCAPE) return null;
+      throw error;
+    }
+  }
 
   for (const relativePath of DEFAULT_GLOBAL_FILES) {
-    // A wake-up file that links outside the Lagoon is reported missing rather than loaded.
-    const file = await readMemoryFile({ scope: "global", path: relativePath, projectRoot }).catch((error) => {
-      if (error.message === SYMLINK_ESCAPE) return { found: false };
-      throw error;
-    });
-
-    if (!file.found) {
+    const content = await readWakeUpFile("global", relativePath);
+    if (content === null) {
       missing.push(`global:${relativePath}`);
       continue;
     }
 
     globalFiles.push({
       path: relativePath,
-      content: file.content,
+      content,
     });
   }
 
   for (const relativePath of projectSlug ? DEFAULT_PROJECT_FILES : []) {
-    // A wake-up file that links outside the Lagoon is reported missing rather than loaded.
-    const file = await readMemoryFile({ scope: "project", path: relativePath, projectRoot }).catch((error) => {
-      if (error.message === SYMLINK_ESCAPE) return { found: false };
-      throw error;
-    });
-
-    if (!file.found) {
+    const content = await readWakeUpFile("project", relativePath);
+    if (content === null) {
       missing.push(`project:${relativePath}`);
       continue;
     }
 
     projectFiles.push({
       path: relativePath,
-      content: file.content,
+      content,
     });
   }
 

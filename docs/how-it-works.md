@@ -70,7 +70,11 @@ Typical agent flow:
 4. Use `append_event` for meaningful milestones, with a title and 1-8 concise keywords.
 5. Update curated files like `current_state.md` and `open_threads.md` before finishing.
 
-Writes sync by default. If sync fails or is skipped, call `sync_memory`. `wake_up` and a `sync_memory` with nothing to send first pull what other machines pushed (fast-forward only, without credential prompts; when the remote cannot be reached, the pull gives up after 10 seconds and the agent continues with local memory), so a second machine starts from current memory. Sync only commits when the Lagoon is the top of its own Git repository; a Lagoon folder inside another repository, such as a code checkout, is never committed or pushed.
+Writes sync by default. Hippocamp processes using the same Lagoon take turns writing memory, committing, pushing, and pulling. `wake_up` and a `sync_memory` with nothing to send pull fast-forward only. Remote Git commands use existing credentials without prompting and time out after 10 seconds. Sync only commits in the Lagoon's own repository.
+
+If a push fails because another clone pushed first, Hippocamp fetches and rebases committed changes from a clean working tree, then retries the push. It never automatically stashes local edits. If its rebase hits a conflict, it aborts the rebase, retains the local commits, and reports the conflicting paths. If the clone already has a Git operation or unresolved conflict, finish or abort that operation before saving or syncing with Hippocamp.
+
+When a write reports `committed: true` and `pushed: false`, the change is saved locally. Run `sync_memory` once the remote is reachable or after reconciling the listed conflicts. Avoid appending the same event again to retry a push.
 
 Event writes update a sibling `events/YYYY-MM-DD.index.json` file. The Markdown event remains the canonical memory; the sidecar is rebuildable. Search ranks indexed events and curated files with BM25 and typo tolerance ([MiniSearch](https://github.com/lucaong/minisearch)), weighting keywords above titles and titles above bodies. It returns small coherent evidence blocks from indexed events; an event found only by its keywords or title returns its first paragraphs. If no indexed result is strong enough, it returns no event result instead of scanning whole event logs.
 
