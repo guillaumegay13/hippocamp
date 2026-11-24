@@ -1,9 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { promisify } = require("node:util");
 const memory = require("../scripts/hippocamp-memory.cjs");
 
 test("sync commits when the Lagoon path goes through a symlink", async (t) => {
@@ -132,6 +133,160 @@ function withGitIdentity(t) {
     }
   });
 }
+
+async function createSyncClones(t) {
+  withGitIdentity(t);
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-sync-"));
+  t.after(() => fs.rm(tempRoot, { recursive: true, force: true, maxRetries: 5 }));
+  const remote = path.join(tempRoot, "remote.git");
+  const lagoon = path.join(tempRoot, "lagoon");
+  const other = path.join(tempRoot, "other");
+  const git = (args, cwd = lagoon) => execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
+  git(["init", "-q", "--bare", "-b", "main", remote], tempRoot);
+  git(["clone", "-q", remote, lagoon], tempRoot);
+  await fs.writeFile(path.join(lagoon, "identity.md"), "Initial identity\n");
+  git(["add", "identity.md"]);
+  git(["commit", "-qm", "init"]);
+  git(["push", "-qu", "origin", "main"]);
+  git(["clone", "-q", remote, other], tempRoot);
+  process.env.HIPPOCAMP_GLOBAL_ROOT = lagoon;
+  return { git, lagoon, other, remote };
+}
+
+test("sync preserves a dirty curated file when Dream changes it upstream", async (t) => {
+  const { git, lagoon, other } = await createSyncClones(t);
+  await fs.writeFile(path.join(other, "identity.md"), "Dream rewrite\n");
+  git(["commit", "-qam", "Dream rewrite"], other);
+  git(["push", "-q"], other);
+  await fs.writeFile(path.join(lagoon, "identity.md"), "Local correction\n");
+  // Also guard against an autostash preference in the user's Git config.
+  git(["config", "rebase.autoStash", "true"]);
+  git(["config", "merge.autoStash", "true"]);
+
+  const result = await memory.appendEvent({ scope: "global", content: "Keep me.", title: "Local event" });
+
+  assert.equal(result.sync.committed, true);
+  assert.equal(result.sync.pushed, false);
+  assert.equal(result.sync.reason, "dirty_worktree");
+  assert.match(git(["status", "--porcelain"]), /^M identity\.md$/);
+  assert.equal(await fs.readFile(path.join(lagoon, "identity.md"), "utf8"), "Local correction\n");
+  assert.equal(git(["stash", "list"]), "");
+  assert.equal(git(["rev-list", "--count", "@{u}..HEAD"]), "1");
+});
+
+test("sync rolls back a conflicting rebase and retains the unpushed commit", async (t) => {
+  const { git, lagoon, other } = await createSyncClones(t);
+  await fs.writeFile(path.join(other, "identity.md"), "Remote edit\n");
+  git(["commit", "-qam", "remote edit"], other);
+  git(["push", "-q"], other);
+
+  const { sync } = await memory.writeMemoryFile({ scope: "global", path: "identity.md", content: "Local edit" });
+
+  assert.equal(sync.committed, true);
+  assert.equal(sync.pushed, false);
+  assert.equal(sync.reason, "rebase_conflict");
+  assert.deepEqual(sync.conflictingPaths, ["identity.md"]);
+  assert.equal(git(["status", "--porcelain"]), "");
+  assert.equal(git(["symbolic-ref", "--short", "HEAD"]), "main");
+  assert.equal(git(["show", "HEAD:identity.md"]), "Local edit");
+  assert.equal(await fs.readFile(path.join(lagoon, "identity.md"), "utf8"), "Local edit\n");
+  assert.equal(git(["rev-list", "--count", "@{u}..HEAD"]), "1");
+});
+
+test("sync integrates independent writes from another clone and pushes the backlog", async (t) => {
+  const { git, lagoon, other, remote } = await createSyncClones(t);
+  await fs.writeFile(path.join(other, "identity.md"), "Remote edit\n");
+  git(["commit", "-qam", "remote edit"], other);
+  git(["push", "-q"], other);
+  await fs.writeFile(path.join(lagoon, "scratch.md"), "Untracked note\n");
+
+  const result = await memory.appendEvent({ scope: "global", content: "Keep me.", title: "Local event" });
+
+  assert.equal(result.sync.pushed, true);
+  assert.equal(git(["status", "--porcelain"]), "?? scratch.md");
+  assert.equal(git(["rev-parse", "HEAD"]), git(["rev-parse", "main"], remote));
+  assert.equal(git(["show", "HEAD:identity.md"]), "Remote edit");
+  assert.match(git(["show", `HEAD:${result.path}`]), /Local event/);
+});
+
+test("sync leaves a rebase started outside Hippocamp untouched", async (t) => {
+  const { git, lagoon, other } = await createSyncClones(t);
+  await fs.writeFile(path.join(other, "identity.md"), "Remote edit\n");
+  git(["commit", "-qam", "remote edit"], other);
+  git(["push", "-q"], other);
+  await fs.writeFile(path.join(lagoon, "identity.md"), "Local edit\n");
+  git(["commit", "-qam", "local edit"]);
+  git(["fetch", "-q"]);
+  assert.throws(() => git(["rebase", "@{u}"]), /could not apply/);
+  const before = git(["status", "--porcelain"]);
+
+  const sync = await memory.syncMemory({ scope: "global", paths: [path.join(lagoon, "identity.md")], message: "sync" });
+  assert.equal(sync.reason, "git_operation_in_progress");
+  assert.deepEqual(sync.conflictingPaths, ["identity.md"]);
+  await assert.rejects(
+    memory.writeMemoryFile({ scope: "global", path: "identity.md", content: "Replacement" }),
+    /unfinished Git operation/,
+  );
+  const wakeUp = await memory.wakeUp({ projectRoot: lagoon, checkUpdate: async () => null });
+  assert.equal(wakeUp.pull.reason, "git_operation_in_progress");
+  assert.ok(wakeUp.missing.includes("global:identity.md"));
+  assert.doesNotMatch(wakeUp.text, /<<<<<<</);
+  assert.equal(git(["status", "--porcelain"]), before);
+});
+
+async function appendInParallel(tempRoot, titles) {
+  const run = promisify(execFile);
+  const worker = `
+    const memory = require(process.argv[1]);
+    const title = process.argv[2];
+    memory.appendEvent({ scope: "global", title, content: title, date: "2026-11-24" })
+      .then((result) => console.log(JSON.stringify(result.sync)))
+      .catch((error) => { console.error(error.message); process.exitCode = 1; });
+  `;
+  const modulePath = require.resolve("../scripts/hippocamp-memory.cjs");
+  const results = await Promise.allSettled(titles.map(async (title) => {
+    const tmp = await fs.mkdtemp(path.join(tempRoot, "worker-"));
+    return run(process.execPath, ["-e", worker, modulePath, title], {
+      env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
+    });
+  }));
+  return results.map((result) => {
+    assert.equal(result.status, "fulfilled", result.reason?.stderr);
+    return JSON.parse(result.value.stdout);
+  });
+}
+
+test("parallel processes push every event and its index", async (t) => {
+  const { git, lagoon, remote } = await createSyncClones(t);
+  const titles = Array.from({ length: 8 }, (_, i) => `Checkpoint ${i}`);
+  for (const sync of await appendInParallel(path.dirname(lagoon), titles)) {
+    assert.equal(sync.committed, true, JSON.stringify(sync));
+    assert.equal(sync.pushed, true, JSON.stringify(sync));
+  }
+
+  assert.equal(git(["status", "--porcelain"]), "");
+  assert.equal(git(["rev-parse", "HEAD"]), git(["rev-parse", "main"], remote));
+  const index = JSON.parse(await fs.readFile(path.join(lagoon, "events", "2026-11-24.index.json"), "utf8"));
+  assert.deepEqual(index.events.map((event) => event.heading).sort(), titles);
+  const eventLog = git(["show", "main:events/2026-11-24.md"], remote);
+  for (const title of titles) assert.match(eventLog, new RegExp(title));
+});
+
+test("non-Git Lagoon appends share a lock across different temp directories", async (t) => {
+  withGitIdentity(t);
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hippocamp-no-git-"));
+  t.after(() => fs.rm(tempRoot, { recursive: true, force: true, maxRetries: 5 }));
+  const lagoon = path.join(tempRoot, "lagoon");
+  process.env.HIPPOCAMP_GLOBAL_ROOT = lagoon;
+  const titles = Array.from({ length: 8 }, (_, i) => `Checkpoint ${i}`);
+
+  for (const sync of await appendInParallel(tempRoot, titles)) {
+    assert.equal(sync.reason, "not_git_repo");
+  }
+
+  const index = JSON.parse(await fs.readFile(path.join(lagoon, "events", "2026-11-24.index.json"), "utf8"));
+  assert.deepEqual(index.events.map((event) => event.heading).sort(), titles);
+});
 
 test("wake_up pulls memory another machine pushed", async (t) => {
   withGitIdentity(t);
