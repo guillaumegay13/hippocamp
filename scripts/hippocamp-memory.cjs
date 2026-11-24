@@ -37,6 +37,7 @@ const QUESTION_STOPWORDS = new Set(
 const GIT_NETWORK_TIMEOUT_MS = 10_000;
 const GIT_PUSH_TIMEOUT_MS = 30_000;
 const LAGOON_LOCK_DIRECTORY = ".hippocamp-sync.lock";
+const DREAM_REVIEW_MARKER = /^<!-- hippocamp-dream-through: (\d{4}-\d{2}-\d{2}T[\d:.]+Z) -->\s*$/gm;
 const searchIndexCache = new Map();
 const PROCESS_SESSION_ID = `mcp-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
@@ -1254,8 +1255,21 @@ async function readMemoryFile({ scope, path: relativePath, projectRoot }) {
   };
 }
 
+function getDreamReviewMarker(content) {
+  return [...content.matchAll(DREAM_REVIEW_MARKER)].at(-1)?.[1];
+}
+
+function formatDreamCurrentState(content, marker) {
+  const body = content.replace(DREAM_REVIEW_MARKER, "").trim();
+  return marker ? `${body}\n\n<!-- hippocamp-dream-through: ${marker} -->` : body;
+}
+
+function isProjectCurrentState(parts) {
+  return parts[0] === "projects" && parts.length === 3 && parts[2] === "current_state.md";
+}
+
 async function writeMemoryFile({ scope, path: relativePath, content, projectRoot, sync = true }) {
-  const nextContent = ensureTrailingNewline(requireNonEmptyString(content, "content"));
+  const body = requireNonEmptyString(content, "content");
 
   return withLagoonLock(async (repo) => {
     assertLagoonWritable(repo);
@@ -1267,6 +1281,14 @@ async function writeMemoryFile({ scope, path: relativePath, content, projectRoot
       throw new Error("events/ is append-only. Use append_event with a title and keywords instead.");
     }
 
+    const realFromGlobal = path.relative(realpathExisting(getGlobalRoot()), realpathExisting(target.absolutePath)).split(path.sep);
+    let nextContent = body;
+    if (isProjectCurrentState(fromGlobal) || isProjectCurrentState(realFromGlobal)) {
+      // Read inside the write lock. An agent may have drafted its update before Dream advanced.
+      const saved = await readFileIfExists(target.absolutePath);
+      nextContent = formatDreamCurrentState(body, getDreamReviewMarker(saved ?? ""));
+    }
+    nextContent = ensureTrailingNewline(nextContent);
     await ensureParentDirectory(target.absolutePath);
     await fs.writeFile(target.absolutePath, nextContent, "utf8");
 
@@ -1940,6 +1962,10 @@ module.exports = {
   getProjectSlug,
   isProjectRepository,
   getScopeRoot,
+  getDreamReviewMarker,
+  formatDreamCurrentState,
+  withLagoonLock,
+  assertLagoonWritable,
   readMemoryFile,
   writeMemoryFile,
   appendEvent,

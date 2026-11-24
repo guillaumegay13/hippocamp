@@ -14,7 +14,6 @@ const DREAM_COMPACTION_MAX_PASSES = 3;
 const DREAM_MODEL_MAX_ATTEMPTS = 3;
 const DREAM_MODEL_RETRY_DELAY_MS = 2000;
 const INITIAL_EVENT_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-const REVIEW_MARKER = /^<!-- hippocamp-dream-through: (\d{4}-\d{2}-\d{2}T[\d:.]+Z) -->\s*$/gm;
 // Manifest returns HTTP 200 with a "[🦚 Manifest <code>] ..." banner as the
 // assistant message when the router cannot fulfil a request (model unavailable,
 // overloaded, throttled). It is not JSON, so treat it as a retryable failure.
@@ -224,11 +223,13 @@ async function getProjectReport(slug) {
   const safeSlug = assertSafeProjectSlug(slug);
   const projectRoot = getSyntheticProjectRoot(safeSlug);
   const projectMemoryRoot = memory.getScopeRoot("project", projectRoot);
+  // Validate before pulling and again before reading files that a pull can replace.
+  const paths = CURATED_FILES.map((name) => [name, memory.assertRealPathInLagoon(path.join(projectMemoryRoot, name))]);
+  const wake = await memory.wakeUp({ projectRoot });
   const files = {};
 
-  for (const name of CURATED_FILES) {
-    // A summary file that links outside the Lagoon is never read, sent to a model, or replaced.
-    const absolutePath = memory.assertRealPathInLagoon(path.join(projectMemoryRoot, name));
+  for (const [name, filePath] of paths) {
+    const absolutePath = memory.assertRealPathInLagoon(filePath);
     files[name] = {
       absolutePath,
       bytes: await statSize(absolutePath),
@@ -236,8 +237,6 @@ async function getProjectReport(slug) {
       path: `projects/${safeSlug}/${name}`,
     };
   }
-
-  const wake = await memory.wakeUp({ projectRoot });
 
   return {
     files,
@@ -254,13 +253,9 @@ function extractOpenThreads(content) {
     .filter(Boolean);
 }
 
-function withoutReviewMarker(content) {
-  return content.replace(REVIEW_MARKER, "").trim();
-}
-
 async function buildRecentEvidence(report, budgetChars) {
   const now = new Date();
-  const marker = [...report.files["current_state.md"].content.matchAll(REVIEW_MARKER)].at(-1)?.[1];
+  const marker = memory.getDreamReviewMarker(report.files["current_state.md"].content);
   const validMarker = marker && Number.isFinite(Date.parse(marker)) && marker <= now.toISOString() ? marker : null;
   const after = validMarker || new Date(now.getTime() - INITIAL_EVENT_LOOKBACK_MS).toISOString();
   const events = await memory.readRecentEvents({
@@ -382,7 +377,7 @@ function createPrompt({ report, targetChars, threadEvidence, recentEvidence = { 
         "Rewrite these files from the current content below.",
         "",
         "## current_state.md",
-        withoutReviewMarker(report.files["current_state.md"].content) || "# Current State",
+        memory.formatDreamCurrentState(report.files["current_state.md"].content) || "# Current State",
         "",
         "## open_threads.md",
         report.files["open_threads.md"].content.trim() || "# Open Threads",
@@ -428,7 +423,7 @@ function createCompactionRetryPrompt({ output, targetChars }) {
         `Target combined size for current_state.md and open_threads.md: ${targetChars} chars`,
         "",
         "## current_state.md",
-        withoutReviewMarker(output.currentState),
+        memory.formatDreamCurrentState(output.currentState),
         "",
         "## open_threads.md",
         output.openThreads,
@@ -692,10 +687,7 @@ async function compactDreamOutput({ apiKey, baseUrl, beforeBytes, model, report,
     assertOpenThreadsAccounted(baselineThreads, output);
     closedThreads.push(...output.closedThreads);
     output.closedThreads = [...closedThreads];
-    output.currentState = withoutReviewMarker(output.currentState);
-    if (recentEvidence?.reviewedThrough) {
-      output.currentState += `\n\n<!-- hippocamp-dream-through: ${recentEvidence.reviewedThrough} -->`;
-    }
+    output.currentState = memory.formatDreamCurrentState(output.currentState, recentEvidence?.reviewedThrough);
 
     const afterBytes = getDreamOutputBytes(output);
 
@@ -837,7 +829,16 @@ async function dreamProject(slug, options) {
     recentEvidence,
   });
 
-  await writeDreamOutput(report, compacted.output);
+  await memory.withLagoonLock(async (repo) => {
+    memory.assertLagoonWritable(repo);
+    for (const file of Object.values(report.files)) {
+      const absolutePath = memory.assertRealPathInLagoon(file.absolutePath);
+      if (await readFileIfExists(absolutePath) !== file.content) {
+        throw new Error(`${file.path} changed while Dream was running. Retry from the latest memory.`);
+      }
+    }
+    await writeDreamOutput(report, compacted.output);
+  });
 
   return {
     afterBytes: compacted.afterBytes,
@@ -855,8 +856,8 @@ async function dreamProject(slug, options) {
 }
 
 function printText(results) {
-  for (const item of results) {
-    const result = toPublicReport(item);
+  for (const result of results) {
+    if (result.error) continue; // Already reported on stderr.
     const status = result.changed ? "changed" : result.skipped ? `skipped:${result.skipped}` : "unchanged";
     console.log(
       [
@@ -888,24 +889,31 @@ async function main() {
   }
 
   for (const slug of slugs) {
-    results.push(await dreamProject(slug, options));
+    try {
+      results.push(toPublicReport(await dreamProject(slug, options)));
+    } catch (error) {
+      if (!options.all) throw error;
+      console.error(`Dream failed for ${slug}: ${error.message}`);
+      results.push({ project: slug, changed: false, skipped: "error", error: error.message });
+    }
   }
 
   const payload = {
-    changedProjects: results.filter((item) => item.changed).map((item) => item.report.slug),
+    changedProjects: results.filter((item) => item.changed).map((item) => item.project),
     dryRun: options.dryRun,
     globalRoot,
     model: options.model,
-    results: results.map(toPublicReport),
+    results,
     thresholdChars: options.thresholdChars,
   };
 
   if (options.json) {
     console.log(JSON.stringify(payload, null, 2));
-    return;
+  } else {
+    printText(results);
   }
 
-  printText(results);
+  if (options.write && results.some((item) => item.error)) process.exitCode = 1;
 }
 
 if (require.main === module) {

@@ -1,8 +1,10 @@
 const assert = require("node:assert/strict");
+const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const { promisify } = require("node:util");
 const dream = require("../scripts/hippocamp-dream.cjs");
 const memory = require("../scripts/hippocamp-memory.cjs");
 
@@ -68,6 +70,116 @@ test("small projects receive new evidence and may grow; a successful batch is no
   assert.equal(await fs.readFile(eventPath, "utf8"), originalEvents);
   assert.equal((await dream.dreamProject(f.slug, f.options)).skipped, "below_threshold");
   assert.equal(calls, 1);
+});
+
+test("regular saves preserve Dream progress and cannot set a new marker", async (t) => {
+  const f = await fixture(t);
+  const stale = await fs.readFile(path.join(f.project, "current_state.md"), "utf8");
+  const id = await f.event("Confirmed decision", "Keep the documented boundary.");
+  global.fetch = async () => respond({
+    current_state_md: "# Current State\n\n- Keep the documented boundary.",
+    open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker.",
+    closed_threads: [],
+  });
+  await dream.dreamProject(f.slug, f.options);
+
+  await memory.writeMemoryFile({ scope: "project", path: "current_state.md", content: stale, projectRoot: f.projectRoot, sync: false });
+  assert.deepEqual((await dream.dreamProject(f.slug, { ...f.options, write: false })).recentEvidence.items, []);
+
+  const ordinaryWrite = "# Current State\n\n- Record a new project decision.";
+  const clientMarker = (timestamp) => `<!-- hippocamp-dream-through: ${timestamp} -->`;
+  await memory.writeMemoryFile({
+    scope: "global",
+    path: `projects/${f.slug}/current_state.md`,
+    content: `${ordinaryWrite}\n\n${clientMarker("2024-01-01T00:00:00.000Z")}\n${clientMarker("2099-01-01T00:00:00.000Z")}`,
+    sync: false,
+  });
+  assert.equal(await fs.readFile(path.join(f.project, "current_state.md"), "utf8"), `${ordinaryWrite}\n\n${clientMarker(id)}\n`);
+  await memory.writeMemoryFile({
+    scope: "global",
+    path: "projects/first-project/current_state.md",
+    content: `${ordinaryWrite}\n\n${clientMarker(id)}`,
+    sync: false,
+  });
+  assert.equal(await fs.readFile(path.join(f.root, "projects/first-project/current_state.md"), "utf8"), `${ordinaryWrite}\n`);
+});
+
+test("all-project runs report errors and still process healthy projects", async (t) => {
+  const f = await fixture(t);
+  await f.event("Confirmed decision", "Keep the documented boundary.");
+  const broken = path.join(f.root, "projects/a-broken");
+  await fs.mkdir(broken);
+  const outside = path.join(f.root, "../outside-hippocamp-dream-scan.md");
+  await fs.symlink(outside, path.join(broken, "current_state.md"));
+  const run = promisify(execFile);
+  const script = require.resolve("../scripts/hippocamp-dream.cjs");
+  const env = { ...process.env, HIPPOCAMP_NO_UPDATE_CHECK: "1" };
+  const { stdout, stderr } = await run(process.execPath, [script, "--all", "--dry-run", "--json"], {
+    env,
+  });
+  const { results } = JSON.parse(stdout);
+  assert.match(stderr, /Dream failed for a-broken/);
+  assert.deepEqual(results.map(({ project, skipped }) => [project, skipped]), [["a-broken", "error"], [f.slug, "dry_run"]]);
+  assert.match(results[0].error, /memory root/);
+
+  const preload = path.join(f.root, "mock-model.cjs");
+  const output = {
+    current_state_md: "# Current State\n\n- Keep the documented boundary.",
+    open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker.",
+    closed_threads: [],
+  };
+  const response = JSON.stringify({ output_text: JSON.stringify(output) });
+  await fs.writeFile(preload, `global.fetch = async () => new Response(${JSON.stringify(response)});\n`);
+  await assert.rejects(run(process.execPath, [
+    "--require", preload, script, "--all", "--write", "--json", "--base-url", f.options.baseUrl, "--api-key", f.options.apiKey,
+  ], { env }), (error) => {
+    assert.equal(error.code, 1);
+    assert.deepEqual(JSON.parse(error.stdout).changedProjects, [f.slug]);
+    return true;
+  });
+});
+
+test("Dream keeps the newer snapshot when a memory write lands during compaction", async (t) => {
+  const f = await fixture(t);
+  const event = await f.event("Confirmed decision", "Keep the documented boundary.");
+  const fresh = "# Current State\n\n- Saved by an agent while Dream was working.\n";
+  const threads = path.join(f.project, "open_threads.md");
+  const beforeThreads = await fs.readFile(threads, "utf8");
+  global.fetch = async () => {
+    await memory.writeMemoryFile({ scope: "project", path: "current_state.md", content: fresh, projectRoot: f.projectRoot, sync: false });
+    return respond({ current_state_md: "# Current State\n\n- Older snapshot.", open_threads_md: beforeThreads, closed_threads: [] });
+  };
+  await assert.rejects(dream.dreamProject(f.slug, f.options), /changed while Dream was running/);
+  assert.equal(await fs.readFile(path.join(f.project, "current_state.md"), "utf8"), fresh);
+  assert.equal(await fs.readFile(threads, "utf8"), beforeThreads);
+  assert.equal((await dream.dreamProject(f.slug, { ...f.options, write: false })).recentEvidence.items[0].id, event);
+});
+
+test("Dream takes its snapshot after wake-up brings in upstream edits", async (t) => {
+  const f = await fixture(t);
+  await f.event("Confirmed decision", "Keep the documented boundary.");
+  const wakeUp = memory.wakeUp;
+  t.after(() => { memory.wakeUp = wakeUp; });
+  const upstream = "# Current State\n\n- Retain the imported decision.";
+  let firstWakeUp = true;
+  memory.wakeUp = async (options) => {
+    if (firstWakeUp) {
+      firstWakeUp = false;
+      await fs.writeFile(path.join(f.project, "current_state.md"), `${upstream}\n`);
+    }
+    return wakeUp(options);
+  };
+  let input;
+  global.fetch = async (_url, request) => {
+    input = JSON.parse(request.body).input;
+    return respond({
+      current_state_md: upstream,
+      open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker.",
+      closed_threads: [],
+    });
+  };
+  assert.ok((await dream.dreamProject(f.slug, f.options)).changed);
+  assert.match(input, /Retain the imported decision/);
 });
 
 test("bootstrap ignores old, future, and unindexed events; a recorded cursor survives downtime", async (t) => {
@@ -197,6 +309,13 @@ test("Dream refuses a summary file that links outside the Lagoon, without callin
   await fs.writeFile(path.join(outside, "secret.md"), "TOPSECRET\n");
   await fs.rm(path.join(f.project, "current_state.md"));
   await fs.symlink(path.join(outside, "secret.md"), path.join(f.project, "current_state.md"));
+  const wakeUp = memory.wakeUp;
+  t.after(() => { memory.wakeUp = wakeUp; });
+  let wakeUps = 0;
+  memory.wakeUp = (options) => {
+    wakeUps++;
+    return wakeUp(options);
+  };
   let called = false;
   global.fetch = async () => {
     called = true;
@@ -204,6 +323,7 @@ test("Dream refuses a summary file that links outside the Lagoon, without callin
   };
 
   await assert.rejects(dream.dreamProject(f.slug, f.options), /memory root/);
+  assert.equal(wakeUps, 0);
   assert.equal(called, false);
   assert.equal(await fs.readFile(path.join(outside, "secret.md"), "utf8"), "TOPSECRET\n");
 });

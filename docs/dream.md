@@ -11,7 +11,7 @@ projects/<project-slug>/open_threads.md
 
 Dream runs when a project has new indexed events or its wake-up context exceeds `--threshold-chars`. It does not run during normal MCP wake-up or modify append-only events.
 
-Each run reads a chronological batch of up to 20 new indexed event excerpts, independent of existing open threads. The first run starts with the last seven days. After a successful write, a small `<!-- hippocamp-dream-through: ... -->` comment in `current_state.md` records the last event included. Preserve this comment when editing the file. Later runs resume there, including after downtime; events after the last included event wait for the next run. If the first excerpt alone exceeds the recent-event budget, Dream fails without writing and asks for a larger `--target-chars`. If the comment is removed, Dream starts again with the last seven days.
+Each run reads a chronological batch of up to 20 new indexed event excerpts, independent of existing open threads. The first run starts with the last seven days. After a successful write, a small `<!-- hippocamp-dream-through: ... -->` comment in `current_state.md` records the last event included. The MCP tool `write_memory_file` preserves the saved marker and ignores markers in submitted content. Preserve the marker when editing the file directly. Later runs resume there, including after downtime. Events after the last included event wait for the next run. If the first excerpt alone exceeds the recent-event budget, Dream fails without writing and asks for a larger `--target-chars`. If you remove the comment with a direct edit, Dream starts again with the last seven days.
 
 Dream never drops unfinished work silently. The model must list every open thread it removes or merges, quoting the original bullet with a reason, such as the event that closes it or the bullet it was merged into. A closure counts only when it quotes a distinct original thread that no longer appears word for word. If fewer threads remain than the old count minus the valid closures, the run fails and writes nothing. This is a count check: a model that rewords one thread into two can still hide a dropped one, so review Dream PRs for large projects. The JSON report lists the declared closures under `closedThreads`, so a reviewer can check them.
 
@@ -23,7 +23,7 @@ Projects with indexed events can start without curated summaries. Dream creates 
 
 Corrections apply across both files: a shipped feature should not remain an implementation task, while unverified deployment stays open. Extra compaction passes must keep source paths and timestamps for retained knowledge and aim below the size limit to leave room for length estimates. Dream writes the review comment itself; the model does not set review progress.
 
-The snapshot may grow within `--target-chars` when new evidence adds useful knowledge. If it exceeds the target, Dream compacts the complete result again. It never crops a wake-up file. After three passes, it fails without writing either file or advancing the event comment if the snapshot still does not fit. A project below the threshold with no new indexed evidence is skipped without a model call.
+The snapshot may grow within `--target-chars` when new evidence adds useful knowledge. If it exceeds the target, Dream compacts the complete result again. It never crops a wake-up file. After three passes, it fails without writing either file or advancing the event comment if the snapshot still does not fit. Dream also leaves the files intact if another write changed the snapshot during compaction. A project below the threshold with no new indexed evidence is skipped without a model call.
 
 Dry-run is the default:
 
@@ -31,6 +31,8 @@ Dry-run is the default:
 npm run dream -- --all --dry-run --json
 npm run dream -- --project my-project --write
 ```
+
+An `--all` scan reports project errors on stderr and lists them in JSON results with `skipped: "error"`. Healthy projects remain eligible. An `--all --write` run attempts every project, then exits nonzero if any project failed. The scheduled GitHub workflow continues after a failed project compaction and reports the failed projects at the end.
 
 `--write` requires a Manifest/OpenAI-compatible Responses API endpoint. The default environment variables are:
 

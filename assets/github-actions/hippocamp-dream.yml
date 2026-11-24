@@ -66,6 +66,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          failed=$(jq -r '.results | map(select(.skipped == "error") | .project) | join(" ")' /tmp/hippocamp-dream-scan.json)
+
           enable_lagoon_auto_merge() {
             local project="$1"
             local pr_number="$2"
@@ -98,13 +100,20 @@ jobs:
             git fetch origin main
             git checkout -B "$branch" origin/main
 
-            npx -y hippocamp@latest dream \
+            if ! npx -y hippocamp@latest dream \
               --project "$project" \
               --write \
               --json \
               --threshold-chars "$HIPPOCAMP_DREAM_THRESHOLD_CHARS" \
               --target-chars "$HIPPOCAMP_DREAM_TARGET_CHARS" \
-              > "/tmp/hippocamp-dream-${project}.json"
+              > "/tmp/hippocamp-dream-${project}.json"; then
+              echo "Dream failed for ${project}; continuing with remaining projects." >&2
+              failed="${failed:+$failed }${project}"
+              git checkout main
+              git reset --hard origin/main
+              git clean -fdq -- projects
+              continue
+            fi
 
             git add -- "projects/${project}/current_state.md" "projects/${project}/open_threads.md"
             if git diff --cached --quiet; then
@@ -168,3 +177,8 @@ jobs:
             git checkout main
             git reset --hard origin/main
           done < /tmp/hippocamp-dream-projects.txt
+
+          if [ -n "$failed" ]; then
+            echo "Dream failed for: $failed" >&2
+            exit 1
+          fi
