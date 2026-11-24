@@ -223,12 +223,13 @@ async function getProjectReport(slug) {
   const safeSlug = assertSafeProjectSlug(slug);
   const projectRoot = getSyntheticProjectRoot(safeSlug);
   const projectMemoryRoot = memory.getScopeRoot("project", projectRoot);
+  // Validate before pulling and again before reading files that a pull can replace.
+  const paths = CURATED_FILES.map((name) => [name, memory.assertRealPathInLagoon(path.join(projectMemoryRoot, name))]);
   const wake = await memory.wakeUp({ projectRoot });
   const files = {};
 
-  for (const name of CURATED_FILES) {
-    // A summary file that links outside the Lagoon is never read, sent to a model, or replaced.
-    const absolutePath = memory.assertRealPathInLagoon(path.join(projectMemoryRoot, name));
+  for (const [name, filePath] of paths) {
+    const absolutePath = memory.assertRealPathInLagoon(filePath);
     files[name] = {
       absolutePath,
       bytes: await statSize(absolutePath),

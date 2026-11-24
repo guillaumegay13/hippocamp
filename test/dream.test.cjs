@@ -309,6 +309,13 @@ test("Dream refuses a summary file that links outside the Lagoon, without callin
   await fs.writeFile(path.join(outside, "secret.md"), "TOPSECRET\n");
   await fs.rm(path.join(f.project, "current_state.md"));
   await fs.symlink(path.join(outside, "secret.md"), path.join(f.project, "current_state.md"));
+  const wakeUp = memory.wakeUp;
+  t.after(() => { memory.wakeUp = wakeUp; });
+  let wakeUps = 0;
+  memory.wakeUp = (options) => {
+    wakeUps++;
+    return wakeUp(options);
+  };
   let called = false;
   global.fetch = async () => {
     called = true;
@@ -316,6 +323,7 @@ test("Dream refuses a summary file that links outside the Lagoon, without callin
   };
 
   await assert.rejects(dream.dreamProject(f.slug, f.options), /memory root/);
+  assert.equal(wakeUps, 0);
   assert.equal(called, false);
   assert.equal(await fs.readFile(path.join(outside, "secret.md"), "utf8"), "TOPSECRET\n");
 });
