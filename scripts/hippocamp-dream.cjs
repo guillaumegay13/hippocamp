@@ -829,7 +829,16 @@ async function dreamProject(slug, options) {
     recentEvidence,
   });
 
-  await writeDreamOutput(report, compacted.output);
+  await memory.withLagoonLock(async (repo) => {
+    memory.assertLagoonWritable(repo);
+    for (const file of Object.values(report.files)) {
+      const absolutePath = memory.assertRealPathInLagoon(file.absolutePath);
+      if (await readFileIfExists(absolutePath) !== file.content) {
+        throw new Error(`${file.path} changed while Dream was running. Retry from the latest memory.`);
+      }
+    }
+    await writeDreamOutput(report, compacted.output);
+  });
 
   return {
     afterBytes: compacted.afterBytes,

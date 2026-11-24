@@ -1964,6 +1964,8 @@ module.exports = {
   getScopeRoot,
   getDreamReviewMarker,
   formatDreamCurrentState,
+  withLagoonLock,
+  assertLagoonWritable,
   readMemoryFile,
   writeMemoryFile,
   appendEvent,

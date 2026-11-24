@@ -113,7 +113,7 @@ test("all-project runs report errors and still process healthy projects", async 
   await fs.symlink(outside, path.join(broken, "current_state.md"));
   const run = promisify(execFile);
   const script = require.resolve("../scripts/hippocamp-dream.cjs");
-  const env = { ...process.env, HIPPOCAMP_CHECK_UPDATES: "0" };
+  const env = { ...process.env, HIPPOCAMP_NO_UPDATE_CHECK: "1" };
   const { stdout, stderr } = await run(process.execPath, [script, "--all", "--dry-run", "--json"], {
     env,
   });
@@ -137,6 +137,22 @@ test("all-project runs report errors and still process healthy projects", async 
     assert.deepEqual(JSON.parse(error.stdout).changedProjects, [f.slug]);
     return true;
   });
+});
+
+test("Dream keeps the newer snapshot when a memory write lands during compaction", async (t) => {
+  const f = await fixture(t);
+  const event = await f.event("Confirmed decision", "Keep the documented boundary.");
+  const fresh = "# Current State\n\n- Saved by an agent while Dream was working.\n";
+  const threads = path.join(f.project, "open_threads.md");
+  const beforeThreads = await fs.readFile(threads, "utf8");
+  global.fetch = async () => {
+    await memory.writeMemoryFile({ scope: "project", path: "current_state.md", content: fresh, projectRoot: f.projectRoot, sync: false });
+    return respond({ current_state_md: "# Current State\n\n- Older snapshot.", open_threads_md: beforeThreads, closed_threads: [] });
+  };
+  await assert.rejects(dream.dreamProject(f.slug, f.options), /changed while Dream was running/);
+  assert.equal(await fs.readFile(path.join(f.project, "current_state.md"), "utf8"), fresh);
+  assert.equal(await fs.readFile(threads, "utf8"), beforeThreads);
+  assert.equal((await dream.dreamProject(f.slug, { ...f.options, write: false })).recentEvidence.items[0].id, event);
 });
 
 test("bootstrap ignores old, future, and unindexed events; a recorded cursor survives downtime", async (t) => {
