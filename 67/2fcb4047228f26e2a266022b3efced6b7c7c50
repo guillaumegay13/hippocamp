@@ -1,0 +1,21 @@
+test/dream.test.cjs
+  s_f70713898ecb5d::t_2532372acdee0a 312-318,326
+scripts/hippocamp-dream.cjs
+  s_f70713898ecb5d::t_fdd173b36fbd29 226-227,231-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "672fcb4047228f26e2a266022b3efced6b7c7c50",
+  "prompts": {},
+  "sessions": {
+    "s_f70713898ecb5d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c7b-9ee0-7e71-b0d1-7ea8d35cb666",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Guillaume Gay <guillaume.gay@protonmail.com>"
+    }
+  }
+}
