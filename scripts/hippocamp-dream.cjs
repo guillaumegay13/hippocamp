@@ -223,6 +223,7 @@ async function getProjectReport(slug) {
   const safeSlug = assertSafeProjectSlug(slug);
   const projectRoot = getSyntheticProjectRoot(safeSlug);
   const projectMemoryRoot = memory.getScopeRoot("project", projectRoot);
+  const wake = await memory.wakeUp({ projectRoot });
   const files = {};
 
   for (const name of CURATED_FILES) {
@@ -235,8 +236,6 @@ async function getProjectReport(slug) {
       path: `projects/${safeSlug}/${name}`,
     };
   }
-
-  const wake = await memory.wakeUp({ projectRoot });
 
   return {
     files,

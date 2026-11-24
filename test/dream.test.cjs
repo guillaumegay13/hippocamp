@@ -155,6 +155,33 @@ test("Dream keeps the newer snapshot when a memory write lands during compaction
   assert.equal((await dream.dreamProject(f.slug, { ...f.options, write: false })).recentEvidence.items[0].id, event);
 });
 
+test("Dream takes its snapshot after wake-up brings in upstream edits", async (t) => {
+  const f = await fixture(t);
+  await f.event("Confirmed decision", "Keep the documented boundary.");
+  const wakeUp = memory.wakeUp;
+  t.after(() => { memory.wakeUp = wakeUp; });
+  const upstream = "# Current State\n\n- Retain the imported decision.";
+  let firstWakeUp = true;
+  memory.wakeUp = async (options) => {
+    if (firstWakeUp) {
+      firstWakeUp = false;
+      await fs.writeFile(path.join(f.project, "current_state.md"), `${upstream}\n`);
+    }
+    return wakeUp(options);
+  };
+  let input;
+  global.fetch = async (_url, request) => {
+    input = JSON.parse(request.body).input;
+    return respond({
+      current_state_md: upstream,
+      open_threads_md: "# Open Threads\n\n- Merge PR #2928, then verify deployment.\n- Investigate the unresolved native Google blocker.",
+      closed_threads: [],
+    });
+  };
+  assert.ok((await dream.dreamProject(f.slug, f.options)).changed);
+  assert.match(input, /Retain the imported decision/);
+});
+
 test("bootstrap ignores old, future, and unindexed events; a recorded cursor survives downtime", async (t) => {
   const f = await fixture(t);
   const old = await f.event("Old event", "An older durable constraint.", -10 * 86400000);
